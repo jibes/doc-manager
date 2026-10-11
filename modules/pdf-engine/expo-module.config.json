@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["PdfEngineModule"] },
+  "android": { "modules": ["expo.modules.pdfengine.PdfEngineModule"] }
+}
