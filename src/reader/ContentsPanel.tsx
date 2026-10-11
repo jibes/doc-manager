@@ -94,7 +94,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
                     style={[
                       { flex: 1 },
                       item.depth === 0
-                        ? { fontFamily: fonts.serif, fontSize: 17, lineHeight: 22 }
+                        ? { fontFamily: fonts.sansSemi, fontSize: 15, lineHeight: 20 }
                         : { fontFamily: fonts.sans, fontSize: 14, lineHeight: 19 },
                     ]}
                     color={current ? p.accent : item.depth === 0 ? p.ink : p.inkSoft}
@@ -187,7 +187,7 @@ function PagesGrid({ p, sizes, cache, page, onGo, bookmarks }: { p: Palette; siz
 function Empty({ p, text }: { p: Palette; text: string }) {
   return (
     <View style={{ padding: space.xxl, alignItems: 'center' }}>
-      <T v="body" color={p.muted} style={{ textAlign: 'center', fontFamily: fonts.serifItalic, fontSize: 17 }}>
+      <T v="body" color={p.muted} style={{ textAlign: 'center' }}>
         {text}
       </T>
     </View>

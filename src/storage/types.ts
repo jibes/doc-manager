@@ -20,6 +20,8 @@ export type DocRecord = {
   openedAt?: number;
   position?: ReadingPosition;
   bookmarks: number[];
+  /** Present when the document is on the reading list; it then opens with reading behaviour. */
+  reading?: { since: number; finishedAt?: number };
 };
 
 /** Persistence port. Web: IndexedDB. Native: app documents directory. */

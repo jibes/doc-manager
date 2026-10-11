@@ -1,43 +1,94 @@
-"""Generates the bundled sample PDF (also the e2e fixture): chapters, outline, a landscape plate."""
+"""Generates the bundled sample PDF (also the e2e fixture): a short guide to Tessel with an
+outline, a landscape page and a shortcuts table."""
 import sys
 
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (BaseDocTemplate, Frame, NextPageTemplate, PageBreak, PageTemplate,
-                                Paragraph, Spacer)
+                                Paragraph, Spacer, Table, TableStyle)
 
-INK = HexColor('#1c1b19')
+# Brand type (Inter) for text; DejaVu for the shortcut keys, which need ⌘ ⇧ and arrows.
+FONTS = 'node_modules/@expo-google-fonts/inter'
+pdfmetrics.registerFont(TTFont('Inter', f'{FONTS}/400Regular/Inter_400Regular.ttf'))
+pdfmetrics.registerFont(TTFont('Inter-SemiBold', f'{FONTS}/600SemiBold/Inter_600SemiBold.ttf'))
+pdfmetrics.registerFont(TTFont('Keys', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+
+INK = HexColor('#1b1a17')
 MUTED = HexColor('#6b675f')
-ACCENT = HexColor('#2b4c7e')
+ACCENT = HexColor('#2f4f86')
+RULE = HexColor('#ddd8cc')
 
 CHAPTERS = [
-    ('The Page', 'A page is a field of attention. Its margins are not empty space but the frame that lets '
-     'the eye rest; its measure decides how far the eye must travel before it returns.'),
-    ('The Line', 'Good lines are neither too long nor too short. Between forty-five and seventy-five '
-     'characters, the reader keeps their place without effort and the rhythm of the prose survives.'),
-    ('The Margin', 'Margins hold the thumb, the pencil and the pause. A generous margin is an invitation '
-     'to slow down; a cramped one asks the reader to hurry.'),
-    ('The Return', 'Every reader leaves and every reader returns. A book remembers where it was opened; '
-     'a good reading tool should remember just as faithfully.'),
-    ('The Quire', 'A quire is a gathering of folded sheets, the unit from which books are bound. '
-     'It is the smallest whole thing a book is made of.'),
+    ('Opening files', 'Every PDF you open lands in Recent, newest first. Nothing leaves your device.', [
+        ('Ways to open', [
+            'Use Open PDF on the home screen, drop a file anywhere on the window, or choose Tessel from '
+            'your system’s Open with menu once it is installed. Opening the same file twice simply takes '
+            'you back to it.',
+            'Tessel keeps its own copy of each file so it opens instantly and works offline. Your original '
+            'stays exactly where it was.',
+        ]),
+        ('Removing a file', [
+            'Removing a document from Tessel deletes Tessel’s copy, its cover and its saved position. The '
+            'original file is never touched. On a desktop, hover a row and use the bin; on a phone, press '
+            'and hold the row.',
+        ]),
+    ]),
+    ('Finding your way', 'Long documents stay manageable: you always know where you are and how to get anywhere.', [
+        ('The scrubber', [
+            'The thin line along the bottom edge is the scrubber. Drag it to move through the whole document; '
+            'a preview shows the page and the chapter you are about to land on. Short ticks mark chapters, '
+            'accent ticks mark your bookmarks.',
+        ]),
+        ('Contents, pages and bookmarks', [
+            'The list button opens Navigate. Contents shows the document’s own outline, Pages shows every '
+            'page as a thumbnail, and Bookmarks lists the pages you marked with the ribbon button.',
+            'Tap the page number at the bottom to type a page and jump straight to it.',
+        ]),
+        ('Search', [
+            'Search looks through the full text of the document. Every match is highlighted on the page and '
+            'the current one is outlined. Close the panel and a small find bar stays at the top so you can '
+            'step through matches while you look at the page. Clear it to remove the highlights.',
+        ]),
+    ]),
+    ('The reading list', 'Most files are for checking. Some are for reading. Tessel treats them differently.', [
+        ('Adding a document', [
+            'Use the book button in the viewer, or next to any file in Recent, to add it to your reading list. '
+            'Reading-list documents appear at the top of the home screen with their progress, and the one '
+            'you read last waits in a Continue card.',
+        ]),
+        ('Reading behaviour', [
+            'While you read a document from your reading list, the toolbars step aside as you move forward '
+            'and come back when you scroll up or tap the page. The page indicator also shows how far you '
+            'are. Ordinary documents keep their toolbars visible at all times.',
+            'Reach the last page and the document moves to Finished. Tessel remembers where you left off in '
+            'every file, on the list or not.',
+        ]),
+    ]),
+    ('Making it comfortable', 'Pages should look right in a bright office and in a dark room.', [
+        ('Appearance', [
+            'The Aa button sets the theme: Light, Sepia, Dark or Black, or Auto to follow your system. Fit '
+            'width fills the screen with the page; Fit page shows each page whole. Zoom with the buttons, '
+            'with a pinch, or with Ctrl and the scroll wheel.',
+        ]),
+    ]),
 ]
 
-FILLER = ('Reading is a negotiation between the eye and the page. The typeface sets the voice, the '
-          'leading sets the breath, and the paper sets the light. When all three agree, the reader '
-          'forgets the object and remembers only the text. That forgetting is the whole point of the '
-          'craft: an interface for reading succeeds by disappearing. ')
+SHORTCUTS = [
+    ('Search', '⌘F / Ctrl F'), ('Next / previous match', '⌘G / ⇧⌘G or F3'), ('Contents', 'T'),
+    ('Bookmark page', 'B'), ('Next / previous page', '→  ←'), ('Scroll', '↑ ↓  J K  Space'),
+    ('First / last page', 'Home  End'), ('Zoom in / out / reset', '⌘+  ⌘−  ⌘0'), ('Close panel, go back', 'Esc'),
+]
 
-body = ParagraphStyle('body', fontName='Times-Roman', fontSize=11.5, leading=17, textColor=INK,
-                      spaceAfter=10, firstLineIndent=14)
-lead = ParagraphStyle('lead', parent=body, fontName='Times-Italic', fontSize=13.5, leading=20,
-                      firstLineIndent=0, textColor=MUTED, spaceAfter=18)
-h1 = ParagraphStyle('h1', fontName='Times-Bold', fontSize=30, leading=36, textColor=INK, spaceAfter=8)
-kicker = ParagraphStyle('kicker', fontName='Helvetica', fontSize=8.5, leading=12, textColor=ACCENT,
-                        spaceAfter=6)
-title = ParagraphStyle('title', parent=h1, fontSize=46, leading=52, spaceBefore=180)
-plate = ParagraphStyle('plate', parent=h1, fontSize=40, leading=46, textColor=ACCENT)
+body = ParagraphStyle('body', fontName='Inter', fontSize=10.5, leading=16, textColor=INK, spaceAfter=9)
+lead = ParagraphStyle('lead', parent=body, fontSize=13, leading=19, textColor=MUTED, spaceAfter=16)
+h1 = ParagraphStyle('h1', fontName='Inter-SemiBold', fontSize=26, leading=31, textColor=INK, spaceAfter=8)
+h2 = ParagraphStyle('h2', fontName='Inter-SemiBold', fontSize=13, leading=18, textColor=INK, spaceBefore=12, spaceAfter=5)
+kicker = ParagraphStyle('kicker', fontName='Inter-SemiBold', fontSize=8, leading=12, textColor=ACCENT, spaceAfter=6)
+title = ParagraphStyle('title', parent=h1, fontSize=40, leading=46, spaceBefore=200)
+plate = ParagraphStyle('plate', parent=h1, fontSize=34, leading=40, textColor=ACCENT)
 
 
 class Doc(BaseDocTemplate):
@@ -56,35 +107,45 @@ def heading(text, key, style=h1, level=0):
 
 def footer(canvas, doc):
     canvas.saveState()
-    canvas.setFont('Helvetica', 8)
+    canvas.setFont('Inter', 8)
     canvas.setFillColor(MUTED)
     canvas.drawCentredString(doc.pagesize[0] / 2, 28, str(doc.page))
     canvas.restoreState()
 
 
 def main(out):
-    doc = Doc(out, pagesize=A4, title='The Elements of Reading', author='Quire')
+    doc = Doc(out, pagesize=A4, title='Welcome to Tessel', author='Tessel')
     w, h = A4
     doc.addPageTemplates([
         PageTemplate('portrait', [Frame(72, 64, w - 144, h - 136)], onPage=footer, pagesize=A4),
-        PageTemplate('landscape', [Frame(72, 64, h - 144, w - 136)], onPage=footer,
-                     pagesize=landscape(A4)),
+        PageTemplate('landscape', [Frame(72, 64, h - 144, w - 136)], onPage=footer, pagesize=landscape(A4)),
     ])
-    story = [Paragraph('THE ELEMENTS OF', kicker), Paragraph('The Elements<br/>of Reading', title),
-             Paragraph('Five short chapters on pages, lines and returning.', lead), PageBreak()]
-    for i, (name, intro) in enumerate(CHAPTERS, 1):
+    story = [Paragraph('A SHORT GUIDE', kicker), Paragraph('Welcome<br/>to Tessel', title),
+             Paragraph('Every document, in its place. Five short chapters on opening, finding, reading '
+                       'and seeing your files clearly.', lead), PageBreak()]
+    for i, (name, intro, sections) in enumerate(CHAPTERS, 1):
         story += [Paragraph(f'CHAPTER {i}', kicker), heading(name, f'ch{i}'), Paragraph(intro, lead)]
-        for s in range(1, 4):
-            story += [heading(f'{name} — section {s}', f'ch{i}s{s}', style=ParagraphStyle(
-                'h2', fontName='Times-Bold', fontSize=15, leading=20, spaceBefore=14, spaceAfter=6,
-                textColor=INK), level=1)]
-            story += [Paragraph(FILLER * 2, body) for _ in range(5)]
-        if i == 3:
+        for s, (sec, paras) in enumerate(sections, 1):
+            story.append(heading(sec, f'ch{i}s{s}', style=h2, level=1))
+            story += [Paragraph(t, body) for t in paras]
+        if i == 2:
             story += [NextPageTemplate('landscape'), PageBreak(),
-                      heading('Plate I — The Measure', 'plate', style=plate),
-                      Paragraph('A landscape page, to prove the reader respects each page’s own shape.',
-                                lead), NextPageTemplate('portrait')]
+                      heading('Every page keeps its shape', 'plate', style=plate),
+                      Paragraph('This page is landscape. Tessel shows each page in its own proportions, '
+                                'so wide tables and slides are never squeezed.', lead),
+                      NextPageTemplate('portrait')]
         story.append(PageBreak())
+    story += [Paragraph('CHAPTER 5', kicker), heading('Keyboard shortcuts', 'ch5'),
+              Paragraph('On a computer, everything has a key.', lead)]
+    table = Table([[a, b] for a, b in SHORTCUTS], colWidths=[220, 200])
+    table.setStyle(TableStyle([
+        ('FONT', (0, 0), (0, -1), 'Inter', 10.5), ('FONT', (1, 0), (1, -1), 'Keys', 10.5),
+        ('TEXTCOLOR', (0, 0), (-1, -1), INK),
+        ('TEXTCOLOR', (1, 0), (1, -1), MUTED), ('LINEBELOW', (0, 0), (-1, -2), 0.5, RULE),
+        ('TOPPADDING', (0, 0), (-1, -1), 7), ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+    ]))
+    story += [table, Spacer(1, 24),
+              Paragraph('Tessel is free software under the GNU AGPL. No ads, no account, no tracking.', lead)]
     doc.build(story)
 
 

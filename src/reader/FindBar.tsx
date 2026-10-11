@@ -34,7 +34,7 @@ export function FindBar({ palette: p, query, count, active, searching, top, onOp
       >
         <Pressable accessibilityRole="button" accessibilityLabel={t.editSearch} onPress={onOpen} style={styles.label}>
           <Icon name="search" size={15} color={p.muted} />
-          <T numberOfLines={1} style={{ fontFamily: fonts.serif, fontSize: 15, maxWidth: 140 }}>
+          <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 14, maxWidth: 140 }}>
             {query}
           </T>
           <T v="numeral" color={count ? p.muted : p.accent} accessibilityLiveRegion="polite">

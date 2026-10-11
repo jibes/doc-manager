@@ -1,3 +1,4 @@
+// Key predates the rename to Tessel; kept so existing preferences survive.
 const KEY = 'quire.prefs';
 
 export function loadPrefs<T>(): Partial<T> {

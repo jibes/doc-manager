@@ -4,6 +4,7 @@ import type { DocRecord, LibraryRepo } from './types';
 
 export * from './types';
 
+// Store names predate the rename to Tessel; changing them would orphan existing libraries.
 const meta = createStore('quire-meta', 'docs');
 const files = createStore('quire-files', 'files');
 const covers = createStore('quire-covers', 'covers');

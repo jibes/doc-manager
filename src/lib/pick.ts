@@ -15,8 +15,8 @@ export async function pickPdfs(): Promise<ImportItem[]> {
 }
 
 export async function sampleItem(): Promise<ImportItem> {
-  const asset = Asset.fromModule(require('../../assets/samples/elements-of-reading.pdf'));
-  const name = 'elements-of-reading.pdf';
+  const asset = Asset.fromModule(require('../../assets/samples/welcome-to-tessel.pdf'));
+  const name = 'welcome-to-tessel.pdf';
   if (Platform.OS === 'web') {
     const file = await (await fetch(asset.uri)).blob();
     return { name, size: file.size, file };

@@ -1,7 +1,7 @@
 {
-  "name": "Quire",
-  "short_name": "Quire",
-  "description": "A quiet place to read.",
+  "name": "Tessel \u2014 PDF Viewer",
+  "short_name": "Tessel",
+  "description": "Every document, in its place. A calm PDF viewer with no ads and no account.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ECE8DF",

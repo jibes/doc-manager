@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "Quire",
-    "slug": "quire",
+    "name": "Tessel",
+    "slug": "tessel",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "quire",
+    "scheme": "tessel",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
       "supportsTablet": true,
-      "bundleIdentifier": "app.quire.reader",
+      "bundleIdentifier": "app.tessel.viewer",
       "infoPlist": {
         "LSSupportsOpeningDocumentsInPlace": true,
         "UISupportsDocumentBrowser": false,
@@ -26,7 +26,7 @@
       }
     },
     "android": {
-      "package": "app.quire.reader",
+      "package": "app.tessel.viewer",
       "adaptiveIcon": {
         "backgroundColor": "#ECE8DF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -38,7 +38,7 @@
       "output": "single",
       "bundler": "metro",
       "favicon": "./assets/images/favicon.png",
-      "name": "Quire"
+      "name": "Tessel"
     },
     "plugins": [
       "expo-router",
