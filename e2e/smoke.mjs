@@ -200,7 +200,11 @@ async function locked() {
   await page.getByTestId('password-submit').click();
   await page.getByTestId('reader').waitFor();
   const opened = await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.width > 300), null, { timeout: 10000 }).then(() => true, () => false);
+  // Reload on the home screen (static servers without SPA fallback can't reload deep links), then reopen.
+  await page.getByTestId('back').click();
+  await page.getByTestId('recent-row').first().waitFor();
   await page.reload();
+  await page.getByTestId('recent-row').first().click();
   const asksAgain = await page.getByTestId('password-dialog').waitFor({ timeout: 5000 }).then(() => true, () => false);
   check(rejected && opened && asksAgain, `locked: wrong password rejected (${rejected}), right one opens (${opened}), asked again after reload (${asksAgain})`);
   await ctx.close();
