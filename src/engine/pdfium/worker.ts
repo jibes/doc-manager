@@ -6,7 +6,7 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
 import { mergeGraphics } from '../geometry';
-import type { Graphic, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
+import type { FormField, FormValue, Graphic, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -26,8 +26,18 @@ const FPDF_PAGEOBJ_SHADING = 4;
 const FPDF_PAGEOBJ_FORM = 5;
 /** Beyond this many drawing objects a page is one big drawing (map, plot with thousands of points). */
 const MAX_GRAPHIC_OBJECTS = 1500;
+const FORMTYPE_NONE = 0;
+/** Soft blue behind fillable fields, as COLORREF (0x00BBGGRR). */
+const FIELD_HIGHLIGHT = 0xf5e2c8;
+const FPDF_ANNOT_WIDGET = 20;
+const FIELD_TYPES: Record<number, FormField['type']> = { 2: 'checkbox', 3: 'radio', 4: 'combo', 5: 'list', 6: 'text' };
+const FF_READONLY = 1 << 0;
+const FF_MULTILINE = 1 << 12;
+const FF_PASSWORD = 1 << 13;
+const FF_MULTISELECT = 1 << 21;
 
-type Doc = { ptr: number; buf: number; pageSizes: Size[] };
+/** `form`: PDFium's form-fill environment (null when the PDF has no form); `dirty`: edited since open/save. */
+type Doc = { ptr: number; buf: number; pageSizes: Size[]; formInfo: number; form: number; dirty: boolean };
 type SearchJob = Extract<Request, { type: 'search' }> & { cursor: number; textPtr: number };
 type Job = Exclude<Request, { type: 'cancel' }> | SearchJob;
 
@@ -109,8 +119,16 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
   });
   const meta = (tag: string) => readUtf16((b, l) => M.FPDF_GetMetaText(ptr, tag, b, l)).trim() || undefined;
   const doc = nextDoc++;
-  docs.set(doc, { ptr, buf, pageSizes });
-  return { doc, pageCount, pageSizes, metadata: { title: meta('Title'), author: meta('Author') } };
+  // Forms: PDFium keeps field values and regenerates their appearance as they change.
+  const hasForm = M.FPDF_GetFormType(ptr) !== FORMTYPE_NONE;
+  const formInfo = hasForm ? M.PDFiumExt_OpenFormFillInfo() : 0;
+  const form = hasForm ? M.PDFiumExt_InitFormFillEnvironment(ptr, formInfo) : 0;
+  if (form) {
+    M.FPDF_SetFormFieldHighlightColor(form, 0, FIELD_HIGHLIGHT);
+    M.FPDF_SetFormFieldHighlightAlpha(form, 60);
+  }
+  docs.set(doc, { ptr, buf, pageSizes, formInfo, form, dirty: false });
+  return { doc, pageCount, pageSizes, metadata: { title: meta('Title'), author: meta('Author') }, hasForm: !!form };
 }
 
 /** Renders a page (or the `clip` region of it) so the output is `width` pixels wide. */
@@ -133,18 +151,13 @@ function rasterize(docId: number, pageIndex: number, width: number, clip?: NormR
   const page = M.FPDF_LoadPage(d.ptr, pageIndex);
   if (!page) throw new Error(`Could not load page ${pageIndex + 1}`);
   const bmp = M.FPDFBitmap_CreateEx(w, h, FPDFBitmap_BGRA, 0, 0);
+  if (d.form) M.FORM_OnAfterLoadPage(page, d.form);
   try {
     M.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
-    M.FPDF_RenderPageBitmap(
-      bmp,
-      page,
-      -Math.round(region.x * fullW),
-      -Math.round(region.y * fullH),
-      fullW,
-      fullH,
-      0,
-      FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER,
-    );
+    const [x0, y0] = [-Math.round(region.x * fullW), -Math.round(region.y * fullH)];
+    M.FPDF_RenderPageBitmap(bmp, page, x0, y0, fullW, fullH, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+    // Form fields (values, check marks, highlight) are drawn by the form layer on top.
+    if (d.form) M.FPDF_FFLDraw(d.form, bmp, page, x0, y0, fullW, fullH, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
     const p = M.FPDFBitmap_GetBuffer(bmp);
     const stride = M.FPDFBitmap_GetStride(bmp);
     const src = heap();
@@ -154,6 +167,7 @@ function rasterize(docId: number, pageIndex: number, width: number, clip?: NormR
     return new ImageData(out, w, h);
   } finally {
     M.FPDFBitmap_Destroy(bmp);
+    if (d.form) M.FORM_OnBeforeClosePage(page, d.form);
     M.FPDF_ClosePage(page);
   }
 }
@@ -249,35 +263,48 @@ function searchPage(d: Doc, pageIndex: number, textPtr: number): SearchHit[] {
  */
 type Norm = (l: number, t: number, r: number, b: number) => NormRect;
 
+/**
+ * Page space ↔ normalized top-left space for a loaded page (rotation and crop box via PageToDevice).
+ * The mapping is affine: sampled at three points once, then applied in JS
+ * (two WASM calls per character otherwise dominated text extraction).
+ */
+function pageTransform(d: Doc, pageIndex: number, page: number) {
+  const { width, height } = d.pageSizes[pageIndex];
+  const DW = 10000;
+  const DH = Math.round((DW * height) / width);
+  const [o, a, b] = withScratch(8, (s) =>
+    [
+      [0, 0],
+      [1000, 0],
+      [0, 1000],
+    ].map(([x, y]) => {
+      M.FPDF_PageToDevice(page, 0, 0, DW, DH, 0, x, y, s, s + 4);
+      return [M.pdfium.getValue(s, 'i32') / DW, M.pdfium.getValue(s + 4, 'i32') / DH];
+    }),
+  );
+  const [a1, a2, b1, b2] = [(a[0] - o[0]) / 1000, (a[1] - o[1]) / 1000, (b[0] - o[0]) / 1000, (b[1] - o[1]) / 1000];
+  const dev = (x: number, y: number) => [o[0] + a1 * x + b1 * y, o[1] + a2 * x + b2 * y];
+  const det = a1 * b2 - a2 * b1;
+  const norm: Norm = (l, t, r, bt) => {
+    const [x0, y0] = dev(l, t);
+    const [x1, y1] = dev(r, bt);
+    return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+  };
+  /** Normalized point → page space. */
+  const toPage = (nx: number, ny: number): [number, number] => {
+    const [dx, dy] = [nx - o[0], ny - o[1]];
+    return [(dx * b2 - dy * b1) / det, (a1 * dy - a2 * dx) / det];
+  };
+  return { norm, toPage };
+}
+
 function withTextPage<T>(d: Doc, pageIndex: number, fallback: T, fn: (page: number, text: number, norm: Norm) => T): T {
   const page = M.FPDF_LoadPage(d.ptr, pageIndex);
   if (!page) return fallback;
   const text = M.FPDFText_LoadPage(page);
-  const { width, height } = d.pageSizes[pageIndex];
-  const DW = 10000;
-  const DH = Math.round((DW * height) / width);
   try {
     if (!text) return fallback;
-    return withScratch(8, (s) => {
-      const devCall = (x: number, y: number) => {
-        M.FPDF_PageToDevice(page, 0, 0, DW, DH, 0, x, y, s, s + 4);
-        return [M.pdfium.getValue(s, 'i32') / DW, M.pdfium.getValue(s + 4, 'i32') / DH];
-      };
-      // Page→device is affine: sample it at three points once, then transform in JS
-      // (two WASM calls per character otherwise dominated text extraction).
-      const K = 1000;
-      const [ox, oy] = devCall(0, 0);
-      const [ax, ay] = devCall(K, 0);
-      const [bx, by] = devCall(0, K);
-      const [a1, a2, b1, b2] = [(ax - ox) / K, (ay - oy) / K, (bx - ox) / K, (by - oy) / K];
-      const dev = (x: number, y: number) => [ox + a1 * x + b1 * y, oy + a2 * x + b2 * y];
-      const norm = (l: number, t: number, r: number, b: number): NormRect => {
-        const [x0, y0] = dev(l, t);
-        const [x1, y1] = dev(r, b);
-        return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
-      };
-      return fn(page, text, norm);
-    });
+    return fn(page, text, pageTransform(d, pageIndex, page).norm);
   } finally {
     if (text) M.FPDFText_ClosePage(text);
     M.FPDF_ClosePage(page);
@@ -519,6 +546,133 @@ function pageLayout(docId: number, pageIndex: number): PageLayout {
   }));
 }
 
+// ---------- forms ----------
+
+/** Loads a page into the form environment (needed for any form interaction), runs fn, unloads it. */
+function withFormPage<T>(d: Doc, pageIndex: number, fn: (page: number) => T): T {
+  const page = M.FPDF_LoadPage(d.ptr, pageIndex);
+  if (!page) throw new Error(`Could not load page ${pageIndex + 1}`);
+  M.FORM_OnAfterLoadPage(page, d.form);
+  try {
+    return fn(page);
+  } finally {
+    M.FORM_OnBeforeClosePage(page, d.form);
+    M.FPDF_ClosePage(page);
+  }
+}
+
+function annotRect(annot: number): [number, number, number, number] {
+  return withScratch(16, (s) => {
+    M.FPDFAnnot_GetRect(annot, s);
+    return [0, 4, 8, 12].map((o) => M.pdfium.getValue(s + o, 'float')) as [number, number, number, number];
+  });
+}
+
+/** Fillable fields on a page (push buttons and signatures aside: no scripts run here). */
+function formFields(docId: number, pageIndex: number): FormField[] {
+  const d = getDoc(docId);
+  if (!d.form) return [];
+  return withFormPage(d, pageIndex, (page) => {
+    const { norm } = pageTransform(d, pageIndex, page);
+    const out: FormField[] = [];
+    const n = M.FPDFPage_GetAnnotCount(page);
+    for (let i = 0; i < n; i++) {
+      const annot = M.FPDFPage_GetAnnot(page, i);
+      if (!annot) continue;
+      try {
+        if (M.FPDFAnnot_GetSubtype(annot) !== FPDF_ANNOT_WIDGET) continue;
+        const type = FIELD_TYPES[M.FPDFAnnot_GetFormFieldType(d.form, annot)];
+        if (!type) continue;
+        const flags = M.FPDFAnnot_GetFormFieldFlags(d.form, annot);
+        const [l, t, r, b] = annotRect(annot);
+        const field: FormField = {
+          index: i,
+          type,
+          name: readUtf16((buf, len) => M.FPDFAnnot_GetFormFieldName(d.form, annot, buf, len)),
+          rect: norm(l, t, r, b),
+          value: readUtf16((buf, len) => M.FPDFAnnot_GetFormFieldValue(d.form, annot, buf, len)),
+          readOnly: (flags & FF_READONLY) !== 0,
+          multiline: type === 'text' && (flags & FF_MULTILINE) !== 0,
+          password: type === 'text' && (flags & FF_PASSWORD) !== 0,
+          multiple: type === 'list' && (flags & FF_MULTISELECT) !== 0,
+        };
+        if (type === 'checkbox' || type === 'radio') field.checked = M.FPDFAnnot_IsChecked(d.form, annot);
+        if (type === 'combo' || type === 'list') {
+          const count = M.FPDFAnnot_GetOptionCount(d.form, annot);
+          field.options = Array.from({ length: Math.max(0, count) }, (_, k) => ({
+            label: readUtf16((buf, len) => M.FPDFAnnot_GetOptionLabel(d.form, annot, k, buf, len)),
+            selected: M.FPDFAnnot_IsOptionSelected(d.form, annot, k),
+          }));
+        }
+        out.push(field);
+      } finally {
+        M.FPDFPage_CloseAnnot(annot);
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * Sets a field through PDFium's own form handling (focus, edit, click), so appearances, radio groups
+ * and calculated state update exactly as in other viewers. Returns the page's fields afterwards.
+ */
+function setFormField(docId: number, pageIndex: number, index: number, value: FormValue): FormField[] {
+  const d = getDoc(docId);
+  if (!d.form) return [];
+  withFormPage(d, pageIndex, (page) => {
+    const annot = M.FPDFPage_GetAnnot(page, index);
+    if (!annot) return;
+    try {
+      const type = FIELD_TYPES[M.FPDFAnnot_GetFormFieldType(d.form, annot)];
+      if (type === 'text' && typeof value === 'string') {
+        M.FORM_SetFocusedAnnot(d.form, annot);
+        M.FORM_SelectAllText(d.form, page);
+        const n = (value.length + 1) * 2;
+        withScratch(n, (p) => {
+          M.pdfium.stringToUTF16(value, p, n);
+          M.FORM_ReplaceSelection(d.form, page, p);
+        });
+      } else if ((type === 'checkbox' || type === 'radio') && typeof value === 'boolean') {
+        if (M.FPDFAnnot_IsChecked(d.form, annot) !== value) {
+          const [l, t, r, b] = annotRect(annot);
+          const [x, y] = [(l + r) / 2, (t + b) / 2];
+          M.FORM_OnLButtonDown(d.form, page, 0, x, y);
+          M.FORM_OnLButtonUp(d.form, page, 0, x, y);
+        }
+      } else if ((type === 'combo' || type === 'list') && Array.isArray(value)) {
+        M.FORM_SetFocusedAnnot(d.form, annot);
+        const count = M.FPDFAnnot_GetOptionCount(d.form, annot);
+        // Deselect first (list boxes), then select: PDFium applies each index as it comes.
+        for (let k = 0; k < count; k++) if (!value.includes(k)) M.FORM_SetIndexSelected(d.form, page, k, false);
+        for (const k of value) M.FORM_SetIndexSelected(d.form, page, k, true);
+      }
+      M.FORM_ForceToKillFocus(d.form);
+      d.dirty = true;
+    } finally {
+      M.FPDFPage_CloseAnnot(annot);
+    }
+  });
+  return formFields(docId, pageIndex);
+}
+
+/** The document as it is now (edits included), as PDF bytes. */
+function save(docId: number): ArrayBuffer {
+  const d = getDoc(docId);
+  if (d.form) M.FORM_ForceToKillFocus(d.form);
+  const w = M.PDFiumExt_OpenFileWriter();
+  try {
+    if (!M.PDFiumExt_SaveAsCopy(d.ptr, w)) throw new Error('Could not save the PDF');
+    const n = M.PDFiumExt_GetFileWriterSize(w);
+    return withScratch(n, (p) => {
+      M.PDFiumExt_GetFileWriterData(w, p, n);
+      return heap().slice(p, p + n).buffer;
+    });
+  } finally {
+    M.PDFiumExt_CloseFileWriter(w);
+  }
+}
+
 const SAFE_URL = /^(https?:|mailto:)/i;
 
 function pageLinks(docId: number, pageIndex: number): PageLink[] {
@@ -587,6 +741,8 @@ function searchSlice(job: SearchJob): boolean {
 function close(docId: number) {
   const d = docs.get(docId);
   if (!d) return;
+  if (d.form) M.PDFiumExt_ExitFormFillEnvironment(d.form);
+  if (d.formInfo) M.PDFiumExt_CloseFormFillInfo(d.formInfo);
   M.FPDF_CloseDocument(d.ptr);
   free(d.buf);
   docs.delete(docId);
@@ -638,6 +794,15 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: pageLinks(job.doc, job.page) });
     case 'layout':
       return post({ id: job.id, ok: true, result: job.pages.map((pg) => pageLayout(job.doc, pg)) });
+    case 'fields':
+      return post({ id: job.id, ok: true, result: formFields(job.doc, job.page) });
+    case 'setField':
+      return post({ id: job.id, ok: true, result: setFormField(job.doc, job.page, job.index, job.value) });
+    case 'save': {
+      const bytes = save(job.doc);
+      getDoc(job.doc).dirty = false;
+      return post({ id: job.id, ok: true, result: bytes }, [bytes]);
+    }
     case 'close':
       close(job.doc);
       return post({ id: job.id, ok: true, result: null });

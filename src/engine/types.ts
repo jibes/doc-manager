@@ -51,6 +51,24 @@ export type Graphic = { rect: NormRect; image: boolean; /** Drawing objects merg
 /** What reflow needs from one page. */
 export type PageLayout = { lines: TextLine[]; graphics: Graphic[] };
 
+/** A fillable form field (one widget of it); `index` is its annotation index on the page. */
+export type FormField = {
+  index: number;
+  type: 'text' | 'checkbox' | 'radio' | 'combo' | 'list';
+  name: string;
+  rect: NormRect;
+  value: string;
+  readOnly: boolean;
+  multiline: boolean;
+  password: boolean;
+  /** List boxes allowing several choices. */
+  multiple: boolean;
+  checked?: boolean;
+  options?: { label: string; selected: boolean }[];
+};
+/** Text for text fields, checked state for check boxes and radios, chosen option indices for choices. */
+export type FormValue = string | boolean | number[];
+
 export type PageLink = { rect: NormRect } & ({ kind: 'page'; page: number } | { kind: 'url'; url: string });
 
 /** Thrown by open() for encrypted PDFs; `wrong` when a password was given but rejected. */
@@ -90,6 +108,8 @@ export interface DocHandle {
   /** Page sizes in PDF points, rotation applied. */
   readonly pageSizes: Size[];
   readonly metadata: DocMetadata;
+  /** The PDF has an interactive form. */
+  readonly hasForm: boolean;
   renderPage(page: number, opts: RenderOptions): Promise<Raster>;
   outline(): Promise<OutlineItem[]>;
   /** Streams hits per page via onHits; resolves when done or aborted. */
@@ -100,6 +120,12 @@ export interface DocHandle {
   links(page: number): Promise<PageLink[]>;
   /** Lines with typography plus drawings, for reflow, for a batch of pages. Engines without text extraction return null. */
   layout(pages: number[]): Promise<PageLayout[] | null>;
+  /** Fillable fields on a page ([] when none, or the engine can't fill forms). */
+  fields(page: number): Promise<FormField[]>;
+  /** Sets a field; resolves with the page's fields afterwards (radio groups change together). */
+  setField(page: number, index: number, value: FormValue): Promise<FormField[]>;
+  /** The document with all edits, as PDF bytes. */
+  save(): Promise<ArrayBuffer>;
   close(): void;
 }
 

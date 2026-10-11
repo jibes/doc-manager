@@ -13,6 +13,8 @@ export const engine: DocumentEngine = {
       pageCount: r.pageCount,
       pageSizes: r.pageSizes,
       metadata: { title: r.title, author: r.author },
+      // Forms and saving need PDFium on native (deferred); PDFKit/PdfRenderer here are view-only.
+      hasForm: false,
       async renderPage(page, { width, signal }) {
         if (signal?.aborted) throw aborted();
         const out = await PdfEngine.render(r.handle, page, width);
@@ -28,6 +30,11 @@ export const engine: DocumentEngine = {
       pageText: async () => [],
       links: async () => [],
       layout: async () => null,
+      fields: async () => [],
+      setField: async () => [],
+      save: async () => {
+        throw new Error('Saving is not available in the app yet');
+      },
       close: () => PdfEngine.close(r.handle),
     };
     return handle;
