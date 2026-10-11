@@ -1,7 +1,8 @@
 import { createStore, del, delMany, get, getMany, keys, set, values } from 'idb-keyval';
 
 import type { TextLine } from '@/engine/types';
-import type { DocRecord, LibraryRepo } from './types';
+import { ensurePermission, isFileHandle } from '@/lib/fsa';
+import { FILE_ACCESS, FILE_MOVED, type DocRecord, type LibraryRepo } from './types';
 
 export * from './types';
 
@@ -30,9 +31,28 @@ export const repo: LibraryRepo = {
     await set(id, data, files);
   },
   async source(id) {
-    const blob = await get<Blob>(id, files);
-    if (!blob) throw new Error('This document’s file is missing from storage.');
-    return { kind: 'bytes', bytes: await blob.arrayBuffer() };
+    const stored = await get<unknown>(id, files);
+    if (isFileHandle(stored)) {
+      if ((await stored.queryPermission({ mode: 'read' })) !== 'granted') throw new Error(FILE_ACCESS);
+      const file = await stored.getFile().catch(() => {
+        throw new Error(FILE_MOVED);
+      });
+      return { kind: 'bytes', bytes: await file.arrayBuffer() };
+    }
+    if (!(stored instanceof Blob)) throw new Error('This document’s file is missing from storage.');
+    return { kind: 'bytes', bytes: await stored.arrayBuffer() };
+  },
+  async requestAccess(id, write = false) {
+    const stored = await get<unknown>(id, files);
+    return isFileHandle(stored) ? ensurePermission(stored, write) : true;
+  },
+  async writeFile(id, bytes) {
+    const stored = await get<unknown>(id, files);
+    if (!isFileHandle(stored)) return set(id, new Blob([bytes], { type: 'application/pdf' }), files);
+    if (!(await ensurePermission(stored, true))) throw new Error(FILE_ACCESS);
+    const w = await stored.createWritable();
+    await w.write(bytes);
+    await w.close();
   },
   async saveCover(id, cover) {
     await set(id, cover, covers);

@@ -16,7 +16,7 @@ import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
 import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
-import type { DocRecord } from '@/storage';
+import { repo, type DocRecord } from '@/storage';
 
 const MAX_W = 1120;
 /** AGPL §13: offer the source to network users. */
@@ -26,7 +26,9 @@ const progressOf = (d: DocRecord) => (d.position && d.pageCount > 1 ? (d.positio
 const pctOf = (d: DocRecord) => Math.round(progressOf(d) * 100);
 
 function open(doc: DocRecord) {
-  router.push({ pathname: '/read/[id]', params: { id: doc.id } });
+  // A linked file may need the browser's OK again (after a restart); ask while the tap still counts as a gesture.
+  const ready = doc.linked ? repo.requestAccess(doc.id).catch(() => false) : Promise.resolve(true);
+  ready.then(() => router.push({ pathname: '/read/[id]', params: { id: doc.id } }));
 }
 
 function confirmRemove(doc: DocRecord, remove: (id: string) => void) {
@@ -309,6 +311,7 @@ function Row({
           </T>
           <T v="caption" color={p.muted} numberOfLines={1}>
             {t.docMeta(doc.pageCount, doc.bytes, doc.openedAt)}
+            {doc.linked ? ` · ${t.inPlace}` : ''}
           </T>
         </View>
       </Pressable>

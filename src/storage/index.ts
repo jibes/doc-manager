@@ -69,6 +69,11 @@ export const repo: LibraryRepo = {
     const f = cover(id);
     return f.exists ? f.uri : null;
   },
+  // Native keeps copies (opening in place needs security-scoped bookmarks / persisted SAF grants).
+  requestAccess: async () => true,
+  async writeFile(id, bytes) {
+    pdf(id).write(new Uint8Array(bytes));
+  },
   // No on-device OCR on native yet (see src/ocr), so nothing is ever stored.
   loadOcr: async (_id, pageCount) => new Array(pageCount).fill(undefined),
   saveOcr: async () => {},
