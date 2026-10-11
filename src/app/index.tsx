@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Cover } from '@/components/Cover';
@@ -16,6 +16,8 @@ import { usePalette } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
 
 const MAX_W = 1120;
+/** AGPL §13: offer the source to network users. */
+const SOURCE_URL = 'https://github.com/jibes/doc-reader';
 
 const progressOf = (d: DocRecord) => (d.position && d.pageCount > 1 ? (d.position.page + d.position.offset) / d.pageCount : 0);
 
@@ -123,6 +125,15 @@ export default function Library() {
             </>
           )}
         </View>
+        <Pressable
+          accessibilityRole="link"
+          onPress={() => Linking.openURL(SOURCE_URL)}
+          style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.colophon, { opacity: hovered ? 1 : 0.7 }]}
+        >
+          <T v="caption" color={p.muted}>
+            Quire is free software · Source (AGPL-3.0)
+          </T>
+        </Pressable>
       </ScrollView>
       <Toast message={error} onDismiss={clearError} />
     </DropZone>
@@ -225,4 +236,5 @@ const styles = StyleSheet.create({
   tile: { transitionDuration: '220ms', transitionProperty: 'transform' } as object,
   placeholder: { borderRadius: radius.cover, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
   remove: { position: 'absolute', top: space.sm, right: space.sm },
+  colophon: { marginTop: space.xxxl, paddingVertical: space.sm },
 });

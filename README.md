@@ -64,3 +64,11 @@ node scripts/make-icons.mjs  # regenerate icons from the mark
 
 - Web: complete and covered by `e2e/smoke.mjs` (desktop + mobile viewports).
 - Native: the engine module (`modules/pdf-engine`) is written but **not yet compiled or run on a device**. Android search requires API 35+, and PdfRenderer exposes no outline.
+
+## License
+
+[GNU AGPL-3.0-or-later](LICENSE). Use, study, modify and share freely. Any distributed or network-hosted version, modified or not, must publish its complete source under the same license, so Quire can't be turned into closed, proprietary software.
+
+## Deployment
+
+`.github/workflows/web.yml` typechecks, lints, builds the web app under `/<repo>/`, runs the e2e smoke test against that build, and on `main` publishes it to GitHub Pages. One-time setup: Settings → Pages → Source: **GitHub Actions**.

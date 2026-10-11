@@ -1,13 +1,15 @@
 // End-to-end smoke test against a running web build (default: expo dev server on :8081).
 // Usage: BASE=http://localhost:8081 node e2e/smoke.mjs
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE ?? 'http://localhost:8081';
 const OUT = new URL('./out/', import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM ?? '/opt/pw-browsers/chromium' });
+// Use a preinstalled Chromium when present, else Playwright's own (`npx playwright-core install chromium`).
+const preinstalled = process.env.CHROMIUM ?? '/opt/pw-browsers/chromium';
+const browser = await chromium.launch(existsSync(preinstalled) ? { executablePath: preinstalled } : {});
 const errors = [];
 let failures = 0;
 

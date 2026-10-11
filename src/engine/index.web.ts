@@ -1,3 +1,5 @@
+import { BASE } from '@/lib/base';
+
 import type { OpenResult, Request, Response, ResultMap } from './pdfium/protocol';
 import type { DocHandle, DocSource, DocumentEngine, OutlineItem, Raster, SearchHit } from './types';
 
@@ -13,7 +15,7 @@ class WorkerClient {
 
   private get w(): Worker {
     if (!this.worker) {
-      this.worker = new Worker('/engine/pdfium-worker.js', { type: 'module' });
+      this.worker = new Worker(`${BASE}/engine/pdfium-worker.js`, { type: 'module' });
       this.worker.onmessage = (e: MessageEvent<Response>) => {
         const msg = e.data;
         const p = this.pending.get(msg.id);
