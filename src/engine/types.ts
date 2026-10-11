@@ -66,6 +66,21 @@ export type FormField = {
   checked?: boolean;
   options?: { label: string; selected: boolean }[];
 };
+/** A markup annotation (from Tessel or any other app); `index` is its annotation index on the page. */
+export type Annotation = {
+  page: number;
+  index: number;
+  kind: 'highlight' | 'underline' | 'strikeout' | 'squiggly' | 'note' | 'freetext' | 'ink' | 'shape' | 'stamp';
+  rect: NormRect;
+  /** #rrggbb, when the annotation has a colour. */
+  color?: string;
+  /** The reader's comment. */
+  contents: string;
+  author: string;
+  /** Text under a highlight / underline / strikeout. */
+  quote: string;
+};
+
 /** Text for text fields, checked state for check boxes and radios, chosen option indices for choices. */
 export type FormValue = string | boolean | number[];
 
@@ -124,6 +139,12 @@ export interface DocHandle {
   fields(page: number): Promise<FormField[]>;
   /** Sets a field; resolves with the page's fields afterwards (radio groups change together). */
   setField(page: number, index: number, value: FormValue): Promise<FormField[]>;
+  /** Markup annotations on all pages, in page order. */
+  annotations(): Promise<Annotation[]>;
+  /** Highlights text covering `rects` (one per line) on a page, with an optional comment. */
+  addHighlight(page: number, rects: NormRect[], color: string, contents?: string): Promise<void>;
+  updateAnnotation(page: number, index: number, patch: { contents?: string; color?: string }): Promise<void>;
+  removeAnnotation(page: number, index: number): Promise<void>;
   /** The document with all edits, as PDF bytes. */
   save(): Promise<ArrayBuffer>;
   close(): void;

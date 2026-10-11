@@ -27,12 +27,12 @@ CHAPTERS = [
             'Use Open PDF on the home screen, drop a file anywhere on the window, or choose Tessel from '
             'your system’s Open with menu once it is installed. Opening the same file twice simply takes '
             'you back to it.',
-            'Tessel keeps its own copy of each file so it opens instantly and works offline. Your original '
-            'stays exactly where it was.',
+            'In Chrome and Edge, Tessel opens the file where it is saved, so form entries, highlights and '
+            'notes are saved back into it. Other browsers keep a copy in Tessel instead.',
         ]),
         ('Removing a file', [
-            'Removing a document from Tessel deletes Tessel’s copy, its cover and its saved position. The '
-            'original file is never touched. On a desktop, hover a row and use the bin; on a phone, press '
+            'Removing a document from Tessel forgets it: its copy (if it has one), its cover and its saved '
+            'position. The original file is never deleted. On a desktop, hover a row and use the bin; on a phone, press '
             'and hold the row.',
         ]),
     ]),

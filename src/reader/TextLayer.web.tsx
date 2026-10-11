@@ -24,7 +24,7 @@ function measure(text: string, px: number): number {
   return measureCtx.measureText(text).width;
 }
 
-export const TextLayer = memo(function TextLayer({ runs, width, height }: { runs: TextRun[]; width: number; height: number }) {
+export const TextLayer = memo(function TextLayer({ page, runs, width, height }: { page: number; runs: TextRun[]; width: number; height: number }) {
   // Each run is stretched horizontally to its true width so selection boxes match the glyphs underneath.
   const spans = useMemo(
     () =>
@@ -37,7 +37,7 @@ export const TextLayer = memo(function TextLayer({ runs, width, height }: { runs
     [runs, width, height],
   );
   return (
-    <div className="tl" data-testid="text-layer">
+    <div className="tl" data-testid="text-layer" data-page={page}>
       {spans.map(({ r, fontSize, scaleX }, i) => (
         <Fragment key={i}>
           <span style={{ left: r.rect.x * width, top: r.rect.y * height, fontSize, transform: `scaleX(${scaleX})` }}>{r.text}</span>

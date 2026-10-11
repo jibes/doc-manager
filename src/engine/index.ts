@@ -31,6 +31,10 @@ export const engine: DocumentEngine = {
       links: async () => [],
       layout: async () => null,
       fields: async () => [],
+      annotations: async () => [],
+      addHighlight: async () => {},
+      updateAnnotation: async () => {},
+      removeAnnotation: async () => {},
       setField: async () => [],
       save: async () => {
         throw new Error('Saving is not available in the app yet');
