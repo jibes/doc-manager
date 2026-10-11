@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Quire",
+    "slug": "quire",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": "quire",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/images/icon.png",
+      "supportsTablet": true,
+      "bundleIdentifier": "app.quire.reader",
+      "infoPlist": {
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "UISupportsDocumentBrowser": false,
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "PDF",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "com.adobe.pdf"
+            ]
+          }
+        ]
+      }
+    },
+    "android": {
+      "package": "app.quire.reader",
+      "adaptiveIcon": {
+        "backgroundColor": "#ECE8DF",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": true
+    },
+    "web": {
+      "output": "single",
+      "bundler": "metro",
+      "favicon": "./assets/images/favicon.png",
+      "name": "Quire"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ECE8DF",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 88,
+          "dark": {
+            "backgroundColor": "#18191C"
+          }
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
