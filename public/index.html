@@ -13,8 +13,13 @@
     <style id="expo-reset">
       html, body { height: 100%; background: #ECE8DF; }
       @media (prefers-color-scheme: dark) { html, body { background: #18191C; } }
-      body { overflow: hidden; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overscroll-behavior: none; }
-      #root { display: flex; height: 100%; flex: 1; }
+      /* App fills the *visible* viewport (dvh tracks mobile browser bars) and the document itself never scrolls:
+         all scrolling happens inside the app, so the URL bar can't push content off-screen. */
+      body {
+        position: fixed; inset: 0; margin: 0; overflow: hidden; overscroll-behavior: none;
+        -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+      }
+      #root { display: flex; flex: 1; height: 100%; height: 100dvh; }
       ::selection { background: rgba(47, 79, 134, 0.22); }
       :focus-visible { outline: 2px solid #2F4F86; outline-offset: 2px; border-radius: 6px; }
     </style>
@@ -23,6 +28,16 @@
     <noscript>Quire needs JavaScript to run.</noscript>
     <div id="root"></div>
     <script>
+      // Capture the install prompt before the app mounts; it fires once, early.
+      addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.__installPrompt = e;
+        dispatchEvent(new Event('quire:installable'));
+      });
+      addEventListener('appinstalled', () => {
+        window.__installPrompt = null;
+        dispatchEvent(new Event('quire:installable'));
+      });
       if ('serviceWorker' in navigator && location.port !== '8081') {
         addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
       }
