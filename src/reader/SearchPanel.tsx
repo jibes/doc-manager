@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { t } from '@/i18n';
 import { Icon } from '@/components/Icon';
 import { IconButton, T } from '@/components/primitives';
 import { fonts, radius, space, type Palette } from '@/design/tokens';
@@ -32,16 +33,19 @@ export function SearchPanel({ palette: p, query, onQuery, hits, active, searchin
     if (active >= 0 && active < hits.length) list.current?.scrollToIndex({ index: active, viewPosition: 0.4, animated: true });
   }, [active, hits.length]);
 
+  const more = hits.length >= 200 && !searching;
   const status = !query.trim()
-    ? 'Search the full text of this document.'
+    ? t.searchIntro
     : searching && !hits.length
-      ? 'Searching…'
+      ? t.searching
       : hits.length
-        ? `${active >= 0 ? `${active + 1} of ` : ''}${hits.length}${hits.length >= 200 && !searching ? '+' : ''} result${hits.length === 1 ? '' : 's'}`
-        : 'No matches.';
+        ? active >= 0
+          ? t.nOfResults(active + 1, hits.length, more)
+          : t.results(hits.length, more)
+        : t.noMatches;
 
   return (
-    <Panel title="Search" onClose={onClose} testID="search-panel">
+    <Panel title={t.search} onClose={onClose} testID="search-panel">
       <View style={styles.bar}>
         <View style={[styles.field, { backgroundColor: p.hairline }]}>
           <Icon name="search" size={17} color={p.muted} />
@@ -50,7 +54,7 @@ export function SearchPanel({ palette: p, query, onQuery, hits, active, searchin
             testID="search-input"
             value={query}
             onChangeText={onQuery}
-            placeholder="Find in document"
+            placeholder={t.findPlaceholder}
             placeholderTextColor={p.muted}
             returnKeyType="search"
             autoCorrect={false}
@@ -64,8 +68,8 @@ export function SearchPanel({ palette: p, query, onQuery, hits, active, searchin
           />
           {searching && <ActivityIndicator size="small" color={p.muted} />}
         </View>
-        <IconButton icon="up" label="Previous result" size={36} disabled={!hits.length} onPress={() => onStep(-1)} />
-        <IconButton icon="down" label="Next result" size={36} disabled={!hits.length} onPress={() => onStep(1)} />
+        <IconButton icon="up" label={t.previousResult} size={36} disabled={!hits.length} onPress={() => onStep(-1)} />
+        <IconButton icon="down" label={t.nextResult} size={36} disabled={!hits.length} onPress={() => onStep(1)} />
       </View>
       <T v="caption" color={p.muted} style={styles.status} accessibilityLiveRegion="polite">
         {status}

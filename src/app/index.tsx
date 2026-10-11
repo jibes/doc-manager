@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { t } from '@/i18n';
 import { Cover } from '@/components/Cover';
 import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
@@ -27,13 +28,13 @@ function open(doc: DocRecord) {
 }
 
 function confirmRemove(doc: DocRecord, remove: (id: string) => void) {
-  const msg = `Remove “${doc.title}” from this device?`;
+  const msg = t.removeConfirm(doc.title);
   if (Platform.OS === 'web') {
     if (window.confirm(msg)) remove(doc.id);
   } else {
-    Alert.alert('Remove document', msg, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => remove(doc.id) },
+    Alert.alert(t.removeTitle, msg, [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.remove, style: 'destructive', onPress: () => remove(doc.id) },
     ]);
   }
 }
@@ -88,13 +89,13 @@ export default function Library() {
                   testID="install"
                   kind="quiet"
                   icon="install"
-                  label="Install"
+                  label={t.install}
                   onPress={() =>
-                    installKind === 'prompt' ? install() : setHint('To install: tap Share, then “Add to Home Screen”.')
+                    installKind === 'prompt' ? install() : setHint(t.installHintIos)
                   }
                 />
               )}
-              {docs.length > 0 && <Button testID="add" label={wide ? 'Add PDF' : 'Add'} icon="plus" onPress={async () => add(await pickPdfs())} />}
+              {docs.length > 0 && <Button testID="add" label={wide ? t.addPdf : t.add} icon="plus" onPress={async () => add(await pickPdfs())} />}
             </View>
           </View>
 
@@ -108,7 +109,7 @@ export default function Library() {
 
               <View style={[styles.sectionHead, { borderColor: p.hairline }]}>
                 <T v="kicker" color={p.muted}>
-                  {query ? `${filtered.length} found` : `Library · ${docs.length}`}
+                  {query ? t.found(filtered.length) : t.libraryCount(docs.length)}
                 </T>
                 {docs.length > 5 && (
                   <View style={[styles.search, { backgroundColor: p.hairline }]}>
@@ -116,7 +117,7 @@ export default function Library() {
                     <TextInput
                       value={query}
                       onChangeText={setQuery}
-                      placeholder="Filter"
+                      placeholder={t.filter}
                       placeholderTextColor={p.muted}
                       style={[styles.searchInput, { color: p.ink }]}
                     />
@@ -131,7 +132,7 @@ export default function Library() {
                 {importing.map((name) => (
                   <View key={name} style={{ width: colW }}>
                     <View style={[styles.placeholder, { height: colW * 1.38, borderColor: p.hairline }]}>
-                      <T v="caption" color={p.muted}>Adding…</T>
+                      <T v="caption" color={p.muted}>{t.adding}</T>
                     </View>
                   </View>
                 ))}
@@ -145,7 +146,7 @@ export default function Library() {
           style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.colophon, { opacity: hovered ? 1 : 0.7 }]}
         >
           <T v="caption" color={p.muted}>
-            Quire is free software · Source (AGPL-3.0)
+            {t.colophon}
           </T>
         </Pressable>
       </ScrollView>
@@ -163,7 +164,7 @@ function ContinueCard({ doc, cover, wide, onPress }: { doc: DocRecord; cover?: s
     <Pressable
       testID="continue"
       accessibilityRole="button"
-      accessibilityLabel={`Continue reading ${doc.title}, page ${page}`}
+      accessibilityLabel={t.continueReadingA11y(doc.title, page)}
       onPress={onPress}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.continue,
@@ -173,7 +174,7 @@ function ContinueCard({ doc, cover, wide, onPress }: { doc: DocRecord; cover?: s
     >
       <Cover uri={cover} aspect={doc.coverAspect} width={coverW} />
       <View style={{ flex: 1, justifyContent: 'center', gap: space.sm }}>
-        <T v="kicker" color={p.accent}>Continue reading</T>
+        <T v="kicker" color={p.accent}>{t.continueReading}</T>
         <T numberOfLines={2} style={{ fontFamily: fonts.serif, fontSize: wide ? 30 : 22, lineHeight: wide ? 34 : 26, letterSpacing: -0.5 }}>
           {doc.title}
         </T>
@@ -183,7 +184,7 @@ function ContinueCard({ doc, cover, wide, onPress }: { doc: DocRecord; cover?: s
             <View style={{ width: `${Math.max(pct, 1)}%`, height: '100%', backgroundColor: p.accent, borderRadius: 2 }} />
           </View>
           <T v="numeral" color={p.muted}>
-            Page {page} of {doc.pageCount} · {pct}%
+            {t.pageOf(page, doc.pageCount)} · {pct}%
           </T>
         </View>
       </View>
@@ -214,7 +215,7 @@ function Tile({ doc, cover, width, onRemove }: { doc: DocRecord; cover?: string 
           </T>
           <T v="caption" color={p.muted} numberOfLines={1}>
             {pct > 0 ? `${Math.round(pct * 100)}% · ` : ''}
-            {doc.pageCount} pages
+            {t.pages(doc.pageCount)}
           </T>
         </View>
       </Pressable>
@@ -222,7 +223,7 @@ function Tile({ doc, cover, width, onRemove }: { doc: DocRecord; cover?: string 
         // Sibling, not child: buttons can't nest in the DOM.
         <IconButton
           icon="trash"
-          label="Remove"
+          label={t.remove}
           size={32}
           onPress={onRemove}
           onHoverIn={() => setHover(true)}

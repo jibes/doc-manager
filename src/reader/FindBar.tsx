@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
 
+import { t } from '@/i18n';
 import { Icon } from '@/components/Icon';
 import { IconButton, T } from '@/components/primitives';
 import { elevation, fonts, radius, space, type Palette } from '@/design/tokens';
@@ -19,7 +20,7 @@ type Props = {
 
 /** Compact find-in-page bar that keeps a search alive (and highlighted) after the panel closes. */
 export function FindBar({ palette: p, query, count, active, searching, top, onOpen, onStep, onClear }: Props) {
-  const status = count ? `${active >= 0 ? active + 1 : '–'} of ${count}${count >= 200 && !searching ? '+' : ''}` : searching ? 'Searching…' : 'No matches';
+  const status = count ? t.nOf(active >= 0 ? active + 1 : '–', count, count >= 200 && !searching) : searching ? t.searching : t.noMatches;
   return (
     <Animated.View
       entering={FadeInUp.duration(200)}
@@ -31,7 +32,7 @@ export function FindBar({ palette: p, query, count, active, searching, top, onOp
         testID="find-bar"
         style={[styles.bar, { backgroundColor: p.glass, borderColor: p.hairline }, elevation(p.shadow, 2)]}
       >
-        <Pressable accessibilityRole="button" accessibilityLabel="Edit search" onPress={onOpen} style={styles.label}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t.editSearch} onPress={onOpen} style={styles.label}>
           <Icon name="search" size={15} color={p.muted} />
           <T numberOfLines={1} style={{ fontFamily: fonts.serif, fontSize: 15, maxWidth: 140 }}>
             {query}
@@ -40,9 +41,9 @@ export function FindBar({ palette: p, query, count, active, searching, top, onOp
             {status}
           </T>
         </Pressable>
-        <IconButton icon="up" label="Previous result" size={32} disabled={!count} onPress={() => onStep(-1)} />
-        <IconButton icon="down" label="Next result" size={32} disabled={!count} onPress={() => onStep(1)} testID="find-next" />
-        <IconButton icon="close" label="Clear search" size={32} onPress={onClear} testID="find-clear" />
+        <IconButton icon="up" label={t.previousResult} size={32} disabled={!count} onPress={() => onStep(-1)} />
+        <IconButton icon="down" label={t.nextResult} size={32} disabled={!count} onPress={() => onStep(1)} testID="find-next" />
+        <IconButton icon="close" label={t.clearSearch} size={32} onPress={onClear} testID="find-clear" />
       </View>
     </Animated.View>
   );

@@ -2,6 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { errorText, t } from '@/i18n';
 import { Button, T } from '@/components/primitives';
 import { fonts, space } from '@/design/tokens';
 import { goBack } from '@/lib/nav';
@@ -25,14 +26,14 @@ export default function ReadScreen() {
   }, [load]);
 
   const missing = loaded && !doc;
-  const message = useMemo(() => (missing ? 'This document is no longer in your library.' : state.status === 'error' ? state.message : null), [missing, state]);
+  const message = useMemo(() => (missing ? t.missing : state.status === 'error' ? errorText(state.message) : null), [missing, state]);
 
   if (message) {
     return (
       <View style={[styles.center, { backgroundColor: p.canvas }]}>
-        <T style={{ fontFamily: fonts.serif, fontSize: 26, textAlign: 'center' }}>Can’t open this document</T>
+        <T style={{ fontFamily: fonts.serif, fontSize: 26, textAlign: 'center' }}>{t.cantOpen}</T>
         <T v="body" color={p.muted} style={{ textAlign: 'center', maxWidth: 420 }}>{message}</T>
-        <Button label="Back to library" kind="quiet" onPress={goBack} style={{ marginTop: space.md }} />
+        <Button label={t.backToLibrary} kind="quiet" onPress={goBack} style={{ marginTop: space.md }} />
       </View>
     );
   }
@@ -42,7 +43,7 @@ export default function ReadScreen() {
       <View style={[styles.center, { backgroundColor: p.canvas }]}>
         {slow && doc && (
           <T style={{ fontFamily: fonts.serifItalic, fontSize: 20 }} color={p.muted}>
-            Opening {doc.title}…
+            {t.opening(doc.title)}
           </T>
         )}
       </View>

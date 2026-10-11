@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { t } from '@/i18n';
 import { T } from '@/components/primitives';
 import { elevation, type Palette } from '@/design/tokens';
 import type { Raster, SearchHit } from '@/engine/types';
@@ -44,7 +45,7 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
     <Pressable
       onPress={onPress}
       accessibilityRole="image"
-      accessibilityLabel={`Page ${page + 1}`}
+      accessibilityLabel={t.pageN(page + 1)}
       style={[
         styles.page,
         { width, height, backgroundColor: PAGE_BASE[palette.name] },

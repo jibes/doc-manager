@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideInRight, SlideOutDown, SlideOutRight } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { t } from '@/i18n';
 import { IconButton, T } from '@/components/primitives';
 import { elevation, radius, space } from '@/design/tokens';
 import { usePalette } from '@/state/prefs';
@@ -19,7 +20,7 @@ export function Panel({ title, onClose, children, compact, testID }: { title: st
   const header = (
     <View style={styles.header}>
       <T v="headline">{title}</T>
-      <IconButton icon="close" label="Close" size={34} onPress={onClose} />
+      <IconButton icon="close" label={t.close} size={34} onPress={onClose} />
     </View>
   );
 
@@ -45,7 +46,7 @@ export function Panel({ title, onClose, children, compact, testID }: { title: st
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(160)} style={StyleSheet.absoluteFill}>
-        <Pressable accessibilityLabel="Close" style={[StyleSheet.absoluteFill, { backgroundColor: p.scrim }]} onPress={onClose} />
+        <Pressable accessibilityLabel={t.close} style={[StyleSheet.absoluteFill, { backgroundColor: p.scrim }]} onPress={onClose} />
       </Animated.View>
       <Animated.View
         testID={testID}

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
+import { t } from '@/i18n';
 import { Icon } from '@/components/Icon';
 import { T } from '@/components/primitives';
 import { fonts, radius, space, type Palette } from '@/design/tokens';
@@ -13,7 +14,7 @@ export type FlatOutline = { title: string; page: number; depth: number }[];
 
 export function flattenOutline(items: OutlineItem[], depth = 0, out: FlatOutline = []): FlatOutline {
   for (const it of items) {
-    out.push({ title: it.title || 'Untitled', page: it.page, depth });
+    out.push({ title: it.title || t.untitled, page: it.page, depth });
     flattenOutline(it.children, depth + 1, out);
   }
   return out;
@@ -45,13 +46,13 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
   }, [outline, page]);
 
   const tabs: [Tab, string][] = [
-    ['contents', 'Contents'],
-    ['pages', 'Pages'],
-    ['bookmarks', `Bookmarks${bookmarks.length ? ` ${bookmarks.length}` : ''}`],
+    ['contents', t.contents],
+    ['pages', t.pagesTab],
+    ['bookmarks', `${t.bookmarks}${bookmarks.length ? ` ${bookmarks.length}` : ''}`],
   ];
 
   return (
-    <Panel title="Navigate" onClose={onClose} testID="contents-panel">
+    <Panel title={t.navigate} onClose={onClose} testID="contents-panel">
       <View style={[styles.segment, { backgroundColor: p.hairline }]}>
         {tabs.map(([k, label]) => (
           <Pressable
@@ -70,7 +71,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
 
       {tab === 'contents' &&
         (outline == null ? null : outline.length === 0 ? (
-          <Empty p={p} text="This document has no table of contents." />
+          <Empty p={p} text={t.noOutline} />
         ) : (
           <FlatList
             data={outline}
@@ -117,7 +118,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
 
       {tab === 'bookmarks' &&
         (bookmarks.length === 0 ? (
-          <Empty p={p} text="No bookmarks yet. Tap the ribbon while reading to keep a page." />
+          <Empty p={p} text={t.noBookmarks} />
         ) : (
           <FlatList
             data={bookmarks}
@@ -132,7 +133,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
                 >
                   <Thumb cache={cache} page={item} size={sizes[item]} width={44} palette={p} />
                   <View style={{ flex: 1, gap: 2 }}>
-                    <T v="headline">Page {item + 1}</T>
+                    <T v="headline">{t.pageN(item + 1)}</T>
                     {chapter && (
                       <T v="caption" color={p.muted} numberOfLines={1}>
                         {chapter.title}
