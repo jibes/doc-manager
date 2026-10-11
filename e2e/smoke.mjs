@@ -381,6 +381,60 @@ async function forms() {
   await ctx.close();
 }
 
+// Highlights and notes: select → highlight / note; list, edit, delete; saved into the PDF.
+async function annotations() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`annotations: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  await page.getByTestId('sample').click();
+  await page.getByTestId('reader').waitFor();
+  const select = async (re) => {
+    const span = page.locator('[data-testid=text-layer] span', { hasText: re }).first();
+    await span.waitFor({ timeout: 10000 });
+    await span.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    const b = await span.boundingBox();
+    await page.mouse.move(b.x + 1, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width - 1, b.y + b.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.getByTestId('selection-bubble').waitFor({ timeout: 3000 });
+  };
+  await select(/^Every PDF you open lands in Recent/);
+  await page.getByTestId('highlight-green').click();
+  await select(/^Use Open PDF on the home screen/);
+  await page.getByTestId('highlight-note').click();
+  await page.getByTestId('note-input').fill('Try dragging a file in');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('save').waitFor();
+  await page.getByTestId('open-contents').click();
+  await page.getByTestId('tab-notes').click();
+  const rows = page.getByTestId('note-row');
+  await rows.nth(1).waitFor({ timeout: 5000 });
+  const listed = (await rows.count()) === 2 && /Every PDF you open/.test(await rows.nth(0).innerText()) && /Try dragging a file in/.test(await rows.nth(1).innerText());
+  check(listed, 'annotations: highlight and note listed with their text');
+  await rows.nth(1).getByTestId('note-edit').click();
+  await page.getByTestId('note-input').fill('Drop it anywhere');
+  await page.getByTestId('note-save').click();
+  await page.getByText('Drop it anywhere').waitFor({ timeout: 3000 });
+  await rows.nth(0).getByTestId('note-delete').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid=note-row]').length === 1, null, { timeout: 3000 });
+  await page.getByTestId('save').click();
+  await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
+  await page.getByTestId('back').click();
+  await page.getByTestId('recent-row').first().waitFor();
+  await page.reload();
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('open-contents').click();
+  await page.getByTestId('tab-notes').click();
+  await rows.first().waitFor({ timeout: 5000 });
+  const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Use Open PDF/.test(await rows.first().innerText());
+  check(kept, 'annotations: edits and deletions saved into the PDF');
+  await ctx.close();
+}
+
 // Open in place (Chromium): the library links to the user's file. Handles come from the origin-private
 // file system, standing in for the picker; they behave like real ones (read, write, vanish).
 async function linked() {
@@ -472,6 +526,7 @@ await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
 await step('forms', forms);
+await step('annotations', annotations);
 await step('linked', linked);
 await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
 await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));

@@ -114,7 +114,7 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
         </View>
       )}
       <RasterView raster={raster} filter={palette.page.cssFilter} blend={palette.page.blend} />
-      {extras && <TextLayer runs={extras.text} width={width} height={height} />}
+      {extras && <TextLayer page={page} runs={extras.text} width={width} height={height} />}
       {hits && hits.length > 0 && <MarksLayer hits={hits} active={activeHit} width={width} height={height} palette={palette} />}
       {extras && onLink && <LinkLayer links={extras.links} width={width} height={height} onLink={onLink} />}
       {form.fields && form.fields.length > 0 && (

@@ -21,7 +21,7 @@ import { t } from '@/i18n';
 import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import type { DocHandle, PageLink, SearchHit } from '@/engine/types';
+import type { Annotation, DocHandle, PageLink, SearchHit } from '@/engine/types';
 import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -32,6 +32,8 @@ import { FindBar } from './FindBar';
 import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
 import { PageView } from './PageView';
 import { ReflowView, type ReflowApi } from './ReflowView';
+import { NoteDialog, type NoteRequest } from './NoteDialog';
+import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
 import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
@@ -191,6 +193,67 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       setView(doc.id, 'page');
     },
     [doc.id, setView],
+  );
+
+  // ---------- highlights and notes ----------
+  const [annots, setAnnots] = useState<Annotation[] | null>(null);
+  const [annotVersion, setAnnotVersion] = useState(0);
+  const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
+  useEffect(() => {
+    if (panel !== 'contents') return;
+    let alive = true;
+    handle.annotations().then((a) => alive && setAnnots(a), () => alive && setAnnots([]));
+    return () => {
+      alive = false;
+    };
+  }, [panel, handle, annotVersion]);
+
+  const askNote = useCallback(
+    (initial: string, quote: string) =>
+      new Promise<string | null>((resolve) =>
+        setNoteRequest({
+          initial,
+          quote,
+          resolve: (text) => {
+            setNoteRequest(null);
+            resolve(text);
+          },
+        }),
+      ),
+    [],
+  );
+  const annotated = useCallback(
+    (pages: number[]) => {
+      pages.forEach((pg) => cache.invalidate(pg));
+      edits.markDirty();
+      setAnnotVersion((v) => v + 1);
+    },
+    [cache, edits],
+  );
+  const onHighlight = useCallback(
+    async (groups: PageRects[], color: string, note: boolean, quote: string) => {
+      const contents = note ? await askNote('', quote) : undefined;
+      if (note && contents == null) return;
+      for (const g of groups) await handle.addHighlight(g.page, g.rects, color, contents || undefined);
+      annotated(groups.map((g) => g.page));
+    },
+    [askNote, handle, annotated],
+  );
+  const onEditNote = useCallback(
+    async (a: Annotation) => {
+      const contents = await askNote(a.contents, a.quote);
+      if (contents == null || contents === a.contents) return;
+      await handle.updateAnnotation(a.page, a.index, { contents });
+      annotated([a.page]);
+    },
+    [askNote, handle, annotated],
+  );
+  const onDeleteNote = useCallback(
+    async (a: Annotation) => {
+      await handle.removeAnnotation(a.page, a.index);
+      annotated([a.page]);
+    },
+    [handle, annotated],
   );
 
   // ---------- search ----------
@@ -624,6 +687,9 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           sizes={handle.pageSizes}
           cache={cache}
           bookmarks={doc.bookmarks}
+          annotations={annots}
+          onEditNote={onEditNote}
+          onDeleteNote={onDeleteNote}
           onGo={(n) => {
             goToPage(n);
             if (!wide) setPanel(null);
@@ -649,6 +715,8 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       )}
       {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
       {panel === 'appearance' && <AppearancePanel palette={p} view={view} zoom={zoom} onZoom={setZoom} onClose={() => setPanel(null)} />}
+      {view === 'page' && <SelectionBubble palette={p} onHighlight={onHighlight} />}
+      <NoteDialog request={noteRequest} palette={p} />
       <Toast message={edits.notice} onDismiss={edits.clearNotice} />
     </View>
   );

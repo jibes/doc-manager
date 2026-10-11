@@ -3,9 +3,9 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { t } from '@/i18n';
 import { Icon } from '@/components/Icon';
-import { T } from '@/components/primitives';
+import { IconButton, T } from '@/components/primitives';
 import { fonts, radius, space, type Palette } from '@/design/tokens';
-import type { OutlineItem, Size } from '@/engine/types';
+import type { Annotation, OutlineItem, Size } from '@/engine/types';
 import { Panel } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Thumb } from './Thumb';
@@ -20,7 +20,7 @@ export function flattenOutline(items: OutlineItem[], depth = 0, out: FlatOutline
   return out;
 }
 
-type Tab = 'contents' | 'pages' | 'bookmarks';
+type Tab = 'contents' | 'pages' | 'bookmarks' | 'notes';
 
 type Props = {
   palette: Palette;
@@ -29,11 +29,15 @@ type Props = {
   sizes: Size[];
   cache: RasterCache;
   bookmarks: number[];
+  /** Highlights and notes in the PDF (null while loading); editable when the callbacks are given. */
+  annotations: Annotation[] | null;
+  onEditNote?: (a: Annotation) => void;
+  onDeleteNote?: (a: Annotation) => void;
   onGo: (page: number) => void;
   onClose: () => void;
 };
 
-export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmarks, onGo, onClose }: Props) {
+export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmarks, annotations, onEditNote, onDeleteNote, onGo, onClose }: Props) {
   const [picked, setTab] = useState<Tab>('contents');
   // No outline → open on Pages instead of an empty Contents tab.
   const tab = picked === 'contents' && outline?.length === 0 ? 'pages' : picked;
@@ -49,6 +53,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
     ['contents', t.contents],
     ['pages', t.pagesTab],
     ['bookmarks', `${t.bookmarks}${bookmarks.length ? ` ${bookmarks.length}` : ''}`],
+    ['notes', `${t.notesTab}${annotations?.length ? ` ${annotations.length}` : ''}`],
   ];
 
   return (
@@ -59,6 +64,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
             key={k}
             accessibilityRole="tab"
             accessibilityState={{ selected: tab === k }}
+            testID={`tab-${k}`}
             onPress={() => setTab(k)}
             style={[styles.segBtn, tab === k && [{ backgroundColor: p.raised }, styles.segActive]]}
           >
@@ -146,6 +152,46 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
             }}
           />
         ))}
+
+      {tab === 'notes' &&
+        (annotations == null ? null : annotations.length === 0 ? (
+          <Empty p={p} text={t.noNotes} />
+        ) : (
+          <FlatList
+            data={annotations}
+            keyExtractor={(a) => `${a.page}:${a.index}`}
+            contentContainerStyle={{ paddingBottom: space.xl }}
+            renderItem={({ item: a }) => (
+              <View style={[styles.noteRow, { borderColor: p.hairline }]} testID="note-row">
+                <Pressable onPress={() => onGo(a.page)} style={{ flex: 1, gap: 4 }}>
+                  <View style={styles.noteHead}>
+                    <View style={[styles.swatch, { backgroundColor: a.color ?? p.accent }]} />
+                    <T v="caption" color={p.muted}>
+                      {t.annotationKinds[a.kind]} · {t.pageN(a.page + 1)}
+                      {a.author ? ` · ${a.author}` : ''}
+                    </T>
+                  </View>
+                  {!!a.quote && (
+                    <T v="body" numberOfLines={4} color={p.inkSoft} style={{ fontSize: 14, lineHeight: 20 }}>
+                      {a.quote}
+                    </T>
+                  )}
+                  {!!a.contents && (
+                    <T v="body" style={{ fontSize: 14, lineHeight: 20, fontFamily: fonts.sansMedium }}>
+                      {a.contents}
+                    </T>
+                  )}
+                </Pressable>
+                {onEditNote && (
+                  <View style={styles.noteActions}>
+                    <IconButton icon="pencil" label={t.editNote} size={32} onPress={() => onEditNote(a)} testID="note-edit" />
+                    <IconButton icon="trash" label={t.deleteNote} size={32} onPress={() => onDeleteNote?.(a)} testID="note-delete" />
+                  </View>
+                )}
+              </View>
+            )}
+          />
+        ))}
     </Panel>
   );
 }
@@ -195,6 +241,10 @@ function Empty({ p, text }: { p: Palette; text: string }) {
 }
 
 const styles = StyleSheet.create({
+  noteRow: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.xl - 4, paddingVertical: space.md, borderBottomWidth: StyleSheet.hairlineWidth },
+  noteHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  swatch: { width: 10, height: 10, borderRadius: 5 },
+  noteActions: { gap: 2 },
   segment: { flexDirection: 'row', marginHorizontal: space.xl - 4, marginBottom: space.md, borderRadius: radius.sm + 2, padding: 3 },
   segBtn: { flex: 1, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   segActive: { boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } as object,

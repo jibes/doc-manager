@@ -1,4 +1,4 @@
-import type { DocMetadata, FormField, FormValue, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
+import type { Annotation, DocMetadata, FormField, FormValue, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
 
 export type Request =
   | { id: number; type: 'open'; bytes: ArrayBuffer; password?: string }
@@ -11,6 +11,10 @@ export type Request =
   | { id: number; type: 'fields'; doc: number; page: number }
   | { id: number; type: 'setField'; doc: number; page: number; index: number; value: FormValue }
   | { id: number; type: 'save'; doc: number }
+  | { id: number; type: 'annots'; doc: number }
+  | { id: number; type: 'addHighlight'; doc: number; page: number; rects: NormRect[]; color: string; contents?: string }
+  | { id: number; type: 'updateAnnot'; doc: number; page: number; index: number; contents?: string; color?: string }
+  | { id: number; type: 'removeAnnot'; doc: number; page: number; index: number }
   | { id: number; type: 'search'; doc: number; query: string }
   | { id: number; type: 'cancel'; target: number }
   | { id: number; type: 'close'; doc: number };
@@ -33,6 +37,10 @@ export type ResultMap = {
   fields: FormField[];
   setField: FormField[];
   save: ArrayBuffer;
+  annots: Annotation[];
+  addHighlight: null;
+  updateAnnot: null;
+  removeAnnot: null;
   search: null;
   cancel: null;
   close: null;

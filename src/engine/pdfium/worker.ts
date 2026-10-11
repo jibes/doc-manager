@@ -6,7 +6,7 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
 import { mergeGraphics } from '../geometry';
-import type { FormField, FormValue, Graphic, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
+import type { Annotation, FormField, FormValue, Graphic, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -35,6 +35,22 @@ const FF_READONLY = 1 << 0;
 const FF_MULTILINE = 1 << 12;
 const FF_PASSWORD = 1 << 13;
 const FF_MULTISELECT = 1 << 21;
+const FPDF_ANNOT_HIGHLIGHT = 9;
+const ANNOT_KINDS: Record<number, Annotation['kind']> = {
+  1: 'note',
+  3: 'freetext',
+  4: 'shape',
+  5: 'shape',
+  6: 'shape',
+  7: 'shape',
+  8: 'shape',
+  9: 'highlight',
+  10: 'underline',
+  11: 'squiggly',
+  12: 'strikeout',
+  13: 'stamp',
+  15: 'ink',
+};
 
 /** `form`: PDFium's form-fill environment (null when the PDF has no form); `dirty`: edited since open/save. */
 type Doc = { ptr: number; buf: number; pageSizes: Size[]; formInfo: number; form: number; dirty: boolean };
@@ -673,6 +689,177 @@ function save(docId: number): ArrayBuffer {
   }
 }
 
+// ---------- annotations ----------
+
+const hex = (n: number) => n.toString(16).padStart(2, '0');
+
+function setWide(annot: number, key: string, value: string) {
+  const n = (value.length + 1) * 2;
+  withScratch(n, (p) => {
+    M.pdfium.stringToUTF16(value, p, n);
+    M.FPDFAnnot_SetStringValue(annot, key, p);
+  });
+}
+
+function setColor(annot: number, color: string) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  M.FPDFAnnot_SetColor(annot, 0, r, g, b, 255);
+}
+
+/** PDF date for the annotation's modified date (`M`). */
+function pdfDate(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `D:${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+}
+
+/** Text inside a page-space box (the words under a highlight). */
+function boundedText(text: number, l: number, t: number, r: number, b: number): string {
+  const n = M.FPDFText_GetBoundedText(text, l, t, r, b, 0, 0);
+  if (n <= 0) return '';
+  return withScratch((n + 1) * 2, (p) => {
+    M.FPDFText_GetBoundedText(text, l, t, r, b, p, n + 1);
+    return M.pdfium.UTF16ToString(p);
+  });
+}
+
+/**
+ * Colour from /C; PDFium won't report it once an appearance stream exists, so then it is read from
+ * the appearance itself (fill of a highlight, stroke of a line markup or ink).
+ */
+function annotColor(annot: number, s: number, u: (o: number) => number): string | undefined {
+  const rgb = () => `#${hex(u(0))}${hex(u(4))}${hex(u(8))}`;
+  if (M.FPDFAnnot_GetColor(annot, 0, s, s + 4, s + 8, s + 12)) return rgb();
+  const n = M.FPDFAnnot_GetObjectCount(annot);
+  for (let i = 0; i < n; i++) {
+    const obj = M.FPDFAnnot_GetObject(annot, i);
+    if (!obj || M.FPDFPageObj_GetType(obj) !== FPDF_PAGEOBJ_PATH) continue;
+    if (M.FPDFPageObj_GetFillColor(obj, s, s + 4, s + 8, s + 12) && u(12) > 0) return rgb();
+    if (M.FPDFPageObj_GetStrokeColor(obj, s, s + 4, s + 8, s + 12)) return rgb();
+  }
+  return undefined;
+}
+
+function pageAnnotations(d: Doc, pageIndex: number): Annotation[] {
+  return withTextPage(d, pageIndex, [], (page, text, norm) => {
+    const out: Annotation[] = [];
+    const n = M.FPDFPage_GetAnnotCount(page);
+    withScratch(32, (s) => {
+      const u = (o: number) => M.pdfium.getValue(s + o, 'i32') >>> 0;
+      const f = (o: number) => M.pdfium.getValue(s + o, 'float');
+      for (let i = 0; i < n; i++) {
+        const annot = M.FPDFPage_GetAnnot(page, i);
+        if (!annot) continue;
+        try {
+          const kind = ANNOT_KINDS[M.FPDFAnnot_GetSubtype(annot)];
+          if (!kind) continue;
+          const [l, t, r, b] = annotRect(annot);
+          const str = (key: string) => readUtf16((buf, len) => M.FPDFAnnot_GetStringValue(annot, key, buf, len));
+          const color = annotColor(annot, s, u);
+          // Text under each quad (one per line), in order.
+          const quotes: string[] = [];
+          const quads = M.FPDFAnnot_CountAttachmentPoints(annot);
+          for (let q = 0; q < quads; q++) {
+            if (!M.FPDFAnnot_GetAttachmentPoints(annot, q, s)) continue;
+            const xs = [0, 8, 16, 24].map(f);
+            const ys = [4, 12, 20, 28].map(f);
+            quotes.push(boundedText(text, Math.min(...xs), Math.max(...ys), Math.max(...xs), Math.min(...ys)).trim());
+          }
+          out.push({
+            page: pageIndex,
+            index: i,
+            kind,
+            rect: norm(l, t, r, b),
+            color,
+            contents: str('Contents'),
+            author: str('T'),
+            quote: quotes.filter(Boolean).join(' ').replace(/\s+/g, ' '),
+          });
+        } finally {
+          M.FPDFPage_CloseAnnot(annot);
+        }
+      }
+    });
+    return out;
+  });
+}
+
+function annotations(docId: number): Annotation[] {
+  const d = getDoc(docId);
+  return d.pageSizes.flatMap((_, i) => pageAnnotations(d, i));
+}
+
+function withPage<T>(d: Doc, pageIndex: number, fn: (page: number) => T): T {
+  const page = M.FPDF_LoadPage(d.ptr, pageIndex);
+  if (!page) throw new Error(`Could not load page ${pageIndex + 1}`);
+  try {
+    return fn(page);
+  } finally {
+    M.FPDF_ClosePage(page);
+  }
+}
+
+/** A highlight with one quad per selected line; PDFium generates its appearance (multiply-blended colour). */
+function addHighlight(docId: number, pageIndex: number, rects: NormRect[], color: string, contents?: string) {
+  const d = getDoc(docId);
+  withPage(d, pageIndex, (page) => {
+    const { toPage } = pageTransform(d, pageIndex, page);
+    const annot = M.FPDFPage_CreateAnnot(page, FPDF_ANNOT_HIGHLIGHT);
+    if (!annot) throw new Error('Could not create the highlight');
+    try {
+      setColor(annot, color);
+      const xs: number[] = [];
+      const ys: number[] = [];
+      withScratch(32, (s) => {
+        for (const r of rects) {
+          // Quad order as Acrobat writes it: top-left, top-right, bottom-left, bottom-right.
+          const pts = [toPage(r.x, r.y), toPage(r.x + r.w, r.y), toPage(r.x, r.y + r.h), toPage(r.x + r.w, r.y + r.h)];
+          pts.forEach(([x, y], k) => {
+            M.pdfium.setValue(s + k * 8, x, 'float');
+            M.pdfium.setValue(s + k * 8 + 4, y, 'float');
+            xs.push(x);
+            ys.push(y);
+          });
+          M.FPDFAnnot_AppendAttachmentPoints(annot, s);
+        }
+        [Math.min(...xs), Math.max(...ys), Math.max(...xs), Math.min(...ys)].forEach((v, k) => M.pdfium.setValue(s + k * 4, v, 'float'));
+        M.FPDFAnnot_SetRect(annot, s);
+      });
+      if (contents) setWide(annot, 'Contents', contents);
+      setWide(annot, 'M', pdfDate());
+      setWide(annot, 'NM', `tessel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    } finally {
+      M.FPDFPage_CloseAnnot(annot);
+    }
+  });
+  d.dirty = true;
+}
+
+function updateAnnot(docId: number, pageIndex: number, index: number, contents?: string, color?: string) {
+  const d = getDoc(docId);
+  withPage(d, pageIndex, (page) => {
+    const annot = M.FPDFPage_GetAnnot(page, index);
+    if (!annot) return;
+    try {
+      if (contents !== undefined) setWide(annot, 'Contents', contents);
+      if (color) {
+        // A new colour needs a new appearance: drop the old one and PDFium regenerates it.
+        M.FPDFAnnot_SetAP(annot, 0, 0);
+        setColor(annot, color);
+      }
+      setWide(annot, 'M', pdfDate());
+    } finally {
+      M.FPDFPage_CloseAnnot(annot);
+    }
+  });
+  d.dirty = true;
+}
+
+function removeAnnot(docId: number, pageIndex: number, index: number) {
+  const d = getDoc(docId);
+  withPage(d, pageIndex, (page) => M.FPDFPage_RemoveAnnot(page, index));
+  d.dirty = true;
+}
+
 const SAFE_URL = /^(https?:|mailto:)/i;
 
 function pageLinks(docId: number, pageIndex: number): PageLink[] {
@@ -798,6 +985,17 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: formFields(job.doc, job.page) });
     case 'setField':
       return post({ id: job.id, ok: true, result: setFormField(job.doc, job.page, job.index, job.value) });
+    case 'annots':
+      return post({ id: job.id, ok: true, result: annotations(job.doc) });
+    case 'addHighlight':
+      addHighlight(job.doc, job.page, job.rects, job.color, job.contents);
+      return post({ id: job.id, ok: true, result: null });
+    case 'updateAnnot':
+      updateAnnot(job.doc, job.page, job.index, job.contents, job.color);
+      return post({ id: job.id, ok: true, result: null });
+    case 'removeAnnot':
+      removeAnnot(job.doc, job.page, job.index);
+      return post({ id: job.id, ok: true, result: null });
     case 'save': {
       const bytes = save(job.doc);
       getDoc(job.doc).dirty = false;

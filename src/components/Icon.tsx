@@ -27,6 +27,7 @@ const paths = {
   down: 'M6.5 9.5 12 15l5.5-5.5',
   more: 'M6 12h.01M12 12h.01M18 12h.01',
   check: 'M5.5 12.5 10 17l8.5-9.5',
+  pencil: 'M4.5 19.5h4l10-10-4-4-10 10v4ZM13 7l4 4',
 } as const;
 
 export type IconName = keyof typeof paths;
