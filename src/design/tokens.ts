@@ -120,6 +120,7 @@ export const palettes: Record<ThemeName, Palette> = {
 
 export const fonts = {
   serif: 'Newsreader_500Medium',
+  serifRegular: 'Newsreader_400Regular',
   serifItalic: 'Newsreader_400Regular_Italic',
   serifSemi: 'Newsreader_600SemiBold',
   sans: 'Inter_400Regular',

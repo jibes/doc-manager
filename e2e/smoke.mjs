@@ -135,6 +135,36 @@ async function run(name, viewport, isMobile) {
   await page.getByLabel('Automatic').click();
   await page.keyboard.press('Escape');
 
+  // Text view: reflowed from the page you're on, footers gone, and back to the same page.
+  await page.getByTestId('page-label').click();
+  await page.getByTestId('page-input').fill('3');
+  await page.getByTestId('page-input').press('Enter');
+  await page.waitForTimeout(400);
+  await page.getByTestId('view-toggle').click();
+  await page.getByTestId('text-view').waitFor({ timeout: 15000 });
+  await page.waitForTimeout(800);
+  const textLabel = parseInt(await page.getByTestId('page-label').innerText(), 10);
+  const flowText = await page.getByTestId('text-view').innerText();
+  check(textLabel === 3 && flowText.includes('Finding your way'), `${name}: text view opens at page ${textLabel} with reflowed text`);
+  await shot('5b-text');
+  await page.getByTestId('view-toggle').click();
+  await page.waitForTimeout(800);
+  check(parseInt(await page.getByTestId('page-label').innerText(), 10) === 3, `${name}: back in page view at the same page`);
+  if (!isMobile) {
+    // Search hits live on pages: picking one from text view switches to page view.
+    await page.getByTestId('view-toggle').click();
+    await page.getByTestId('text-view').waitFor();
+    await page.getByTestId('open-search').click();
+    await page.getByTestId('search-input').fill('scrubber');
+    await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 10000 });
+    await page.getByTestId('search-input').press('Enter');
+    await page.waitForTimeout(800);
+    const backToPages = (await page.getByTestId('pages').count()) > 0 && (await page.getByTestId('text-view').count()) === 0;
+    check(backToPages, `${name}: picking a search hit from text view shows it in page view`);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('find-clear').click();
+  }
+
   // Spine scrubber: press and drag to 75%.
   const box = await page.getByTestId('scrubber').boundingBox();
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
@@ -151,7 +181,11 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('bookmark').click();
 
   // Reading list: the toggle switches to reading behaviour (progress in the page pill).
-  await page.getByTestId('reading-toggle').click();
+  // On narrow screens it lives in the More menu.
+  if (isMobile) {
+    await page.getByTestId('open-more').click();
+    await page.getByTestId('menu-reading').click();
+  } else await page.getByTestId('reading-toggle').click();
   await page.waitForTimeout(300);
   check(/%/.test(await page.getByTestId('page-label').innerText()), `${name}: reading-list document shows progress`);
   await page.getByTestId('back').click();
@@ -210,6 +244,34 @@ async function locked() {
   await ctx.close();
 }
 
+// Tagged PDFs reflow from their structure: headings kept, running header/footer (artifacts) dropped.
+async function tagged() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`tagged: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('view-toggle').click();
+  await page.getByTestId('text-view').waitFor({ timeout: 15000 });
+  await page.waitForTimeout(600);
+  const text = await page.getByTestId('text-view').innerText();
+  const ok = text.includes('Section 1.1') && !text.includes('running header') && !/^Page \d+$/m.test(text);
+  check(ok, 'tagged: text view keeps headings and drops running header/footer');
+  // The view choice is remembered per document (reload from home: CI's static server has no SPA fallback).
+  await page.getByTestId('back').click();
+  await page.getByTestId('recent-row').first().waitFor();
+  await page.reload();
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('text-view').waitFor({ timeout: 15000 }).then(
+    () => check(true, 'tagged: text view remembered after reload'),
+    () => check(false, 'tagged: text view remembered after reload'),
+  );
+  await ctx.close();
+}
+
 // Interface language follows the OS/browser locale.
 async function german() {
   const ctx = await browser.newContext({ locale: 'de-DE', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -228,6 +290,7 @@ async function german() {
 
 await german();
 await locked();
+await tagged();
 await run('desktop', { width: 1440, height: 900 }, false);
 await run('mobile', { width: 390, height: 844 }, true);
 await browser.close();

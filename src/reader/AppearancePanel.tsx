@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { t } from '@/i18n';
 import { IconButton, T, tick } from '@/components/primitives';
 import { fonts, palettes, radius, space, type Palette, type ThemeName } from '@/design/tokens';
-import { usePalette, usePrefs, type FitMode } from '@/state/prefs';
+import { usePalette, usePrefs, type FitMode, type TextFont, type TextLeading, type TextWidth } from '@/state/prefs';
 import { Panel } from './Panel';
 
 const PAGE_TINT: Record<ThemeName, string> = { paper: '#FFFFFF', sepia: '#F3E6CC', dusk: '#3A3A3C', night: '#1A1A1A' };
@@ -41,7 +41,109 @@ function Swatch({ name, selected, onPress }: { name: ThemeName | null; selected:
   );
 }
 
-export function AppearancePanel({ palette: p, zoom, onZoom, onClose }: { palette: Palette; zoom: number; onZoom: (z: number) => void; onClose: () => void }) {
+/** Segmented control used by the layout and text settings. */
+function Segment<K extends string>({
+  p,
+  value,
+  options,
+  onChange,
+}: {
+  p: Palette;
+  value: K;
+  options: [K, string][];
+  onChange: (k: K) => void;
+}) {
+  return (
+    <View style={[styles.segment, { backgroundColor: p.hairline }]}>
+      {options.map(([k, label]) => (
+        <Pressable
+          key={k}
+          accessibilityRole="radio"
+          accessibilityState={{ selected: value === k }}
+          onPress={() => onChange(k)}
+          style={[styles.segBtn, value === k && { backgroundColor: p.raised }]}
+        >
+          <T v="label" color={value === k ? p.ink : p.muted}>
+            {label}
+          </T>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function TextSettings({ p }: { p: Palette }) {
+  const { textFont, textScale, textLeading, textWidth, set } = usePrefs();
+  const scale = (d: number) => set({ textScale: Math.min(1.8, Math.max(0.75, Math.round((textScale + d) * 100) / 100)) });
+  return (
+    <>
+      <View style={{ gap: space.sm }}>
+        <T v="kicker" color={p.muted}>
+          {t.font}
+        </T>
+        <Segment<TextFont>
+          p={p}
+          value={textFont}
+          options={[
+            ['serif', t.serif],
+            ['sans', t.sans],
+          ]}
+          onChange={(k) => set({ textFont: k })}
+        />
+      </View>
+      <View style={{ gap: space.sm }}>
+        <T v="kicker" color={p.muted}>
+          {t.size}
+        </T>
+        <View style={styles.zoom}>
+          <IconButton icon="zoomOut" label={t.smaller} onPress={() => scale(-0.1)} disabled={textScale <= 0.75} testID="text-smaller" />
+          <Pressable onPress={() => set({ textScale: 1 })} accessibilityLabel={t.size} style={styles.zoomVal}>
+            <T v="numeral" style={{ fontSize: 15 }}>
+              {Math.round(textScale * 100)}%
+            </T>
+          </Pressable>
+          <IconButton icon="zoomIn" label={t.larger} onPress={() => scale(0.1)} disabled={textScale >= 1.8} testID="text-larger" />
+        </View>
+      </View>
+      <View style={{ gap: space.sm }}>
+        <T v="kicker" color={p.muted}>
+          {t.lineSpacing}
+        </T>
+        <Segment<TextLeading>
+          p={p}
+          value={textLeading}
+          options={(['compact', 'normal', 'relaxed'] as const).map((k) => [k, t.leading[k]])}
+          onChange={(k) => set({ textLeading: k })}
+        />
+      </View>
+      <View style={{ gap: space.sm }}>
+        <T v="kicker" color={p.muted}>
+          {t.width}
+        </T>
+        <Segment<TextWidth>
+          p={p}
+          value={textWidth}
+          options={(['narrow', 'medium', 'wide'] as const).map((k) => [k, t.widths[k]])}
+          onChange={(k) => set({ textWidth: k })}
+        />
+      </View>
+    </>
+  );
+}
+
+export function AppearancePanel({
+  palette: p,
+  view,
+  zoom,
+  onZoom,
+  onClose,
+}: {
+  palette: Palette;
+  view: 'page' | 'text';
+  zoom: number;
+  onZoom: (z: number) => void;
+  onClose: () => void;
+}) {
   const { theme, fit, set } = usePrefs();
   const fits: [FitMode, string][] = [
     ['width', t.fitWidth],
@@ -56,36 +158,41 @@ export function AppearancePanel({ palette: p, zoom, onZoom, onClose }: { palette
           ))}
         </View>
 
-        <View style={{ gap: space.sm }}>
-          <T v="kicker" color={p.muted}>{t.layout}</T>
-          <View style={[styles.segment, { backgroundColor: p.hairline }]}>
-            {fits.map(([k, label]) => (
-              <Pressable
-                key={k}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: fit === k }}
-                onPress={() => {
+        {view === 'text' ? (
+          <TextSettings p={p} />
+        ) : (
+          <>
+            <View style={{ gap: space.sm }}>
+              <T v="kicker" color={p.muted}>
+                {t.layout}
+              </T>
+              <Segment<FitMode>
+                p={p}
+                value={fit}
+                options={fits}
+                onChange={(k) => {
                   set({ fit: k });
                   onZoom(1);
                 }}
-                style={[styles.segBtn, fit === k && { backgroundColor: p.raised }]}
-              >
-                <T v="label" color={fit === k ? p.ink : p.muted}>{label}</T>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+              />
+            </View>
 
-        <View style={{ gap: space.sm }}>
-          <T v="kicker" color={p.muted}>{t.zoom}</T>
-          <View style={styles.zoom}>
-            <IconButton icon="zoomOut" label={t.zoomOut} onPress={() => onZoom(zoom / 1.2)} disabled={zoom <= 0.5} />
-            <Pressable onPress={() => onZoom(1)} accessibilityLabel={t.resetZoom} style={styles.zoomVal}>
-              <T v="numeral" style={{ fontSize: 15 }}>{Math.round(zoom * 100)}%</T>
-            </Pressable>
-            <IconButton icon="zoomIn" label={t.zoomIn} onPress={() => onZoom(zoom * 1.2)} disabled={zoom >= 4} />
-          </View>
-        </View>
+            <View style={{ gap: space.sm }}>
+              <T v="kicker" color={p.muted}>
+                {t.zoom}
+              </T>
+              <View style={styles.zoom}>
+                <IconButton icon="zoomOut" label={t.zoomOut} onPress={() => onZoom(zoom / 1.2)} disabled={zoom <= 0.5} />
+                <Pressable onPress={() => onZoom(1)} accessibilityLabel={t.resetZoom} style={styles.zoomVal}>
+                  <T v="numeral" style={{ fontSize: 15 }}>
+                    {Math.round(zoom * 100)}%
+                  </T>
+                </Pressable>
+                <IconButton icon="zoomIn" label={t.zoomIn} onPress={() => onZoom(zoom * 1.2)} disabled={zoom >= 4} />
+              </View>
+            </View>
+          </>
+        )}
       </View>
     </Panel>
   );

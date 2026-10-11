@@ -92,6 +92,7 @@ function handleFrom(r: OpenResult): DocHandle {
     },
     pageText: (page) => memo(textCache, page, () => client.call('text', { doc: r.doc, page })),
     links: (page) => memo(linkCache, page, () => client.call('links', { doc: r.doc, page })),
+    textLines: (pages) => client.call('lines', { doc: r.doc, pages }),
     close: () => void client.call('close', { doc: r.doc }).catch(() => {}),
   };
   docIds.set(handle, r.doc);

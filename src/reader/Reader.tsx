@@ -31,6 +31,7 @@ import { ContentsPanel, flattenOutline, type FlatOutline } from './ContentsPanel
 import { FindBar } from './FindBar';
 import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
 import { PageView } from './PageView';
+import { ReflowView, type ReflowApi } from './ReflowView';
 import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
@@ -48,7 +49,10 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const fit = usePrefs((s) => s.fit);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, toggleReading, markOpened } = useLibrary();
+  const { savePosition, toggleBookmark, toggleReading, markOpened, setView } = useLibrary();
+  // Page view shows the PDF as authored; text view reflows it (remembered per document).
+  const view = doc.view ?? 'page';
+  const textApiRef = useRef<ReflowApi | null>(null);
   // Reading-list documents get reading behaviour (immersive chrome, progress); everything else is a plain viewer.
   const readingMode = !!doc.reading;
 
@@ -62,7 +66,17 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const [editingPage, setEditingPage] = useState(false);
 
   // Position bookkeeping lives in refs: scroll events must not re-render the tree.
-  const pos = useRef(doc.position ?? { page: 0, offset: 0 });
+  const posRef = useRef(doc.position ?? { page: 0, offset: 0 });
+  // Where text view opens: the saved position at mount, then wherever page view was when switching.
+  const [textStart, setTextStart] = useState(() => ({ page: doc.position?.page ?? 0, y: doc.position?.offset ?? 0 }));
+  const switchView = useCallback(
+    (next: 'page' | 'text') => {
+      // Open on the page the reader sees (the indicator), keeping the in-page offset when it's the same page.
+      if (next === 'text') setTextStart({ page, y: posRef.current.page === page ? posRef.current.offset : 0 });
+      setView(doc.id, next);
+    },
+    [doc.id, setView, page],
+  );
   const scrollY = useRef(0);
   const restored = useRef(false);
   const lastDir = useRef({ y: 0, acc: 0 });
@@ -88,9 +102,9 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
 
   // Re-anchor to the saved position whenever geometry changes (first layout, zoom, fit, rotation).
   useLayoutEffect(() => {
-    if (!layout) return;
-    const y = scrollYFor(layout, pos.current.page, pos.current.offset);
-    cache.setFocus(pos.current.page);
+    if (!layout || view !== 'page') return;
+    const y = scrollYFor(layout, posRef.current.page, posRef.current.offset);
+    cache.setFocus(posRef.current.page);
     const go = () => list.current?.scrollToOffset({ offset: y, animated: false });
     // Ignore scroll events emitted while content resizes; they'd corrupt the anchor.
     restored.current = false;
@@ -100,7 +114,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       restored.current = true;
     });
     return () => cancelAnimationFrame(raf);
-  }, [layout, cache]);
+  }, [layout, cache, view]);
 
   const setZoom = useCallback((z: number) => setZoomRaw((old) => (Math.abs(clampZoom(z) - old) < 0.001 ? old : clampZoom(z))), []);
 
@@ -118,23 +132,16 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (!layout) return;
       const target = Math.min(Math.max(0, n), handle.pageCount - 1);
       cache.setFocus(target);
-      scrollTo(layout.offsets[target] - layout.padTop, animated);
+      if (view === 'text') textApiRef.current?.scrollToPage(target);
+      else scrollTo(layout.offsets[target] - layout.padTop, animated);
       setPage(target);
     },
-    [layout, handle.pageCount, scrollTo, cache],
+    [layout, handle.pageCount, scrollTo, cache, view],
   );
 
-  const onScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!layout || !vp || !restored.current) return;
-      const y = e.nativeEvent.contentOffset.y;
-      scrollY.current = y;
-      pos.current = positionAt(layout, y);
-      savePosition(doc.id, pos.current);
-      const rp = readingPage(layout, y, vp.h);
-      cache.setFocus(rp);
-      setPage((old) => (old === rp ? old : rp));
-      // Immersive (reading list only): hide chrome reading forward, reveal on a deliberate scroll back.
+  // Immersive (reading list only): hide chrome reading forward, reveal on a deliberate scroll back.
+  const trackDirection = useCallback(
+    (y: number) => {
       if (!readingMode) return;
       const d = lastDir.current;
       const delta = y - d.y;
@@ -143,7 +150,33 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (d.acc > 48 && y > 120) setChrome(false);
       else if (d.acc < -64) setChrome(true);
     },
-    [layout, vp, doc.id, savePosition, cache, readingMode],
+    [readingMode],
+  );
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!layout || !vp || !restored.current) return;
+      const y = e.nativeEvent.contentOffset.y;
+      scrollY.current = y;
+      posRef.current = positionAt(layout, y);
+      savePosition(doc.id, posRef.current);
+      const rp = readingPage(layout, y, vp.h);
+      cache.setFocus(rp);
+      setPage((old) => (old === rp ? old : rp));
+      trackDirection(y);
+    },
+    [layout, vp, doc.id, savePosition, cache, trackDirection],
+  );
+
+  // Text view reports the block at the top; it becomes the shared position.
+  const onTextPosition = useCallback(
+    (pg: number, y: number) => {
+      posRef.current = { page: pg, offset: y };
+      savePosition(doc.id, posRef.current);
+      cache.setFocus(pg);
+      setPage((old) => (old === pg ? old : pg));
+    },
+    [doc.id, savePosition, cache],
   );
 
   // ---------- search ----------
@@ -218,16 +251,36 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     [hits, layout, vp, scrollTo, cache],
   );
 
+  // Hits live on pages: picking one from text view switches to page view first.
+  const [pendingHit, setPendingHit] = useState<number | null>(null);
+  useEffect(() => {
+    if (pendingHit == null || view !== 'page' || !layout) return;
+    const raf = requestAnimationFrame(() => {
+      showHit(pendingHit);
+      setPendingHit(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [pendingHit, view, layout, showHit]);
+  const goToHit = useCallback(
+    (i: number) => {
+      if (view === 'text') {
+        setView(doc.id, 'page');
+        setPendingHit(i);
+      } else showHit(i);
+    },
+    [view, doc.id, setView, showHit],
+  );
+
   const stepHit = useCallback(
     (dir: 1 | -1) => {
       if (!hits.length) return;
       if (active < 0) {
         const first = hits.findIndex((h) => h.page >= page);
-        return showHit(dir === 1 ? Math.max(0, first) : (first <= 0 ? hits.length : first) - 1);
+        return goToHit(dir === 1 ? Math.max(0, first) : (first <= 0 ? hits.length : first) - 1);
       }
-      showHit((active + dir + hits.length) % hits.length);
+      goToHit((active + dir + hits.length) % hits.length);
     },
-    [hits, active, page, showHit],
+    [hits, active, page, goToHit],
   );
 
   // ---------- keyboard + wheel (web) ----------
@@ -264,6 +317,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         Home: () => goToPage(0),
         End: () => goToPage(handle.pageCount - 1),
         b: () => toggleBookmark(doc.id, page),
+        v: () => switchView(view === 'page' ? 'text' : 'page'),
         t: () => setPanel((x) => (x === 'contents' ? null : 'contents')),
       };
       const fn = keys[e.key];
@@ -297,7 +351,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery]);
+  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view]);
 
   // ---------- pinch (native) ----------
   const pinchScale = useSharedValue(1);
@@ -339,7 +393,16 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const [menu, setMenu] = useState(false);
   const mac = Platform.OS === 'web' && /Mac|iPhone|iPad/.test(navigator.platform);
   const key = (k: string) => (Platform.OS === 'web' ? `${mac ? '⌘' : 'Ctrl+'}${k}` : undefined);
+  // Narrow screens: the reading-list toggle moves into the menu to keep the title readable.
+  const narrow = winW < 520;
+  const readingItem: MenuItem = {
+    key: 'reading',
+    icon: readingMode ? 'readingOn' : 'readingAdd',
+    label: readingMode ? t.removeFromReadingList : t.addToReadingList,
+    onPress: () => toggleReading(doc.id),
+  };
   const menuItems: MenuItem[] = [
+    ...(narrow ? [readingItem] : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc).catch(() => {}) },
@@ -360,7 +423,21 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
 
   return (
     <View style={{ flex: 1, backgroundColor: p.canvas }} onLayout={onLayout} testID="reader">
-      {layout && vp && (
+      {vp && view === 'text' && (
+        <ReflowView
+          handle={handle}
+          palette={p}
+          width={vp.w}
+          padTop={insets.top + TOP_BAR}
+          padBottom={insets.bottom + BOTTOM_BAR}
+          initial={textStart}
+          onPosition={onTextPosition}
+          onScrollY={trackDirection}
+          onExit={() => switchView('page')}
+          apiRef={textApiRef}
+        />
+      )}
+      {layout && vp && view === 'page' && (
         <GestureDetector gesture={pinch}>
           <Animated.View style={[{ flex: 1 }, pinchStyle]}>
             <ScrollView
@@ -419,12 +496,20 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           </T>
         </View>
         <View style={{ flexDirection: 'row' }}>
+          {!narrow && (
+            <IconButton
+              icon={readingMode ? 'readingOn' : 'readingAdd'}
+              label={readingMode ? t.removeFromReadingList : t.addToReadingList}
+              active={readingMode}
+              onPress={() => toggleReading(doc.id)}
+              testID="reading-toggle"
+            />
+          )}
           <IconButton
-            icon={readingMode ? 'readingOn' : 'readingAdd'}
-            label={readingMode ? t.removeFromReadingList : t.addToReadingList}
-            active={readingMode}
-            onPress={() => toggleReading(doc.id)}
-            testID="reading-toggle"
+            icon={view === 'page' ? 'textView' : 'pageView'}
+            label={`${view === 'page' ? t.textView : t.pageView} (V)`}
+            onPress={() => switchView(view === 'page' ? 'text' : 'page')}
+            testID="view-toggle"
           />
           <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
           <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
@@ -541,7 +626,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           active={active}
           searching={searching}
           onPick={(i) => {
-            showHit(i);
+            goToHit(i);
             if (!wide) setPanel(null);
           }}
           onStep={stepHit}
@@ -549,7 +634,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         />
       )}
       {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
-      {panel === 'appearance' && <AppearancePanel palette={p} zoom={zoom} onZoom={setZoom} onClose={() => setPanel(null)} />}
+      {panel === 'appearance' && <AppearancePanel palette={p} view={view} zoom={zoom} onZoom={setZoom} onClose={() => setPanel(null)} />}
     </View>
   );
 }

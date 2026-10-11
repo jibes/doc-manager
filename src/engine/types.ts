@@ -30,6 +30,21 @@ export type SearchHit = {
 /** A run of text on one line, for the selectable text layer. */
 export type TextRun = { text: string; rect: NormRect; /** Last run on its line: copy inserts a line break after it. */ eol: boolean };
 
+/** A line fragment with typography, for the reflowed text view. Order is the PDF's reading order. */
+export type TextLine = {
+  text: string;
+  rect: NormRect;
+  /** Font size in points. */
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  /** Ends in a hyphen that splits a word across lines. */
+  hyphen: boolean;
+  /** Tagged PDFs: structure type (P, H1, LI, …) and element id grouping lines into blocks. */
+  role?: string;
+  sid?: number;
+};
+
 export type PageLink = { rect: NormRect } & ({ kind: 'page'; page: number } | { kind: 'url'; url: string });
 
 /** Thrown by open() for encrypted PDFs; `wrong` when a password was given but rejected. */
@@ -75,6 +90,8 @@ export interface DocHandle {
   pageText(page: number): Promise<TextRun[]>;
   /** Link annotations plus URLs detected in the text. */
   links(page: number): Promise<PageLink[]>;
+  /** Lines with typography for reflow, for a batch of pages. Engines without text extraction return null. */
+  textLines(pages: number[]): Promise<TextLine[][] | null>;
   close(): void;
 }
 

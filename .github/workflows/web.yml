@@ -27,6 +27,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npx eslint .
+      - run: npm test
       - run: npm run build:web
 
       # Smoke-test the exact artifact under its sub-path before publishing.

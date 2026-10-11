@@ -22,6 +22,8 @@ export type DocRecord = {
   bookmarks: number[];
   /** Present when the document is on the reading list; it then opens with reading behaviour. */
   reading?: { since: number; finishedAt?: number };
+  /** Last view used for this document: original pages or reflowed text. */
+  view?: 'page' | 'text';
 };
 
 /** Persistence port. Web: IndexedDB. Native: app documents directory. */

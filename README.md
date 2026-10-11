@@ -17,7 +17,7 @@ Live web app: https://jibes.github.io/doc-reader/
 |---|---|---|
 | Home — acquire, organise, resume | Open/picker, drag-and-drop, OS "Open with" (PWA File Handling), Recent list, reading list with progress + Finished, filter, remove (keeps the original) | Open in place without copying |
 | Viewer — render, navigate, find, act | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, scrubber with chapter marks, go-to-page, full-text search with persistent highlights and find bar, selectable text (web), internal + web links, password-protected PDFs (password kept for the session only), share / download / print (⌘S, ⌘P) | Text selection and links on native (phase 3: PDFium on all platforms) |
-| Reading | Reading list, immersive chrome, progress, bookmarks | Reflowed text view (phase 3) |
+| Reading | Reading list, immersive chrome, progress, bookmarks; **text view** (reflow) with font, size, line spacing and width settings, position shared with page view | Multi-column layouts, inline figures, OCR for scans |
 | Personalisation | Light, Sepia, Dark, Black, Auto; English and German (follows OS) | More languages |
 | Platform | Offline PWA, install button, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds |
 
@@ -30,6 +30,7 @@ src/components/     shared UI primitives, covers, empty state, drop zone
 src/design/         tokens: palettes, type scale, spacing, motion
 src/state/          zustand stores: library, prefs
 src/storage/        persistence port — index.web.ts (IndexedDB) | index.ts (expo-file-system)
+src/reflow/         text view: build.ts turns positioned lines into blocks (pure, unit-tested)
 src/engine/         DocumentEngine contract (types.ts)
   index.web.ts        → PDFium WASM in a Web Worker (src/engine/pdfium/worker.ts)
   index.ts            → native module modules/pdf-engine
@@ -37,6 +38,8 @@ modules/pdf-engine/ local Expo module — iOS: PDFKit (Swift), Android: PdfRende
 ```
 
 UI depends only on `src/engine/types.ts`. Platform files (`*.web.ts`) pick the implementation at bundle time.
+
+**Text view.** The worker extracts lines with typography (size, weight, hyphenation) and, for tagged PDFs, structure roles; untagged artifacts (running heads/footers) are dropped. `src/reflow/build.ts` removes repeated headers, footers and page numbers, detects body size and headings, splits paragraphs and lists, rejoins hyphenated words and paragraphs across pages, and reports scans with no text layer. Blocks keep their source page and position, so both views share one reading position.
 
 **Render pipeline.** `RasterCache` de-duplicates requests, refcounts cancellation, keeps ≤ 2 renders in flight and always starts the page closest to the reading position. Web rasters are `ImageBitmap`s transferred from the worker and drawn to `<canvas>`; theme tint is a GPU CSS filter, so switching theme never re-renders. Native rasters are cached JPEG files tinted with a blend-mode overlay.
 
@@ -47,7 +50,7 @@ npm install            # also builds the PDFium worker into public/engine
 npm run web            # dev server (http://localhost:8081)
 npm run ios|android    # dev build (needs Xcode / Android SDK; Expo Go can't load the native engine)
 npm run build:web      # production web export → dist/
-npm run typecheck && npx eslint .
+npm run typecheck && npx eslint . && npm test   # unit tests (vitest)
 npm run test:e2e       # Playwright smoke test; BASE=http://… to target another server
 npm run sample         # regenerate the bundled sample guide PDF (needs reportlab)
 node scripts/make-icons.mjs  # regenerate icons from the mark
