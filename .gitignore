@@ -42,8 +42,9 @@ example
 /ios
 /android
 
-# Generated PDFium worker + wasm (npm run engine)
+# Generated PDFium worker + wasm, OCR assets (npm run engine)
 public/engine/
+public/ocr/
 
 # e2e output
 e2e/out/

@@ -1,4 +1,5 @@
-// Bundles the PDFium worker + wasm into public/engine (served as static assets on web).
+// Bundles the PDFium worker + wasm into public/engine, and copies the on-device OCR
+// (Tesseract, LSTM builds + English/German models) into public/ocr. Served as static assets on web.
 import { build } from 'esbuild';
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -22,3 +23,22 @@ await build({
 const wasm = join(dirname(require.resolve('@embedpdf/pdfium/pdfium.wasm')), 'pdfium.wasm');
 copyFileSync(wasm, join(out, 'pdfium.wasm'));
 console.log('engine → public/engine');
+
+// OCR is loaded only when a reader asks to recognize a scanned PDF; self-hosted so no page image or request leaves the app's origin.
+const ocr = 'public/ocr';
+mkdirSync(join(ocr, 'lang'), { recursive: true });
+const pkg = (name) => dirname(require.resolve(`${name}/package.json`));
+for (const f of ['tesseract.min.js', 'worker.min.js']) copyFileSync(join(pkg('tesseract.js'), 'dist', f), join(ocr, f));
+for (const v of ['lstm', 'simd-lstm', 'relaxedsimd-lstm']) {
+  const f = `tesseract-core-${v}.wasm.js`;
+  copyFileSync(join(pkg('tesseract.js-core'), f), join(ocr, f));
+}
+for (const lang of ['eng', 'deu']) {
+  const f = `${lang}.traineddata.gz`;
+  copyFileSync(join(pkg(`@tesseract.js-data/${lang}`), '4.0.0_best_int', f), join(ocr, 'lang', f));
+}
+// Licences travel with the redistributed code (Apache-2.0); the models are Apache-2.0 from tesseract-ocr/tessdata.
+copyFileSync(join(pkg('tesseract.js'), 'LICENSE.md'), join(ocr, 'LICENSE-tesseract.js.md'));
+copyFileSync(join(pkg('tesseract.js-core'), 'LICENSE'), join(ocr, 'LICENSE-tesseract-core.txt'));
+for (const f of ['tesseract.min.js.LICENSE.txt', 'worker.min.js.LICENSE.txt']) copyFileSync(join(pkg('tesseract.js'), 'dist', f), join(ocr, f));
+console.log('ocr → public/ocr');

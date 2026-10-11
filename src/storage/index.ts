@@ -69,4 +69,7 @@ export const repo: LibraryRepo = {
     const f = cover(id);
     return f.exists ? f.uri : null;
   },
+  // No on-device OCR on native yet (see src/ocr), so nothing is ever stored.
+  loadOcr: async (_id, pageCount) => new Array(pageCount).fill(undefined),
+  saveOcr: async () => {},
 };

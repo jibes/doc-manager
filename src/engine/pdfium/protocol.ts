@@ -1,13 +1,13 @@
-import type { DocMetadata, OutlineItem, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
+import type { DocMetadata, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
 
 export type Request =
   | { id: number; type: 'open'; bytes: ArrayBuffer; password?: string }
-  | { id: number; type: 'render'; doc: number; page: number; width: number }
+  | { id: number; type: 'render'; doc: number; page: number; width: number; clip?: NormRect }
   | { id: number; type: 'cover'; doc: number; width: number }
   | { id: number; type: 'outline'; doc: number }
   | { id: number; type: 'text'; doc: number; page: number }
   | { id: number; type: 'links'; doc: number; page: number }
-  | { id: number; type: 'lines'; doc: number; pages: number[] }
+  | { id: number; type: 'layout'; doc: number; pages: number[] }
   | { id: number; type: 'search'; doc: number; query: string }
   | { id: number; type: 'cancel'; target: number }
   | { id: number; type: 'close'; doc: number };
@@ -26,7 +26,7 @@ export type ResultMap = {
   outline: OutlineItem[];
   text: TextRun[];
   links: PageLink[];
-  lines: TextLine[][];
+  layout: PageLayout[];
   search: null;
   cancel: null;
   close: null;

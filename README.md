@@ -17,7 +17,7 @@ Live web app: https://jibes.github.io/doc-reader/
 |---|---|---|
 | Home — acquire, organise, resume | Open/picker, drag-and-drop, OS "Open with" (PWA File Handling), Recent list, reading list with progress + Finished, filter, remove (keeps the original) | Open in place without copying |
 | Viewer — render, navigate, find, act | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, scrubber with chapter marks, go-to-page, full-text search with persistent highlights and find bar, selectable text (web), internal + web links, password-protected PDFs (password kept for the session only), share / download / print (⌘S, ⌘P) | Text selection and links on native (phase 3: PDFium on all platforms) |
-| Reading | Reading list, immersive chrome, progress, bookmarks; **text view** (reflow) with font, size, line spacing and width settings, position shared with page view | Multi-column layouts, inline figures, OCR for scans |
+| Reading | Reading list, immersive chrome, progress, bookmarks; **text view** (reflow) with font, size, line spacing and width settings, position shared with page view; multi-column layouts, inline figures and tables, search highlights; on-device OCR for scans (web) | Text view and OCR on native |
 | Personalisation | Light, Sepia, Dark, Black, Auto; English and German (follows OS) | More languages |
 | Platform | Offline PWA, install button, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds |
 
@@ -30,7 +30,8 @@ src/components/     shared UI primitives, covers, empty state, drop zone
 src/design/         tokens: palettes, type scale, spacing, motion
 src/state/          zustand stores: library, prefs
 src/storage/        persistence port — index.web.ts (IndexedDB) | index.ts (expo-file-system)
-src/reflow/         text view: build.ts turns positioned lines into blocks (pure, unit-tested)
+src/reflow/         text view: layout.ts (figures, tables, columns) + build.ts (blocks); pure, unit-tested
+src/ocr/            on-device text recognition — index.web.ts (Tesseract WASM, self-hosted) | index.ts (none yet)
 src/engine/         DocumentEngine contract (types.ts)
   index.web.ts        → PDFium WASM in a Web Worker (src/engine/pdfium/worker.ts)
   index.ts            → native module modules/pdf-engine
@@ -39,7 +40,7 @@ modules/pdf-engine/ local Expo module — iOS: PDFKit (Swift), Android: PdfRende
 
 UI depends only on `src/engine/types.ts`. Platform files (`*.web.ts`) pick the implementation at bundle time.
 
-**Text view.** The worker extracts lines with typography (size, weight, hyphenation) and, for tagged PDFs, structure roles; untagged artifacts (running heads/footers) are dropped. `src/reflow/build.ts` removes repeated headers, footers and page numbers, detects body size and headings, splits paragraphs and lists, rejoins hyphenated words and paragraphs across pages, and reports scans with no text layer. Blocks keep their source page and position, so both views share one reading position.
+**Text view.** The worker extracts lines with typography (size, weight, hyphenation) and, for tagged PDFs, structure roles; untagged artifacts (running heads/footers) are dropped. `src/reflow/build.ts` removes repeated headers, footers and page numbers, detects body size and headings, splits paragraphs and lists, rejoins hyphenated words and paragraphs across pages and columns, and reports scans with no text layer. The worker also reports images and clustered vector drawings; `src/reflow/layout.ts` keeps those that read as figures (with nearby labels and captions), detects tables (aligned short cells, or table tags) and shows both as sharp crops of the page, and finds column gutters to read multi-column pages column by column, with full-width bands in between. For scans, text view offers recognition with Tesseract running in its own worker (English, plus German for a German UI); models load from the app's own origin on first use, nothing is uploaded, and results are stored per page so recognition resumes and never repeats. Blocks keep their source page and position, so both views share one reading position.
 
 **Render pipeline.** `RasterCache` de-duplicates requests, refcounts cancellation, keeps ≤ 2 renders in flight and always starts the page closest to the reading position. Web rasters are `ImageBitmap`s transferred from the worker and drawn to `<canvas>`; theme tint is a GPU CSS filter, so switching theme never re-renders. Native rasters are cached JPEG files tinted with a blend-mode overlay.
 

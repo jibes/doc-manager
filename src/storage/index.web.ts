@@ -1,5 +1,6 @@
-import { createStore, del, get, set, values } from 'idb-keyval';
+import { createStore, del, delMany, get, getMany, keys, set, values } from 'idb-keyval';
 
+import type { TextLine } from '@/engine/types';
 import type { DocRecord, LibraryRepo } from './types';
 
 export * from './types';
@@ -8,7 +9,9 @@ export * from './types';
 const meta = createStore('quire-meta', 'docs');
 const files = createStore('quire-files', 'files');
 const covers = createStore('quire-covers', 'covers');
+const ocr = createStore('tessel-ocr', 'pages');
 const coverUrls = new Map<string, string>();
+const ocrKey = (id: string, page: number) => `${id}#${page}`;
 
 // Ask the browser not to evict the library under storage pressure.
 navigator.storage?.persist?.().catch(() => {});
@@ -17,7 +20,8 @@ export const repo: LibraryRepo = {
   list: () => values<DocRecord>(meta),
   put: (rec) => set(rec.id, rec, meta),
   async remove(id) {
-    await Promise.all([del(id, meta), del(id, files), del(id, covers)]);
+    const pages = (await keys<string>(ocr)).filter((k) => k.startsWith(`${id}#`));
+    await Promise.all([del(id, meta), del(id, files), del(id, covers), delMany(pages, ocr)]);
     const url = coverUrls.get(id);
     if (url) URL.revokeObjectURL(url);
     coverUrls.delete(id);
@@ -41,5 +45,9 @@ export const repo: LibraryRepo = {
     const url = URL.createObjectURL(blob);
     coverUrls.set(id, url);
     return url;
+  },
+  loadOcr: (id, pageCount) => getMany<TextLine[] | undefined>(Array.from({ length: pageCount }, (_, i) => ocrKey(id, i)), ocr),
+  async saveOcr(id, page, lines) {
+    await set(ocrKey(id, page), lines, ocr);
   },
 };

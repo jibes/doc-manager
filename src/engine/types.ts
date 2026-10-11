@@ -45,6 +45,12 @@ export type TextLine = {
   sid?: number;
 };
 
+/** A drawing on a page: one image, or a cluster of vector paths (chart, diagram). */
+export type Graphic = { rect: NormRect; image: boolean; /** Drawing objects merged into it. */ parts: number };
+
+/** What reflow needs from one page. */
+export type PageLayout = { lines: TextLine[]; graphics: Graphic[] };
+
 export type PageLink = { rect: NormRect } & ({ kind: 'page'; page: number } | { kind: 'url'; url: string });
 
 /** Thrown by open() for encrypted PDFs; `wrong` when a password was given but rejected. */
@@ -74,6 +80,8 @@ export type Raster =
 export type RenderOptions = {
   /** Target width in device pixels. */
   width: number;
+  /** Render only this region of the page; `width` then applies to the region. */
+  clip?: NormRect;
   signal?: AbortSignal;
 };
 
@@ -90,8 +98,8 @@ export interface DocHandle {
   pageText(page: number): Promise<TextRun[]>;
   /** Link annotations plus URLs detected in the text. */
   links(page: number): Promise<PageLink[]>;
-  /** Lines with typography for reflow, for a batch of pages. Engines without text extraction return null. */
-  textLines(pages: number[]): Promise<TextLine[][] | null>;
+  /** Lines with typography plus drawings, for reflow, for a batch of pages. Engines without text extraction return null. */
+  layout(pages: number[]): Promise<PageLayout[] | null>;
   close(): void;
 }
 

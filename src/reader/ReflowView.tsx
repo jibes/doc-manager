@@ -1,18 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  PixelRatio,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type TextStyle,
+} from 'react-native';
 
 import { Button, T } from '@/components/primitives';
 import { fonts, space, type Palette } from '@/design/tokens';
-import type { DocHandle } from '@/engine/types';
+import type { DocHandle, Raster, Size } from '@/engine/types';
 import { t } from '@/i18n';
 import { blockAt, type Block } from '@/reflow/build';
-import { useReflow } from '@/reflow/useReflow';
+import { recognizeText, useReflow, type OcrProgress } from '@/reflow/useReflow';
 import { usePrefs } from '@/state/prefs';
+import { RasterView } from './RasterView';
 
-export type ReflowApi = { scrollToPage: (page: number) => void };
+export type ReflowApi = {
+  scrollToPage: (page: number) => void;
+  /** Scroll to the block holding a search hit at this page position. */
+  showHit: (page: number, y: number) => void;
+};
 
 type Props = {
   handle: DocHandle;
+  docId: string;
+  /** Active search query: matches are highlighted in the text. */
+  query: string;
+  /** Tap on a figure: show it on its page (where it can be zoomed). */
+  onOpenPage: (page: number, y: number) => void;
   palette: Palette;
   width: number;
   padTop: number;
@@ -29,8 +50,8 @@ const LEADING = { compact: 1.38, normal: 1.58, relaxed: 1.8 } as const;
 const MEASURE = { narrow: 30, medium: 36, wide: 44 } as const;
 
 /** The document as reflowed text: one comfortable column, typography from the reader's settings. */
-export function ReflowView({ handle, palette: p, width, padTop, padBottom, initial, onPosition, onScrollY, onExit, apiRef }: Props) {
-  const state = useReflow(handle);
+export function ReflowView({ handle, docId, palette: p, onExit, ...rest }: Props) {
+  const state = useReflow(handle, docId);
 
   if (state.status === 'loading')
     return (
@@ -41,28 +62,46 @@ export function ReflowView({ handle, palette: p, width, padTop, padBottom, initi
         </T>
       </Centered>
     );
-  if (state.status !== 'ready' || state.reflow.status === 'no-text')
+  const back = <Button label={t.backToPageView} kind="quiet" icon="pageView" onPress={onExit} />;
+  if (state.status !== 'ready')
     return (
       <Centered>
-        <T v="body" color={p.inkSoft} style={{ textAlign: 'center', maxWidth: 420 }}>
-          {state.status === 'unsupported' ? t.textViewUnsupported : state.status === 'error' ? t.openFailed : t.noTextLayer}
-        </T>
-        <Button label={t.backToPageView} kind="quiet" icon="pageView" onPress={onExit} />
+        <Message palette={p}>{state.status === 'unsupported' ? t.textViewUnsupported : t.openFailed}</Message>
+        {back}
       </Centered>
     );
 
+  const { reflow, ocr, canOcr } = state;
+  if (reflow.status === 'no-text') {
+    if (ocr?.running)
+      return (
+        <Centered>
+          <ActivityIndicator color={p.muted} />
+          <T v="label" color={p.muted} testID="ocr-progress">
+            {t.ocrProgress(ocr.done, ocr.total)}
+          </T>
+        </Centered>
+      );
+    const message = ocr?.failed ? t.ocrFailed : ocr ? t.ocrNone : canOcr ? t.ocrOffer : t.noTextLayer;
+    return (
+      <Centered>
+        <Message palette={p}>{message}</Message>
+        {canOcr && (!ocr || ocr.failed) && (
+          <Button label={ocr ? t.ocrResume : t.ocrStart} icon="textView" onPress={() => recognizeText(handle)} testID="ocr-start" />
+        )}
+        {back}
+      </Centered>
+    );
+  }
+
+  return <Blocks blocks={reflow.blocks} handle={handle} palette={p} ocr={ocr} {...rest} />;
+}
+
+function Message({ palette: p, children }: { palette: Palette; children: string }) {
   return (
-    <Blocks
-      blocks={state.reflow.blocks}
-      palette={p}
-      width={width}
-      padTop={padTop}
-      padBottom={padBottom}
-      initial={initial}
-      onPosition={onPosition}
-      onScrollY={onScrollY}
-      apiRef={apiRef}
-    />
+    <T v="body" color={p.inkSoft} style={{ textAlign: 'center', maxWidth: 420 }}>
+      {children}
+    </T>
   );
 }
 
@@ -70,17 +109,34 @@ function Centered({ children }: { children: ReactNode }) {
   return <View style={styles.centered}>{children}</View>;
 }
 
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Figure size in the column: natural size up to the column, tables wider than it scroll sideways at a readable scale. */
+function figureBox(b: Block, sizes: Size[], column: number) {
+  const pg = sizes[b.page];
+  const r = b.rect!;
+  const natural = r.w * pg.width;
+  const aspect = (r.h * pg.height) / (r.w * pg.width);
+  const readable = natural * 1.2;
+  const width = Math.round(b.table && readable > column ? Math.min(readable, 1600) : Math.min(column, natural * 1.5));
+  return { width, height: Math.round(width * aspect), scroll: width > column };
+}
+
 function Blocks({
   blocks,
+  handle,
   palette: p,
   width,
   padTop,
   padBottom,
   initial,
+  query,
+  ocr,
   onPosition,
   onScrollY,
+  onOpenPage,
   apiRef,
-}: Omit<Props, 'handle' | 'onExit'> & { blocks: Block[] }) {
+}: Omit<Props, 'docId' | 'onExit'> & { blocks: Block[]; ocr?: OcrProgress }) {
   const { textFont, textScale, textLeading, textWidth } = usePrefs();
   const list = useRef<FlatList<Block>>(null);
   const size = Math.round((width < 600 ? 18 : 19) * textScale);
@@ -107,6 +163,10 @@ function Blocks({
           return mark + h(1.08, space.md + space.sm);
         case 'label':
           return mark + size + space.xl - space.sm;
+        case 'figure':
+          return mark + figureBox(b, handle.pageSizes, column).height + space.lg * 2;
+        case 'caption':
+          return mark + lines(b.text, 0.85) * Math.round(size * 0.85 * 1.4) + space.lg;
         default:
           return mark + lines(b.text, b.kind === 'li' ? 1.08 : 1) * lineHeight + lineHeight * (b.kind === 'li' ? 0.35 : 0.75);
       }
@@ -118,7 +178,7 @@ function Blocks({
       y += h;
     }
     return { heights, offsets };
-  }, [blocks, size, lineHeight, column, textFont, headerH]);
+  }, [blocks, size, lineHeight, column, textFont, headerH, handle.pageSizes]);
 
   const scrollToIndex = useCallback(
     // Land the block just below the top bar.
@@ -126,12 +186,28 @@ function Blocks({
     [padTop],
   );
 
+  // Search matches: highlighted in place; a hit maps to the block on its page that holds the query,
+  // nearest at or above the hit (blocks in column order aren't sorted by y).
+  const marks = useMemo(() => (query.length >= 2 ? new RegExp(`(${escape(query)})`, 'gi') : null), [query]);
   useEffect(() => {
-    apiRef.current = { scrollToPage: (page) => scrollToIndex(blockAt(blocks, page, 0)) };
+    const has = query.length >= 2 ? new RegExp(escape(query), 'i') : null;
+    const showHit = (page: number, y: number) => {
+      let best = blockAt(blocks, page, y);
+      let bestD = Infinity;
+      for (let i = blockAt(blocks, page, 0); has && i < blocks.length && blocks[i].page <= page; i++) {
+        const b = blocks[i];
+        if (!has.test(b.text)) continue;
+        const top = b.page < page ? b.y - 1 : b.y;
+        const d = top <= y + 0.005 ? y - top : 1 + top - y;
+        if (d < bestD) [best, bestD] = [i, d];
+      }
+      scrollToIndex(best);
+    };
+    apiRef.current = { scrollToPage: (page) => scrollToIndex(blockAt(blocks, page, 0)), showHit };
     return () => {
       apiRef.current = null;
     };
-  }, [apiRef, blocks, scrollToIndex]);
+  }, [apiRef, blocks, scrollToIndex, query]);
 
   // Open where the page view was.
   const start = useMemo(() => blockAt(blocks, initial.page, initial.y), [blocks, initial.page, initial.y]);
@@ -181,9 +257,22 @@ function Blocks({
       initialNumToRender={12}
       windowSize={9}
       ListHeaderComponent={<View style={{ height: headerH }} />}
+      ListFooterComponent={
+        ocr ? (
+          <View style={[styles.ocrNote, { width: column, borderColor: p.hairline }]}>
+            {ocr.running && <ActivityIndicator color={p.muted} size="small" />}
+            <T v="label" color={p.muted} style={{ flex: 1 }} testID={ocr.running ? 'ocr-progress' : undefined}>
+              {ocr.running ? t.ocrProgress(ocr.done, ocr.total) : ocr.failed ? t.ocrFailed : t.ocrNote}
+            </T>
+            {ocr.failed && <Button label={t.ocrResume} kind="quiet" onPress={() => recognizeText(handle)} />}
+          </View>
+        ) : null
+      }
       contentContainerStyle={{ paddingBottom: padBottom + space.xxxl, alignItems: 'center' }}
       renderItem={({ item, index }) => {
         const newPage = index === 0 || blocks[index - 1].page !== item.page;
+        const mark: TextStyle = { backgroundColor: p.mark };
+        const text = (s: string) => highlight(s, marks, mark);
         const style =
           item.kind === 'h1'
             ? [heading(1.7, fonts.sansSemi), styles.h1]
@@ -213,9 +302,18 @@ function Blocks({
                   {item.marker ?? '•'}
                 </T>
                 <T selectable style={{ flex: 1, fontFamily: family, fontSize: size, lineHeight, color: p.ink }}>
-                  {item.text}
+                  {text(item.text)}
                 </T>
               </View>
+            ) : item.kind === 'figure' ? (
+              <Figure handle={handle} block={item} box={figureBox(item, handle.pageSizes, column)} column={column} palette={p} onOpen={onOpenPage} />
+            ) : item.kind === 'caption' ? (
+              <T
+                selectable
+                style={[styles.caption, { fontFamily: fonts.sans, fontSize: Math.round(size * 0.85), lineHeight: Math.round(size * 0.85 * 1.4), color: p.inkSoft }]}
+              >
+                {text(item.text)}
+              </T>
             ) : (
               <T
                 selectable
@@ -225,7 +323,7 @@ function Blocks({
                   item.kind === 'quote' && [styles.quote, { borderColor: p.hairline, marginBottom: lineHeight * 0.75 }],
                 ]}
               >
-                {item.text}
+                {text(item.text)}
               </T>
             )}
           </View>
@@ -235,7 +333,84 @@ function Blocks({
   );
 }
 
+function highlight(s: string, re: RegExp | null, style: TextStyle): ReactNode {
+  if (!re) return s;
+  const parts = s.split(re);
+  if (parts.length === 1) return s;
+  // split() with a capture group puts the matches at odd indices.
+  return parts.map((part, i) =>
+    i % 2 ? (
+      <T key={i} style={style}>
+        {part}
+      </T>
+    ) : (
+      part
+    ),
+  );
+}
+
+/** A figure or table: that region of the page, rendered sharp for this width, tinted like pages. */
+function Figure({
+  handle,
+  block,
+  box,
+  column,
+  palette: p,
+  onOpen,
+}: {
+  handle: DocHandle;
+  block: Block;
+  box: { width: number; height: number; scroll: boolean };
+  column: number;
+  palette: Palette;
+  onOpen: (page: number, y: number) => void;
+}) {
+  const [raster, setRaster] = useState<Raster | undefined>(undefined);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    handle.renderPage(block.page, { width: Math.round(box.width * PixelRatio.get()), clip: block.rect, signal: ctrl.signal }).then(setRaster, () => {});
+    return () => ctrl.abort();
+  }, [handle, block, box.width]);
+  // The canvas keeps its pixels; the bitmap can go once replaced or unmounted.
+  useEffect(() => () => void (raster?.kind === 'bitmap' && raster.bitmap.close()), [raster]);
+
+  const label = block.text ? `${block.table ? t.table : t.figure}: ${block.text}` : block.table ? t.table : t.figure;
+  const image = (
+    <Pressable
+      onPress={() => onOpen(block.page, block.y)}
+      accessibilityRole="image"
+      accessibilityLabel={label}
+      accessibilityHint={t.showOnPage(block.page + 1)}
+      testID="figure"
+      style={{ width: box.width, height: box.height, backgroundColor: '#fff', borderRadius: 2, overflow: 'hidden' }}
+    >
+      <RasterView raster={raster} filter={p.page.cssFilter} blend={p.page.blend} />
+    </Pressable>
+  );
+  return (
+    <View style={styles.figure}>
+      {box.scroll ? (
+        <ScrollView horizontal style={{ width: column }} showsHorizontalScrollIndicator>
+          {image}
+        </ScrollView>
+      ) : (
+        image
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  figure: { marginVertical: space.lg, alignItems: 'center' },
+  caption: { marginTop: -space.sm, marginBottom: space.lg },
+  ocrNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    marginTop: space.xl,
+    paddingTop: space.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.lg, padding: space.xl },
   h1: { marginTop: space.xl, marginBottom: space.lg, letterSpacing: -0.6 },
   h2: { marginTop: space.lg, marginBottom: space.md, letterSpacing: -0.3 },
