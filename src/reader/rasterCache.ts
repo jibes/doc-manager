@@ -40,7 +40,7 @@ export class RasterCache {
   private px = 0;
   private focus = 0;
 
-  constructor(private handle: DocHandle) {}
+  constructor(readonly handle: DocHandle) {}
 
   private key = (page: number, width: number) => `${page}@${width}`;
 

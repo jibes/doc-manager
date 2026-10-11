@@ -16,7 +16,7 @@ export default function ReadScreen() {
   const p = usePalette();
   const { loaded, load } = useLibrary();
   const doc = useLibrary((s) => s.docs.find((d) => d.id === id));
-  const state = useDocument(id);
+  const state = useDocument(id, doc?.fileName);
   const [slow, setSlow] = useState(false);
 
   useEffect(() => {

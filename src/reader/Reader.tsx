@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -19,7 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { t } from '@/i18n';
 import { IconButton, T } from '@/components/primitives';
 import { fonts, radius, space } from '@/design/tokens';
-import type { DocHandle, SearchHit } from '@/engine/types';
+import type { DocHandle, PageLink, SearchHit } from '@/engine/types';
+import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
 import { goBack } from '@/lib/nav';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -29,6 +31,7 @@ import { ContentsPanel, flattenOutline, type FlatOutline } from './ContentsPanel
 import { FindBar } from './FindBar';
 import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
 import { PageView } from './PageView';
+import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Scrubber } from './Scrubber';
@@ -148,10 +151,13 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [active, setActive] = useState(-1);
   const [searching, setSearching] = useState(false);
+  // Per-page hits, updated incrementally: only pages in a new batch get new arrays, so other PageViews skip re-rendering.
+  const [hitsByPage, setHitsByPage] = useState(() => new Map<number, SearchHit[]>());
 
   const onQuery = useCallback((q: string) => {
     setQuery(q);
     setHits([]);
+    setHitsByPage(new Map());
     setActive(-1);
   }, []);
 
@@ -159,26 +165,44 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     const q = query.trim();
     if (q.length < 2) return;
     const ctrl = new AbortController();
+    // Results stream in per 8 pages; coalesce them into one state update per frame.
+    let pending: SearchHit[] = [];
+    let raf = 0;
+    const flush = () => {
+      raf = 0;
+      const batch = pending;
+      pending = [];
+      if (ctrl.signal.aborted || !batch.length) return;
+      setHits((h) => [...h, ...batch]);
+      setHitsByPage((prev) => {
+        const m = new Map(prev);
+        for (const h of batch) m.set(h.page, [...(m.get(h.page) ?? []), h]);
+        return m;
+      });
+    };
     const t = setTimeout(() => {
       setSearching(true);
       handle
-        .search(q, (batch) => !ctrl.signal.aborted && setHits((h) => [...h, ...batch]), ctrl.signal)
+        .search(
+          q,
+          (batch) => {
+            pending.push(...batch);
+            raf ||= requestAnimationFrame(flush);
+          },
+          ctrl.signal,
+        )
         .catch(() => {})
         .finally(() => !ctrl.signal.aborted && setSearching(false));
     }, 200);
     return () => {
       clearTimeout(t);
+      cancelAnimationFrame(raf);
       ctrl.abort();
       setSearching(false);
     };
   }, [query, handle]);
 
   // Highlights persist while a query is active, panel open or not — like find-in-page elsewhere.
-  const hitsByPage = useMemo(() => {
-    const m = new Map<number, SearchHit[]>();
-    for (const h of hits) m.set(h.page, [...(m.get(h.page) ?? []), h]);
-    return m;
-  }, [hits]);
   const searchActive = query.trim().length >= 2;
 
   const showHit = useCallback(
@@ -212,6 +236,8 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       const typing = (e.target as HTMLElement)?.tagName === 'INPUT';
+      if (mod && e.key === 'p') return e.preventDefault(), void printDoc(doc).catch(() => {});
+      if (mod && e.key === 's') return e.preventDefault(), void downloadDoc(doc).catch(() => {});
       if (mod && e.key === 'f') {
         e.preventDefault();
         setChrome(true);
@@ -271,7 +297,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc.id, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery]);
+  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery]);
 
   // ---------- pinch (native) ----------
   const pinchScale = useSharedValue(1);
@@ -304,9 +330,28 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const chapters = useMemo(() => (outline ?? []).filter((o) => o.depth === 0 && o.page >= 0), [outline]);
   const wide = isWide(winW);
   const onPagePress = useCallback(() => {
+    // Finishing a text selection is a click too; don't treat it as a tap on the page.
+    if (Platform.OS === 'web' && window.getSelection()?.toString()) return;
     if (panel && !wide) return setPanel(null);
     if (readingMode) setChrome((c) => !c);
   }, [panel, wide, readingMode]);
+
+  const [menu, setMenu] = useState(false);
+  const mac = Platform.OS === 'web' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const key = (k: string) => (Platform.OS === 'web' ? `${mac ? '⌘' : 'Ctrl+'}${k}` : undefined);
+  const menuItems: MenuItem[] = [
+    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc).catch(() => {}) },
+    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
+    { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc).catch(() => {}) },
+  ];
+
+  const onLink = useCallback(
+    (l: PageLink) => {
+      if (l.kind === 'page') goToPage(l.page);
+      else Linking.openURL(l.url).catch(() => {});
+    },
+    [goToPage],
+  );
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -344,6 +389,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
                       hits={hitsByPage.get(item)}
                       activeHit={hits[active]}
                       onPress={onPagePress}
+                      onLink={onLink}
                     />
                   </View>
                 )}
@@ -383,6 +429,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
           <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
+          <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
         </View>
       </Animated.View>
 
@@ -501,6 +548,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           onClose={() => setPanel(null)}
         />
       )}
+      {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
       {panel === 'appearance' && <AppearancePanel palette={p} zoom={zoom} onZoom={setZoom} onClose={() => setPanel(null)} />}
     </View>
   );

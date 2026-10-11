@@ -27,6 +27,26 @@ export type SearchHit = {
   matchLength: number;
 };
 
+/** A run of text on one line, for the selectable text layer. */
+export type TextRun = { text: string; rect: NormRect; /** Last run on its line: copy inserts a line break after it. */ eol: boolean };
+
+export type PageLink = { rect: NormRect } & ({ kind: 'page'; page: number } | { kind: 'url'; url: string });
+
+/** Thrown by open() for encrypted PDFs; `wrong` when a password was given but rejected. */
+export class PasswordError extends Error {
+  constructor(readonly wrong: boolean) {
+    super(wrong ? 'password-wrong' : 'password-required');
+    this.name = 'PasswordError';
+  }
+}
+
+/** Engines report password failures as messages across threads/bridges; normalise them here. */
+export function asPasswordError(e: unknown): PasswordError | null {
+  if (e instanceof PasswordError) return e;
+  const m = e instanceof Error ? e.message : String(e);
+  return /password-wrong/.test(m) ? new PasswordError(true) : /password-required/.test(m) ? new PasswordError(false) : null;
+}
+
 export type DocSource =
   | { kind: 'bytes'; bytes: ArrayBuffer }
   | { kind: 'uri'; uri: string };
@@ -51,11 +71,15 @@ export interface DocHandle {
   outline(): Promise<OutlineItem[]>;
   /** Streams hits per page via onHits; resolves when done or aborted. */
   search(query: string, onHits: (hits: SearchHit[]) => void, signal?: AbortSignal): Promise<void>;
+  /** Selectable text, line by line. Engines without text extraction return []. */
+  pageText(page: number): Promise<TextRun[]>;
+  /** Link annotations plus URLs detected in the text. */
+  links(page: number): Promise<PageLink[]>;
   close(): void;
 }
 
 export interface DocumentEngine {
-  open(source: DocSource): Promise<DocHandle>;
+  open(source: DocSource, password?: string): Promise<DocHandle>;
   /** Encoded cover image of page 1 for the library (Blob on web, file URI on native). */
-  renderCover(source: DocSource, width: number): Promise<{ cover: Blob | string; handle: DocHandle }>;
+  renderCover(source: DocSource, width: number, password?: string): Promise<{ cover: Blob | string; handle: DocHandle }>;
 }

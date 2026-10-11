@@ -2,6 +2,7 @@ package expo.modules.pdfengine
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.pdf.LoadParams
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
@@ -38,14 +39,20 @@ class PdfEngineModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PdfEngine")
 
-    AsyncFunction("open") { uri: String ->
+    AsyncFunction("open") { uri: String, password: String? ->
       val path = Uri.parse(uri).path ?: throw OpenFailedException("Invalid file URI.")
       val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+      // Messages carry the tokens src/engine/types.ts#asPasswordError looks for.
       val renderer = try {
-        PdfRenderer(pfd)
+        if (!password.isNullOrEmpty() && Build.VERSION.SDK_INT >= 35) {
+          PdfRenderer(pfd, LoadParams.Builder().setPassword(password).build())
+        } else {
+          PdfRenderer(pfd)
+        }
       } catch (e: SecurityException) {
         pfd.close()
-        throw OpenFailedException("This PDF is password protected.")
+        // Before API 35 PdfRenderer can't take a password at all.
+        throw OpenFailedException(if (password.isNullOrEmpty() || Build.VERSION.SDK_INT < 35) "password-required" else "password-wrong")
       } catch (e: Exception) {
         pfd.close()
         throw OpenFailedException("Could not open PDF.")

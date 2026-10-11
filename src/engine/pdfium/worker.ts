@@ -5,7 +5,7 @@
  */
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
-import type { OutlineItem, SearchHit, Size } from '../types';
+import type { NormRect, OutlineItem, PageLink, SearchHit, Size, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -14,6 +14,8 @@ const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // emit RGBA instead of BGRA
 const FPDFBitmap_BGRA = 4;
 const PDFACTION_GOTO = 1;
+const PDFACTION_URI = 3;
+const FPDF_ERR_PASSWORD = 4;
 const MAX_DIM = 8192;
 const MAX_PIXELS = 32e6;
 const SEARCH_PAGES_PER_SLICE = 8;
@@ -73,15 +75,17 @@ function getDoc(id: number): Doc {
 
 // ---------- operations ----------
 
-function open(bytes: ArrayBuffer): OpenResult {
+function open(bytes: ArrayBuffer, password = ''): OpenResult {
   const len = bytes.byteLength;
   const buf = malloc(len);
   heap().set(new Uint8Array(bytes), buf);
-  const ptr = M.FPDF_LoadMemDocument(buf, len, '');
+  const ptr = M.FPDF_LoadMemDocument(buf, len, password);
   if (!ptr) {
     free(buf);
     const code = M.FPDF_GetLastError();
-    throw new Error(code === 4 ? 'This PDF is password protected.' : `Could not open PDF (error ${code}).`);
+    // Message tokens are parsed by asPasswordError on the main thread.
+    if (code === FPDF_ERR_PASSWORD) throw new Error(password ? 'password-wrong' : 'password-required');
+    throw new Error(`Could not open PDF (error ${code}).`);
   }
   const pageCount = M.FPDF_GetPageCount(ptr);
   const pageSizes: Size[] = withScratch(8, (s) => {
@@ -214,6 +218,139 @@ function searchPage(d: Doc, pageIndex: number, textPtr: number): SearchHit[] {
   return hits;
 }
 
+/**
+ * Opens a page + text page and hands `fn` a converter from page space to normalized
+ * top-left rects (rotation and crop box handled by PageToDevice).
+ */
+function withTextPage<T>(d: Doc, pageIndex: number, fallback: T, fn: (page: number, text: number, norm: (l: number, t: number, r: number, b: number) => NormRect) => T): T {
+  const page = M.FPDF_LoadPage(d.ptr, pageIndex);
+  if (!page) return fallback;
+  const text = M.FPDFText_LoadPage(page);
+  const { width, height } = d.pageSizes[pageIndex];
+  const DW = 10000;
+  const DH = Math.round((DW * height) / width);
+  try {
+    if (!text) return fallback;
+    return withScratch(8, (s) => {
+      const dev = (x: number, y: number) => {
+        M.FPDF_PageToDevice(page, 0, 0, DW, DH, 0, x, y, s, s + 4);
+        return [M.pdfium.getValue(s, 'i32') / DW, M.pdfium.getValue(s + 4, 'i32') / DH];
+      };
+      const norm = (l: number, t: number, r: number, b: number): NormRect => {
+        const [x0, y0] = dev(l, t);
+        const [x1, y1] = dev(r, b);
+        return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+      };
+      return fn(page, text, norm);
+    });
+  } finally {
+    if (text) M.FPDFText_ClosePage(text);
+    M.FPDF_ClosePage(page);
+  }
+}
+
+/** Groups characters into same-line runs for the selectable text layer. */
+function pageText(docId: number, pageIndex: number): TextRun[] {
+  const d = getDoc(docId);
+  return withTextPage(d, pageIndex, [], (_page, text, norm) => {
+    const runs: TextRun[] = [];
+    const n = M.FPDFText_CountChars(text);
+    let cur: (TextRun & { right: number }) | null = null;
+    const flush = (eol: boolean) => {
+      if (cur && cur.text.trim()) runs.push({ text: cur.text.replace(/\s+$/, ''), rect: cur.rect, eol });
+      cur = null;
+    };
+    withScratch(16, (box) => {
+      for (let i = 0; i < n; i++) {
+        const code = M.FPDFText_GetUnicode(text, i);
+        const ch = String.fromCharCode(code);
+        if (ch === '\r' || ch === '\n') {
+          flush(true);
+          continue;
+        }
+        // FS_RECTF {left, top, right, bottom}; the loose box spans the font's ascent..descent.
+        const has = M.FPDFText_GetLooseCharBox(text, i, box);
+        const [l, t, r, b] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(box + o, 'float'));
+        if (!has || r <= l || t <= b) {
+          if (cur && ch === ' ') cur.text += ' ';
+          continue;
+        }
+        const rc = norm(l, t, r, b);
+        const c = cur as (TextRun & { right: number }) | null;
+        const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
+        const gap = c ? rc.x - c.right : 0;
+        if (c && sameLine && gap < c.rect.h * 1.5 && gap > -c.rect.h) {
+          if (gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+          c.text += ch;
+          const x1 = Math.max(c.right, rc.x + rc.w);
+          const y0 = Math.min(c.rect.y, rc.y);
+          const y1 = Math.max(c.rect.y + c.rect.h, rc.y + rc.h);
+          c.rect = { x: c.rect.x, y: y0, w: x1 - c.rect.x, h: y1 - y0 };
+          c.right = x1;
+        } else {
+          flush(!!c && !sameLine);
+          cur = { text: ch, rect: rc, eol: false, right: rc.x + rc.w };
+        }
+      }
+    });
+    flush(true);
+    return runs;
+  });
+}
+
+const SAFE_URL = /^(https?:|mailto:)/i;
+
+function pageLinks(docId: number, pageIndex: number): PageLink[] {
+  const d = getDoc(docId);
+  return withTextPage(d, pageIndex, [], (page, text, norm) => {
+    const out: PageLink[] = [];
+    withScratch(24, (s) => {
+      const [pos, link, rect] = [s, s + 4, s + 8];
+      M.pdfium.setValue(pos, 0, 'i32');
+      // Annotation links: internal destinations and URI actions.
+      while (M.FPDFLink_Enumerate(page, pos, link)) {
+        const l = M.pdfium.getValue(link, 'i32');
+        if (!M.FPDFLink_GetAnnotRect(l, rect)) continue;
+        const [x0, y0, x1, y1] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(rect + o, 'float'));
+        const r = norm(Math.min(x0, x1), Math.max(y0, y1), Math.max(x0, x1), Math.min(y0, y1));
+        let dest = M.FPDFLink_GetDest(d.ptr, l);
+        const action = dest ? 0 : M.FPDFLink_GetAction(l);
+        const type = action ? M.FPDFAction_GetType(action) : 0;
+        if (!dest && type === PDFACTION_GOTO) dest = M.FPDFAction_GetDest(d.ptr, action);
+        if (dest) {
+          const target = M.FPDFDest_GetDestPageIndex(d.ptr, dest);
+          if (target >= 0) out.push({ kind: 'page', page: target, rect: r });
+        } else if (type === PDFACTION_URI) {
+          const n = M.FPDFAction_GetURIPath(d.ptr, action, 0, 0);
+          const url = n > 1 ? withScratch(n, (b) => (M.FPDFAction_GetURIPath(d.ptr, action, b, n), M.pdfium.UTF8ToString(b))) : '';
+          if (SAFE_URL.test(url)) out.push({ kind: 'url', url, rect: r });
+        }
+      }
+    });
+    // Plain-text URLs, unless an annotation already covers them.
+    const web = M.FPDFLink_LoadWebLinks(text);
+    if (web) {
+      withScratch(32, (s) => {
+        for (let i = 0; i < M.FPDFLink_CountWebLinks(web); i++) {
+          const n = M.FPDFLink_GetURL(web, i, 0, 0);
+          if (n <= 1) continue;
+          const url = withScratch(n * 2, (b) => (M.FPDFLink_GetURL(web, i, b, n), M.pdfium.UTF16ToString(b)));
+          if (!SAFE_URL.test(url)) continue;
+          for (let j = 0; j < M.FPDFLink_CountRects(web, i); j++) {
+            M.FPDFLink_GetRect(web, i, j, s, s + 8, s + 16, s + 24);
+            const [l, t, r2, b] = [0, 8, 16, 24].map((o) => M.pdfium.getValue(s + o, 'double'));
+            const rc = norm(l, t, r2, b);
+            const covered = out.some((o) => rc.x < o.rect.x + o.rect.w && rc.x + rc.w > o.rect.x && rc.y < o.rect.y + o.rect.h && rc.y + rc.h > o.rect.y);
+            if (!covered) out.push({ kind: 'url', url, rect: rc });
+          }
+        }
+      });
+      M.FPDFLink_CloseWebLinks(web);
+    }
+    return out;
+  });
+}
+
 /** Runs one slice; returns true when the search is finished. */
 function searchSlice(job: SearchJob): boolean {
   const d = getDoc(job.doc);
@@ -261,7 +398,7 @@ function releaseSearch(job: Job) {
 async function run(job: Job) {
   switch (job.type) {
     case 'open': {
-      const r = open(job.bytes);
+      const r = open(job.bytes, job.password);
       return post({ id: job.id, ok: true, result: r });
     }
     case 'render': {
@@ -272,6 +409,10 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: await cover(job.doc, job.width) });
     case 'outline':
       return post({ id: job.id, ok: true, result: outline(job.doc) });
+    case 'text':
+      return post({ id: job.id, ok: true, result: pageText(job.doc, job.page) });
+    case 'links':
+      return post({ id: job.id, ok: true, result: pageLinks(job.doc, job.page) });
     case 'close':
       close(job.doc);
       return post({ id: job.id, ok: true, result: null });

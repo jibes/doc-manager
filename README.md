@@ -16,7 +16,7 @@ Live web app: https://jibes.github.io/doc-reader/
 | Domain | Shipped | Next |
 |---|---|---|
 | Home — acquire, organise, resume | Open/picker, drag-and-drop, OS "Open with" (PWA File Handling), Recent list, reading list with progress + Finished, filter, remove (keeps the original) | Open in place without copying |
-| Viewer — render, navigate, find | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, scrubber with chapter marks, go-to-page, full-text search with persistent highlights and find bar | Text selection, links, password prompt, share/print |
+| Viewer — render, navigate, find, act | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, scrubber with chapter marks, go-to-page, full-text search with persistent highlights and find bar, selectable text (web), internal + web links, password-protected PDFs (password kept for the session only), share / download / print (⌘S, ⌘P) | Text selection and links on native (phase 3: PDFium on all platforms) |
 | Reading | Reading list, immersive chrome, progress, bookmarks | Reflowed text view (phase 3) |
 | Personalisation | Light, Sepia, Dark, Black, Auto; English and German (follows OS) | More languages |
 | Platform | Offline PWA, install button, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds |
