@@ -1,12 +1,15 @@
 import { memo, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { t } from '@/i18n';
 import { T } from '@/components/primitives';
 import { elevation, type Palette } from '@/design/tokens';
-import type { Raster, SearchHit } from '@/engine/types';
+import type { DocHandle, PageLink, Raster, SearchHit, TextRun } from '@/engine/types';
+import { t } from '@/i18n';
+import { LinkLayer } from './LinkLayer';
+import { MarksLayer } from './MarksLayer';
 import { deviceWidth, type RasterCache } from './rasterCache';
 import { RasterView } from './RasterView';
+import { TextLayer } from './TextLayer';
 
 /** What an untinted white page looks like under each theme, shown before the raster lands. */
 const PAGE_BASE: Record<Palette['name'], string> = { paper: '#FFFFFF', sepia: '#F3E6CC', dusk: '#2B2B2B', night: '#151515' };
@@ -20,7 +23,27 @@ type Props = {
   hits?: SearchHit[];
   activeHit?: SearchHit | null;
   onPress?: () => void;
+  onLink?: (link: PageLink) => void;
 };
+
+/** Text runs and links for a page, fetched shortly after mount so they never compete with the first paint. */
+function usePageExtras(handle: DocHandle, page: number) {
+  const [extras, setExtras] = useState<{ page: number; text: TextRun[]; links: PageLink[] } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(() => {
+      Promise.all([handle.pageText(page), handle.links(page)]).then(
+        ([text, links]) => alive && setExtras({ page, text, links }),
+        () => {},
+      );
+    }, 150);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [handle, page]);
+  return extras?.page === page ? extras : null;
+}
 
 export function useRaster(cache: RasterCache, page: number, cssWidth: number, urgent = false): Raster | undefined {
   const target = deviceWidth(cssWidth);
@@ -39,13 +62,14 @@ export function useRaster(cache: RasterCache, page: number, cssWidth: number, ur
   return (fetched?.page === page ? fetched.raster : undefined) ?? cache.best(page);
 }
 
-export const PageView = memo(function PageView({ page, width, height, cache, palette, hits, activeHit, onPress }: Props) {
+export const PageView = memo(function PageView({ page, width, height, cache, palette, hits, activeHit, onPress, onLink }: Props) {
   const raster = useRaster(cache, page, width);
+  const extras = usePageExtras(cache.handle, page);
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="image"
-      accessibilityLabel={t.pageN(page + 1)}
+      role="group"
+      aria-label={t.pageN(page + 1)}
       style={[
         styles.page,
         { width, height, backgroundColor: PAGE_BASE[palette.name] },
@@ -60,30 +84,9 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
         </View>
       )}
       <RasterView raster={raster} filter={palette.page.cssFilter} blend={palette.page.blend} />
-      {hits?.map((h, i) =>
-        h.rects.map((r, j) => {
-          const active = h === activeHit;
-          return (
-            <View
-              key={`${i}-${j}`}
-              testID={active ? 'hit-active' : 'hit'}
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: r.x * width - 1.5,
-                top: r.y * height - 1,
-                width: r.w * width + 3,
-                height: r.h * height + 2,
-                borderRadius: 2,
-                backgroundColor: active ? palette.markActive : palette.mark,
-                mixBlendMode: palette.dark ? 'screen' : 'multiply',
-                borderWidth: active ? 1.5 : 0,
-                borderColor: palette.markRing,
-              }}
-            />
-          );
-        }),
-      )}
+      {extras && <TextLayer runs={extras.text} width={width} height={height} />}
+      {hits && hits.length > 0 && <MarksLayer hits={hits} active={activeHit} width={width} height={height} palette={palette} />}
+      {extras && onLink && <LinkLayer links={extras.links} width={width} height={height} onLink={onLink} />}
     </Pressable>
   );
 });

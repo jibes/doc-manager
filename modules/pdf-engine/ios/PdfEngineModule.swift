@@ -6,8 +6,13 @@ final class OpenFailedException: Exception {
   override var reason: String { "Could not open PDF." }
 }
 
-final class LockedException: Exception {
-  override var reason: String { "This PDF is password protected." }
+// Reasons carry the tokens src/engine/types.ts#asPasswordError looks for.
+final class PasswordRequiredException: Exception {
+  override var reason: String { "password-required" }
+}
+
+final class PasswordWrongException: Exception {
+  override var reason: String { "password-wrong" }
 }
 
 final class UnknownHandleException: Exception {
@@ -42,9 +47,12 @@ public class PdfEngineModule: Module {
   public func definition() -> ModuleDefinition {
     Name("PdfEngine")
 
-    AsyncFunction("open") { (uri: String) -> [String: Any] in
+    AsyncFunction("open") { (uri: String, password: String?) -> [String: Any] in
       guard let url = URL(string: uri), let pdf = PDFDocument(url: url) else { throw OpenFailedException() }
-      if pdf.isLocked { throw LockedException() }
+      if pdf.isLocked {
+        guard let password, !password.isEmpty else { throw PasswordRequiredException() }
+        if !pdf.unlock(withPassword: password) { throw PasswordWrongException() }
+      }
       let handle = UUID().uuidString
       lock.lock()
       docs[handle] = pdf

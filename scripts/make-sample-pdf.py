@@ -45,7 +45,8 @@ CHAPTERS = [
         ('Contents, pages and bookmarks', [
             'The list button opens Navigate. Contents shows the document’s own outline, Pages shows every '
             'page as a thumbnail, and Bookmarks lists the pages you marked with the ribbon button.',
-            'Tap the page number at the bottom to type a page and jump straight to it.',
+            'Tap the page number at the bottom to type a page and jump straight to it. Links work too: '
+            'this one goes to <a href="#ch5" color="#2f4f86"><u>Keyboard shortcuts</u></a>.',
         ]),
         ('Search', [
             'Search looks through the full text of the document. Every match is highlighted on the page and '
@@ -113,8 +114,13 @@ def footer(canvas, doc):
     canvas.restoreState()
 
 
-def main(out):
-    doc = Doc(out, pagesize=A4, title='Welcome to Tessel', author='Tessel')
+def main(out, password=None):
+    # --password produces the encrypted e2e fixture.
+    encrypt = None
+    if password:
+        from reportlab.lib import pdfencrypt
+        encrypt = pdfencrypt.StandardEncryption(password, canPrint=1, canCopy=1)
+    doc = Doc(out, pagesize=A4, title='Welcome to Tessel', author='Tessel', encrypt=encrypt)
     w, h = A4
     doc.addPageTemplates([
         PageTemplate('portrait', [Frame(72, 64, w - 144, h - 136)], onPage=footer, pagesize=A4),
@@ -145,9 +151,11 @@ def main(out):
         ('TOPPADDING', (0, 0), (-1, -1), 7), ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
     ]))
     story += [table, Spacer(1, 24),
-              Paragraph('Tessel is free software under the GNU AGPL. No ads, no account, no tracking.', lead)]
+              Paragraph('Tessel is free software under the GNU AGPL. No ads, no account, no tracking. Source: '
+                        '<a href="https://github.com/jibes/doc-reader" color="#2f4f86"><u>github.com/jibes/doc-reader</u></a>',
+                        lead)]
     doc.build(story)
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == '--password' else None)

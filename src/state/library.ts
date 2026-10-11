@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 
 import { errorText, t } from '@/i18n';
-import { engine } from '@/engine';
+import { asPasswordError, engine } from '@/engine';
+import { askPassword, rememberPassword } from '@/state/password';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
 
 export type ImportItem = { name: string; size: number; file?: Blob; uri?: string };
@@ -33,6 +34,28 @@ export function cleanTitle(metaTitle: string | undefined, fileName: string): str
   const meta = metaTitle?.replace(/^Microsoft (Word|PowerPoint) - /i, '').replace(/\.(docx?|pptx?)$/i, '').trim();
   if (meta && !junk.test(meta) && meta.length < 160) return meta;
   return fileName.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim() || t.untitled;
+}
+
+/**
+ * Runs `attempt`, asking for a password while the document is encrypted.
+ * Resolves null if the user dismisses the prompt.
+ */
+export async function openWithPassword<T>(
+  name: string,
+  attempt: (password?: string) => Promise<T>,
+  password?: string,
+): Promise<{ value: T; password?: string } | null> {
+  for (;;) {
+    try {
+      return { value: await attempt(password), password };
+    } catch (e) {
+      const pe = asPasswordError(e);
+      if (!pe) throw e;
+      const next = await askPassword(name, pe.wrong);
+      if (next == null) return null;
+      password = next;
+    }
+  }
 }
 
 const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.openedAt ?? a.addedAt);
@@ -83,7 +106,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
           const source = item.file
             ? ({ kind: 'bytes', bytes: await item.file.arrayBuffer() } as const)
             : ({ kind: 'uri', uri: item.uri! } as const);
-          const { cover, handle } = await engine.renderCover(source, COVER_WIDTH);
+          const opened = await openWithPassword(item.name, (pw) => engine.renderCover(source, COVER_WIDTH, pw));
+          if (!opened) continue; // password prompt dismissed
+          const { cover, handle } = opened.value;
           const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
           const id = newId();
           const rec: DocRecord = {
@@ -98,6 +123,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
             bookmarks: [],
           };
           handle.close();
+          if (opened.password) rememberPassword(id, opened.password);
           await repo.saveFile(id, item.file ?? item.uri!);
           await repo.saveCover(id, cover);
           await repo.put(rec);

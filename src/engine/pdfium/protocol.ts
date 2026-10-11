@@ -1,10 +1,12 @@
-import type { DocMetadata, OutlineItem, SearchHit, Size } from '../types';
+import type { DocMetadata, OutlineItem, PageLink, SearchHit, Size, TextRun } from '../types';
 
 export type Request =
-  | { id: number; type: 'open'; bytes: ArrayBuffer }
+  | { id: number; type: 'open'; bytes: ArrayBuffer; password?: string }
   | { id: number; type: 'render'; doc: number; page: number; width: number }
   | { id: number; type: 'cover'; doc: number; width: number }
   | { id: number; type: 'outline'; doc: number }
+  | { id: number; type: 'text'; doc: number; page: number }
+  | { id: number; type: 'links'; doc: number; page: number }
   | { id: number; type: 'search'; doc: number; query: string }
   | { id: number; type: 'cancel'; target: number }
   | { id: number; type: 'close'; doc: number };
@@ -21,6 +23,8 @@ export type ResultMap = {
   render: { bitmap: ImageBitmap; width: number; height: number };
   cover: Blob;
   outline: OutlineItem[];
+  text: TextRun[];
+  links: PageLink[];
   search: null;
   cancel: null;
   close: null;

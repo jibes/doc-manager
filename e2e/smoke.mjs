@@ -19,7 +19,7 @@ function check(cond, msg) {
 }
 
 async function run(name, viewport, isMobile) {
-  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile, hasTouch: isMobile });
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile, hasTouch: isMobile, acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => (errors.push(`${name}: ${e.message}`), console.log('pageerror:', e.message.slice(0, 400))));
   page.on('console', (m) => m.type() === 'error' && !/favicon|404/.test(m.text()) && (errors.push(`${name}: ${m.text()}`), console.log('console:', m.text().slice(0, 600))));
@@ -45,6 +45,40 @@ async function run(name, viewport, isMobile) {
   check(parseInt(label, 10) >= 3, `${name}: page indicator advanced (${label.replace(/\s+/g, ' ')})`);
   // Plain viewer: the toolbar never hides.
   check(await page.getByTestId('open-contents').isVisible(), `${name}: viewer keeps toolbar visible after scrolling`);
+
+  if (!isMobile) {
+    // Text layer: drag-select a heading and read the selection back.
+    await page.waitForSelector('[data-testid=text-layer] span', { timeout: 10000 });
+    const span = page.locator('[data-testid=text-layer] span', { hasText: /^Opening files$/ }).first();
+    await span.scrollIntoViewIfNeeded();
+    const sb = await span.boundingBox();
+    await page.mouse.move(sb.x + 1, sb.y + sb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(sb.x + sb.width - 1, sb.y + sb.height / 2, { steps: 6 });
+    await page.mouse.up();
+    const sel = await page.evaluate(() => getSelection().toString().trim());
+    check(sel === 'Opening files', `${name}: text selection → "${sel}"`);
+    await page.evaluate(() => getSelection().removeAllRanges());
+
+    // Links: internal jumps; external is exposed with its URL.
+    await page.getByTestId('page-label').click();
+    await page.getByTestId('page-input').fill('3');
+    await page.getByTestId('page-input').press('Enter');
+    await page.getByTestId('link-page').first().click();
+    await page.waitForTimeout(600);
+    check(parseInt(await page.getByTestId('page-label').innerText(), 10) === 7, `${name}: internal link jumps to page 7`);
+    const url = await page.getByTestId('link-url').first().getAttribute('aria-label');
+    check(/github\.com\/jibes\/doc-reader/.test(url ?? ''), `${name}: external link detected (${url})`);
+
+    // Download from the menu; print via the shortcut prints the PDF, not the app.
+    await page.getByTestId('open-more').click();
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('menu-download').click()]);
+    check(dl.suggestedFilename() === 'welcome-to-tessel.pdf', `${name}: download keeps the file name (${dl.suggestedFilename()})`);
+    await page.keyboard.press('Control+p');
+    const frame = await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some((f) => f.src.startsWith('blob:')), null, { timeout: 5000 }).then(() => true, () => false);
+    check(frame, `${name}: print loads the PDF into a print frame`);
+    await page.keyboard.press('Home');
+  }
 
   // Reading-list documents hide chrome while reading forward; a short scroll back reveals it.
   const reveal = async () => {
@@ -76,8 +110,9 @@ async function run(name, viewport, isMobile) {
 
   // Find-in-page persists after the panel closes: highlights stay, the bar steps and clears.
   await page.getByTestId('find-bar').waitFor();
-  const marks = await page.getByTestId('hit').count() + (await page.getByTestId('hit-active').count());
-  check(marks > 0 && (await page.getByTestId('hit-active').count()) > 0, `${name}: ${marks} highlights on page with panel closed`);
+  const marks = await page.evaluate(() => [...document.querySelectorAll('[data-testid=hits]')].reduce((n, c) => n + Number(c.dataset.count), 0));
+  const activeShown = await page.evaluate(() => [...document.querySelectorAll('[data-testid=hits]')].some((c) => c.dataset.active === 'true'));
+  check(marks > 0 && activeShown, `${name}: ${marks} highlights on page with panel closed`);
   const nth = async () => parseInt((await page.getByTestId('find-bar').innerText()).match(/(\d+) of/)?.[1] ?? '0', 10);
   const before = await nth();
   await page.getByTestId('find-next').click();
@@ -87,7 +122,7 @@ async function run(name, viewport, isMobile) {
   await shot('4b-findbar');
   await page.getByTestId('find-clear').click();
   await page.waitForTimeout(300);
-  check((await page.getByTestId('hit').count()) === 0 && !(await page.getByTestId('find-bar').isVisible().catch(() => false)), `${name}: clearing removes highlights`);
+  check((await page.locator('[data-testid=hits]').count()) === 0 && !(await page.getByTestId('find-bar').isVisible().catch(() => false)), `${name}: clearing removes highlights`);
 
   await reveal();
   await page.getByTestId('open-appearance').click();
@@ -149,6 +184,28 @@ async function run(name, viewport, isMobile) {
   await ctx.close();
 }
 
+// Encrypted PDFs: wrong password is rejected, right one opens, nothing is persisted.
+async function locked() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`locked: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/locked.pdf', import.meta.url).pathname);
+  await page.getByTestId('password-input').fill('nope');
+  await page.getByTestId('password-submit').click();
+  const rejected = await page.getByText(/didn’t work/).waitFor({ timeout: 5000 }).then(() => true, () => false);
+  await page.getByTestId('password-input').fill('tessel');
+  await page.getByTestId('password-submit').click();
+  await page.getByTestId('reader').waitFor();
+  const opened = await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.width > 300), null, { timeout: 10000 }).then(() => true, () => false);
+  await page.reload();
+  const asksAgain = await page.getByTestId('password-dialog').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  check(rejected && opened && asksAgain, `locked: wrong password rejected (${rejected}), right one opens (${opened}), asked again after reload (${asksAgain})`);
+  await ctx.close();
+}
+
 // Interface language follows the OS/browser locale.
 async function german() {
   const ctx = await browser.newContext({ locale: 'de-DE', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -166,6 +223,7 @@ async function german() {
 }
 
 await german();
+await locked();
 await run('desktop', { width: 1440, height: 900 }, false);
 await run('mobile', { width: 390, height: 844 }, true);
 await browser.close();

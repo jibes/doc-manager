@@ -12,6 +12,7 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { PasswordDialog } from '@/components/PasswordDialog';
 import { usePalette } from '@/state/prefs';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -50,6 +51,7 @@ export default function RootLayout() {
           animation: 'fade_from_bottom',
         }}
       />
+      <PasswordDialog />
     </GestureHandlerRootView>
   );
 }

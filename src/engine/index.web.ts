@@ -1,7 +1,7 @@
 import { BASE } from '@/lib/base';
 
 import type { OpenResult, Request, Response, ResultMap } from './pdfium/protocol';
-import type { DocHandle, DocSource, DocumentEngine, OutlineItem, Raster, SearchHit } from './types';
+import type { DocHandle, DocSource, DocumentEngine, OutlineItem, PageLink, Raster, SearchHit, TextRun } from './types';
 
 export * from './types';
 
@@ -67,6 +67,17 @@ const docIds = new WeakMap<DocHandle, number>();
 
 function handleFrom(r: OpenResult): DocHandle {
   let outlineCache: Promise<OutlineItem[]> | null = null;
+  const textCache = new Map<number, Promise<TextRun[]>>();
+  const linkCache = new Map<number, Promise<PageLink[]>>();
+  const memo = <T,>(m: Map<number, Promise<T>>, page: number, load: () => Promise<T>) => {
+    let v = m.get(page);
+    if (!v) {
+      v = load();
+      v.catch(() => m.delete(page));
+      m.set(page, v);
+    }
+    return v;
+  };
   const handle: DocHandle = {
     pageCount: r.pageCount,
     pageSizes: r.pageSizes,
@@ -79,6 +90,8 @@ function handleFrom(r: OpenResult): DocHandle {
     async search(query, onHits, signal) {
       await client.call('search', { doc: r.doc, query }, { signal, onProgress: onHits });
     },
+    pageText: (page) => memo(textCache, page, () => client.call('text', { doc: r.doc, page })),
+    links: (page) => memo(linkCache, page, () => client.call('links', { doc: r.doc, page })),
     close: () => void client.call('close', { doc: r.doc }).catch(() => {}),
   };
   docIds.set(handle, r.doc);
@@ -86,13 +99,13 @@ function handleFrom(r: OpenResult): DocHandle {
 }
 
 export const engine: DocumentEngine = {
-  async open(source) {
-    // Copy, then transfer: the worker owns its bytes; callers keep theirs.
+  async open(source, password) {
+    // Copy, then transfer: the worker owns its bytes; callers keep theirs (and can retry with a password).
     const bytes = (await toBytes(source)).slice(0);
-    return handleFrom(await client.call('open', { bytes }, { transfer: [bytes] }));
+    return handleFrom(await client.call('open', { bytes, password }, { transfer: [bytes] }));
   },
-  async renderCover(source, width) {
-    const handle = await engine.open(source);
+  async renderCover(source, width, password) {
+    const handle = await engine.open(source, password);
     const cover = await client.call('cover', { doc: docIds.get(handle)!, width });
     return { cover, handle };
   },

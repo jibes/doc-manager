@@ -28,6 +28,7 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') document.documentE
 /** Engine/storage errors are English plumbing; show the reader a localized sentence. */
 export function errorText(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
+  if (m === t.passwordCancelled) return m;
   if (/password/i.test(m)) return t.passwordProtected;
   if (/missing from storage/i.test(m)) return t.fileMissing;
   return t.openFailed;
