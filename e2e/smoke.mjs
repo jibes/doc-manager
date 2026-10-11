@@ -151,7 +151,7 @@ async function run(name, viewport, isMobile) {
   await page.waitForTimeout(800);
   check(parseInt(await page.getByTestId('page-label').innerText(), 10) === 3, `${name}: back in page view at the same page`);
   if (!isMobile) {
-    // Search hits live on pages: picking one from text view switches to page view.
+    // Search from text view: matches are highlighted in the text, and picking a hit stays there.
     await page.getByTestId('view-toggle').click();
     await page.getByTestId('text-view').waitFor();
     await page.getByTestId('open-search').click();
@@ -159,10 +159,14 @@ async function run(name, viewport, isMobile) {
     await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 10000 });
     await page.getByTestId('search-input').press('Enter');
     await page.waitForTimeout(800);
-    const backToPages = (await page.getByTestId('pages').count()) > 0 && (await page.getByTestId('text-view').count()) === 0;
-    check(backToPages, `${name}: picking a search hit from text view shows it in page view`);
+    const marked = await page.getByTestId('text-view').evaluate(
+      (el) => [...el.querySelectorAll('span')].filter((s) => /^scrubber$/i.test(s.textContent) && getComputedStyle(s).backgroundColor !== 'rgba(0, 0, 0, 0)').length,
+    );
+    check((await page.getByTestId('text-view').count()) === 1 && marked > 0, `${name}: search in text view highlights matches in place`);
     await page.keyboard.press('Escape');
     await page.getByTestId('find-clear').click();
+    await page.getByTestId('view-toggle').click();
+    await page.getByTestId('pages').waitFor();
   }
 
   // Spine scrubber: press and drag to 75%.
@@ -272,6 +276,65 @@ async function tagged() {
   await ctx.close();
 }
 
+async function openFixture(page, file) {
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL(`./fixtures/${file}`, import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+}
+
+// Text view v2: two columns read in order, figures and tables inline, figure tap opens its page.
+async function columns() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`columns: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  await page.getByTestId('view-toggle').click();
+  await page.getByTestId('text-view').waitFor({ timeout: 15000 });
+  await page.waitForTimeout(800);
+  const list = page.getByTestId('text-view');
+  const text = await list.innerText();
+  const order = ['Why order matters', 'Figure 1:', 'Keeping place', 'The column ends'].map((s) => text.indexOf(s));
+  check(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), 'columns: two-column page reads column by column');
+  // A paragraph split by the column break would start mid-sentence (lowercase).
+  check(!/^\p{Ll}/mu.test(text), 'columns: paragraphs carry across the column break');
+  const drawn = await page.getByTestId('figure').first().evaluate((el) => el.querySelector('canvas')?.width ?? 0);
+  check(drawn > 0, 'columns: figure is drawn inline from the page');
+  await list.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await page.waitForTimeout(800);
+  const table = await page.getByRole('img', { name: /^Table:.*Harbour/ }).count();
+  check(table === 1, 'columns: table kept as drawn, with its text as label');
+  await page.getByTestId('figure').last().click();
+  await page.getByTestId('pages').waitFor({ timeout: 5000 });
+  check(parseInt(await page.getByTestId('page-label').innerText(), 10) === 2, 'columns: tapping a figure shows it on its page');
+  await ctx.close();
+}
+
+// Scanned PDF: on-device OCR feeds text view, page by page, and is kept for next time.
+async function scan() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`scan: ${e.message}`));
+  await openFixture(page, 'scan.pdf');
+  await page.getByTestId('view-toggle').click();
+  await page.getByTestId('ocr-start').click({ timeout: 15000 });
+  const recognized = () => page.waitForFunction(() => /scanned pages/i.test(document.body.innerText) && /kept so it never runs twice/i.test(document.body.innerText), null, { timeout: 120000 });
+  await recognized().then(
+    () => check(true, 'scan: OCR recognizes the scanned text'),
+    () => check(false, 'scan: OCR recognizes the scanned text'),
+  );
+  await page.getByTestId('back').click();
+  await page.getByTestId('recent-row').first().waitFor();
+  await page.reload();
+  await page.getByTestId('recent-row').first().click();
+  await recognized().then(
+    () => check(true, 'scan: recognized text is kept for next time'),
+    () => check(false, 'scan: recognized text is kept for next time'),
+  );
+  await ctx.close();
+}
+
 // Interface language follows the OS/browser locale.
 async function german() {
   const ctx = await browser.newContext({ locale: 'de-DE', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -291,6 +354,8 @@ async function german() {
 await german();
 await locked();
 await tagged();
+await columns();
+await scan();
 await run('desktop', { width: 1440, height: 900 }, false);
 await run('mobile', { width: 390, height: 844 }, true);
 await browser.close();

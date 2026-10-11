@@ -1,4 +1,4 @@
-import type { DocSource } from '@/engine/types';
+import type { DocSource, TextLine } from '@/engine/types';
 
 export type ReadingPosition = {
   /** 0-based page index. */
@@ -36,4 +36,7 @@ export interface LibraryRepo {
   saveCover(id: string, cover: Blob | string): Promise<void>;
   /** Displayable URI (object URL on web, file URI on native) or null. */
   coverUri(id: string): Promise<string | null>;
+  /** Text recognized on-device for scanned PDFs, per page; undefined = not recognized yet. */
+  loadOcr(id: string, pageCount: number): Promise<(TextLine[] | undefined)[]>;
+  saveOcr(id: string, page: number, lines: TextLine[]): Promise<void>;
 }

@@ -179,6 +179,16 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     [doc.id, savePosition, cache],
   );
 
+  // A figure tapped in text view: show it on its page, where it can be zoomed.
+  const openPageAt = useCallback(
+    (pg: number, y: number) => {
+      posRef.current = { page: pg, offset: Math.max(0, y - 0.05) };
+      setPage(pg);
+      setView(doc.id, 'page');
+    },
+    [doc.id, setView],
+  );
+
   // ---------- search ----------
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -251,24 +261,16 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     [hits, layout, vp, scrollTo, cache],
   );
 
-  // Hits live on pages: picking one from text view switches to page view first.
-  const [pendingHit, setPendingHit] = useState<number | null>(null);
-  useEffect(() => {
-    if (pendingHit == null || view !== 'page' || !layout) return;
-    const raf = requestAnimationFrame(() => {
-      showHit(pendingHit);
-      setPendingHit(null);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [pendingHit, view, layout, showHit]);
   const goToHit = useCallback(
     (i: number) => {
-      if (view === 'text') {
-        setView(doc.id, 'page');
-        setPendingHit(i);
-      } else showHit(i);
+      const h = hits[i];
+      if (view !== 'text') return showHit(i);
+      if (!h) return;
+      // Text view highlights matches itself: scroll to the block holding this one.
+      setActive(i);
+      textApiRef.current?.showHit(h.page, h.rects[0]?.y ?? 0);
     },
-    [view, doc.id, setView, showHit],
+    [view, hits, showHit],
   );
 
   const stepHit = useCallback(
@@ -434,7 +436,10 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           onPosition={onTextPosition}
           onScrollY={trackDirection}
           onExit={() => switchView('page')}
+          onOpenPage={openPageAt}
           apiRef={textApiRef}
+          docId={doc.id}
+          query={searchActive ? query.trim() : ''}
         />
       )}
       {layout && vp && view === 'page' && (

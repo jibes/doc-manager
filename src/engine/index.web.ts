@@ -82,8 +82,8 @@ function handleFrom(r: OpenResult): DocHandle {
     pageCount: r.pageCount,
     pageSizes: r.pageSizes,
     metadata: r.metadata,
-    async renderPage(page, { width, signal }): Promise<Raster> {
-      const out = await client.call('render', { doc: r.doc, page, width }, { signal });
+    async renderPage(page, { width, clip, signal }): Promise<Raster> {
+      const out = await client.call('render', { doc: r.doc, page, width, clip }, { signal });
       return { kind: 'bitmap', ...out };
     },
     outline: () => (outlineCache ??= client.call('outline', { doc: r.doc })),
@@ -92,7 +92,7 @@ function handleFrom(r: OpenResult): DocHandle {
     },
     pageText: (page) => memo(textCache, page, () => client.call('text', { doc: r.doc, page })),
     links: (page) => memo(linkCache, page, () => client.call('links', { doc: r.doc, page })),
-    textLines: (pages) => client.call('lines', { doc: r.doc, pages }),
+    layout: (pages) => client.call('layout', { doc: r.doc, pages }),
     close: () => void client.call('close', { doc: r.doc }).catch(() => {}),
   };
   docIds.set(handle, r.doc);

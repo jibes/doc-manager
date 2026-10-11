@@ -5,7 +5,8 @@
  */
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
-import type { NormRect, OutlineItem, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
+import { mergeGraphics } from '../geometry';
+import type { Graphic, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -19,6 +20,12 @@ const FPDF_ERR_PASSWORD = 4;
 const MAX_DIM = 8192;
 const MAX_PIXELS = 32e6;
 const SEARCH_PAGES_PER_SLICE = 8;
+const FPDF_PAGEOBJ_PATH = 2;
+const FPDF_PAGEOBJ_IMAGE = 3;
+const FPDF_PAGEOBJ_SHADING = 4;
+const FPDF_PAGEOBJ_FORM = 5;
+/** Beyond this many drawing objects a page is one big drawing (map, plot with thousands of points). */
+const MAX_GRAPHIC_OBJECTS = 1500;
 
 type Doc = { ptr: number; buf: number; pageSizes: Size[] };
 type SearchJob = Extract<Request, { type: 'search' }> & { cursor: number; textPtr: number };
@@ -29,7 +36,11 @@ const wasmUrl = new URL('./pdfium.wasm', self.location.href).href;
 const ready: Promise<WrappedPdfiumModule> = init({
   instantiateWasm(imports: WebAssembly.Imports, receive: (i: WebAssembly.Instance, m: WebAssembly.Module) => void) {
     WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
-      .catch(() => fetch(wasmUrl).then((r) => r.arrayBuffer()).then((b) => WebAssembly.instantiate(b, imports)))
+      .catch(() =>
+        fetch(wasmUrl)
+          .then((r) => r.arrayBuffer())
+          .then((b) => WebAssembly.instantiate(b, imports)),
+      )
       .then((r) => receive(r.instance, r.module));
     return {};
   },
@@ -102,11 +113,13 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
   return { doc, pageCount, pageSizes, metadata: { title: meta('Title'), author: meta('Author') } };
 }
 
-function rasterize(docId: number, pageIndex: number, width: number): ImageData {
+/** Renders a page (or the `clip` region of it) so the output is `width` pixels wide. */
+function rasterize(docId: number, pageIndex: number, width: number, clip?: NormRect): ImageData {
   const d = getDoc(docId);
   const size = d.pageSizes[pageIndex];
+  const region = clip ?? { x: 0, y: 0, w: 1, h: 1 };
   let w = Math.min(Math.round(width), MAX_DIM);
-  let h = Math.round((w * size.height) / size.width);
+  let h = Math.round((w * size.height * region.h) / (size.width * region.w));
   if (w * h > MAX_PIXELS) {
     const k = Math.sqrt(MAX_PIXELS / (w * h));
     w = Math.floor(w * k);
@@ -114,12 +127,24 @@ function rasterize(docId: number, pageIndex: number, width: number): ImageData {
   }
   w = Math.max(1, w);
   h = Math.max(1, h);
+  // Full-page size at this scale; the bitmap is a window onto it.
+  const fullW = Math.round(w / region.w);
+  const fullH = Math.round(h / region.h);
   const page = M.FPDF_LoadPage(d.ptr, pageIndex);
   if (!page) throw new Error(`Could not load page ${pageIndex + 1}`);
   const bmp = M.FPDFBitmap_CreateEx(w, h, FPDFBitmap_BGRA, 0, 0);
   try {
     M.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
-    M.FPDF_RenderPageBitmap(bmp, page, 0, 0, w, h, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+    M.FPDF_RenderPageBitmap(
+      bmp,
+      page,
+      -Math.round(region.x * fullW),
+      -Math.round(region.y * fullH),
+      fullW,
+      fullH,
+      0,
+      FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER,
+    );
     const p = M.FPDFBitmap_GetBuffer(bmp);
     const stride = M.FPDFBitmap_GetStride(bmp);
     const src = heap();
@@ -133,8 +158,8 @@ function rasterize(docId: number, pageIndex: number, width: number): ImageData {
   }
 }
 
-async function render(docId: number, page: number, width: number) {
-  const img = rasterize(docId, page, width);
+async function render(docId: number, page: number, width: number, clip?: NormRect) {
+  const img = rasterize(docId, page, width, clip);
   const bitmap = await createImageBitmap(img);
   return { bitmap, width: img.width, height: img.height };
 }
@@ -222,7 +247,9 @@ function searchPage(d: Doc, pageIndex: number, textPtr: number): SearchHit[] {
  * Opens a page + text page and hands `fn` a converter from page space to normalized
  * top-left rects (rotation and crop box handled by PageToDevice).
  */
-function withTextPage<T>(d: Doc, pageIndex: number, fallback: T, fn: (page: number, text: number, norm: (l: number, t: number, r: number, b: number) => NormRect) => T): T {
+type Norm = (l: number, t: number, r: number, b: number) => NormRect;
+
+function withTextPage<T>(d: Doc, pageIndex: number, fallback: T, fn: (page: number, text: number, norm: Norm) => T): T {
   const page = M.FPDF_LoadPage(d.ptr, pageIndex);
   if (!page) return fallback;
   const text = M.FPDFText_LoadPage(page);
@@ -342,80 +369,154 @@ function structRoles(page: number): Map<number, Role> | null {
 }
 
 /** Lines with typography for reflow; in tagged PDFs, untagged characters (artifacts: headers, footers) are dropped. */
-function pageLines(docId: number, pageIndex: number): TextLine[] {
-  const d = getDoc(docId);
-  return withTextPage(d, pageIndex, [], (page, text, norm) => {
-    const roles = structRoles(page);
-    const lines: TextLine[] = [];
-    const n = M.FPDFText_CountChars(text);
-    let cur: (TextLine & { right: number }) | null = null;
-    const flush = () => {
-      const c = cur;
-      cur = null;
-      if (!c) return;
-      const trimmed = c.text.replace(/\s+$/, '');
-      if (!trimmed) return;
-      lines.push({ text: trimmed, rect: c.rect, size: c.size, bold: c.bold, italic: c.italic, hyphen: c.hyphen || /[-\u00ad]$/.test(trimmed), role: c.role, sid: c.sid });
-    };
-    withScratch(80, (s) => {
-      const box = s;
-      const flags = s + 16;
-      const nameBuf = s + 20;
-      for (let i = 0; i < n; i++) {
-        const ch = String.fromCharCode(M.FPDFText_GetUnicode(text, i));
-        if (ch === '\r' || ch === '\n') {
-          if (cur && M.FPDFText_IsHyphen(text, i - 1)) cur.hyphen = true;
-          flush();
-          continue;
-        }
-        let role: Role | undefined;
-        if (roles) {
-          const obj = M.FPDFText_GetTextObject(text, i);
-          role = obj ? roles.get(M.FPDFPageObj_GetMarkedContentID(obj)) : undefined;
-          if (!role) continue; // artifact
-        }
-        const has = M.FPDFText_GetLooseCharBox(text, i, box);
-        const [l, t, r, b] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(box + o, 'float'));
-        if (!has || r <= l || t <= b) {
-          if (cur && ch === ' ') cur.text += ' ';
-          continue;
-        }
-        const rc = norm(l, t, r, b);
-        const c = cur as (TextLine & { right: number }) | null;
-        const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
-        const gap = c ? rc.x - c.right : 0;
-        if (c && sameLine && c.sid === role?.sid && gap < c.rect.h * 1.5 && gap > -c.rect.h) {
-          if (gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
-          c.text += ch;
-          const x1 = Math.max(c.right, rc.x + rc.w);
-          const y0 = Math.min(c.rect.y, rc.y);
-          const y1 = Math.max(c.rect.y + c.rect.h, rc.y + rc.h);
-          c.rect = { x: c.rect.x, y: y0, w: x1 - c.rect.x, h: y1 - y0 };
-          c.right = x1;
-        } else {
-          flush();
-          // Typography from the line's first glyph.
-          const weight = M.FPDFText_GetFontWeight(text, i);
-          M.FPDFText_GetFontInfo(text, i, nameBuf, 60, flags);
-          const fontName = M.pdfium.UTF8ToString(nameBuf);
-          const f = M.pdfium.getValue(flags, 'i32');
-          cur = {
-            text: ch,
-            rect: rc,
-            right: rc.x + rc.w,
-            size: Math.round(M.FPDFText_GetFontSize(text, i) * 10) / 10,
-            bold: weight >= 600 || (f & 0x40000) !== 0 || /bold|black|heavy|semibold/i.test(fontName),
-            italic: (f & 0x40) !== 0 || /italic|oblique/i.test(fontName),
-            hyphen: false,
-            role: role?.type,
-            sid: role?.sid,
-          };
-        }
-      }
+function pageLines(page: number, text: number, norm: Norm): TextLine[] {
+  const roles = structRoles(page);
+  const lines: TextLine[] = [];
+  const n = M.FPDFText_CountChars(text);
+  let cur: (TextLine & { right: number }) | null = null;
+  const flush = () => {
+    const c = cur;
+    cur = null;
+    if (!c) return;
+    const trimmed = c.text.replace(/\s+$/, '');
+    if (!trimmed) return;
+    lines.push({
+      text: trimmed,
+      rect: c.rect,
+      size: c.size,
+      bold: c.bold,
+      italic: c.italic,
+      hyphen: c.hyphen || /[-\u00ad]$/.test(trimmed),
+      role: c.role,
+      sid: c.sid,
     });
-    flush();
-    return lines;
+  };
+  withScratch(80, (s) => {
+    const box = s;
+    const flags = s + 16;
+    const nameBuf = s + 20;
+    for (let i = 0; i < n; i++) {
+      const ch = String.fromCharCode(M.FPDFText_GetUnicode(text, i));
+      if (ch === '\r' || ch === '\n') {
+        if (cur && M.FPDFText_IsHyphen(text, i - 1)) cur.hyphen = true;
+        flush();
+        continue;
+      }
+      let role: Role | undefined;
+      if (roles) {
+        const obj = M.FPDFText_GetTextObject(text, i);
+        role = obj ? roles.get(M.FPDFPageObj_GetMarkedContentID(obj)) : undefined;
+        if (!role) continue; // artifact
+      }
+      const has = M.FPDFText_GetLooseCharBox(text, i, box);
+      const [l, t, r, b] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(box + o, 'float'));
+      if (!has || r <= l || t <= b) {
+        if (cur && ch === ' ') cur.text += ' ';
+        continue;
+      }
+      const rc = norm(l, t, r, b);
+      const c = cur as (TextLine & { right: number }) | null;
+      const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
+      const gap = c ? rc.x - c.right : 0;
+      if (c && sameLine && c.sid === role?.sid && gap < c.rect.h * 1.5 && gap > -c.rect.h) {
+        if (gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+        c.text += ch;
+        const x1 = Math.max(c.right, rc.x + rc.w);
+        const y0 = Math.min(c.rect.y, rc.y);
+        const y1 = Math.max(c.rect.y + c.rect.h, rc.y + rc.h);
+        c.rect = { x: c.rect.x, y: y0, w: x1 - c.rect.x, h: y1 - y0 };
+        c.right = x1;
+      } else {
+        flush();
+        // Typography from the line's first glyph.
+        const weight = M.FPDFText_GetFontWeight(text, i);
+        M.FPDFText_GetFontInfo(text, i, nameBuf, 60, flags);
+        const fontName = M.pdfium.UTF8ToString(nameBuf);
+        const f = M.pdfium.getValue(flags, 'i32');
+        cur = {
+          text: ch,
+          rect: rc,
+          right: rc.x + rc.w,
+          size: Math.round(M.FPDFText_GetFontSize(text, i) * 10) / 10,
+          bold: weight >= 600 || (f & 0x40000) !== 0 || /bold|black|heavy|semibold/i.test(fontName),
+          italic: (f & 0x40) !== 0 || /italic|oblique/i.test(fontName),
+          hyphen: false,
+          role: role?.type,
+          sid: role?.sid,
+        };
+      }
+    }
   });
+  flush();
+  return lines;
+}
+
+/** Images and vector drawings, merged into regions; form XObjects are walked with their matrices applied. */
+function pageGraphics(page: number, norm: Norm): Graphic[] {
+  const items: Graphic[] = [];
+  let budget = MAX_GRAPHIC_OBJECTS;
+  let overflow = false;
+  withScratch(48, (s) => {
+    const f = (o: number) => M.pdfium.getValue(s + o, 'float');
+    const visit = (obj: number, m: number[] | null, depth: number) => {
+      const type = M.FPDFPageObj_GetType(obj);
+      if (type === FPDF_PAGEOBJ_FORM) {
+        if (depth > 3) return;
+        const fm = M.FPDFPageObj_GetMatrix(obj, s) ? [0, 4, 8, 12, 16, 20].map(f) : [1, 0, 0, 1, 0, 0];
+        const total = m ? compose(fm, m) : fm;
+        const n = M.FPDFFormObj_CountObjects(obj);
+        for (let i = 0; i < n; i++) visit(M.FPDFFormObj_GetObject(obj, i), total, depth + 1);
+        return;
+      }
+      if (type !== FPDF_PAGEOBJ_IMAGE && type !== FPDF_PAGEOBJ_PATH && type !== FPDF_PAGEOBJ_SHADING) return;
+      if (budget-- <= 0) return void (overflow = true);
+      if (!M.FPDFPageObj_GetBounds(obj, s, s + 4, s + 8, s + 12)) return;
+      let [l, b, r, t] = [f(0), f(4), f(8), f(12)];
+      if (m) [l, b, r, t] = transformBox(m, l, b, r, t);
+      const rect = norm(l, t, r, b);
+      const area = rect.w * rect.h;
+      if (type === FPDF_PAGEOBJ_IMAGE) return void (area > 1e-5 && items.push({ rect, image: true, parts: 1 }));
+      // Page backgrounds and page-wide rules carry no figure. Short hairlines (axes, ticks, table borders)
+      // join drawings together but don't count as drawing on their own.
+      const thin = rect.w < 0.004 || rect.h < 0.004;
+      if (area > 0.5 || (thin && Math.max(rect.w, rect.h) > 0.5)) return;
+      items.push({ rect, image: false, parts: thin ? 0 : 1 });
+    };
+    const n = M.FPDFPage_CountObjects(page);
+    for (let i = 0; i < n; i++) visit(M.FPDFPage_GetObject(page, i), null, 0);
+  });
+  if (overflow) {
+    // Too many objects to cluster pairwise: treat them all as one drawing.
+    const all = mergeGraphics(items, 1);
+    return all.map((g) => ({ ...g, parts: MAX_GRAPHIC_OBJECTS }));
+  }
+  return mergeGraphics(items);
+}
+
+/** PDF matrices [a b c d e f]: apply `inner`, then `outer`. */
+function compose(inner: number[], outer: number[]): number[] {
+  const [a, b, c, d, e, f] = inner;
+  const [A, B, C, D, E, F] = outer;
+  return [a * A + b * C, a * B + b * D, c * A + d * C, c * B + d * D, e * A + f * C + E, e * B + f * D + F];
+}
+
+function transformBox(m: number[], l: number, b: number, r: number, t: number): [number, number, number, number] {
+  const pts = [
+    [l, b],
+    [r, b],
+    [l, t],
+    [r, t],
+  ].map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function pageLayout(docId: number, pageIndex: number): PageLayout {
+  return withTextPage(getDoc(docId), pageIndex, { lines: [], graphics: [] }, (page, text, norm) => ({
+    lines: pageLines(page, text, norm),
+    graphics: pageGraphics(page, norm),
+  }));
 }
 
 const SAFE_URL = /^(https?:|mailto:)/i;
@@ -460,7 +561,9 @@ function pageLinks(docId: number, pageIndex: number): PageLink[] {
             M.FPDFLink_GetRect(web, i, j, s, s + 8, s + 16, s + 24);
             const [l, t, r2, b] = [0, 8, 16, 24].map((o) => M.pdfium.getValue(s + o, 'double'));
             const rc = norm(l, t, r2, b);
-            const covered = out.some((o) => rc.x < o.rect.x + o.rect.w && rc.x + rc.w > o.rect.x && rc.y < o.rect.y + o.rect.h && rc.y + rc.h > o.rect.y);
+            const covered = out.some(
+              (o) => rc.x < o.rect.x + o.rect.w && rc.x + rc.w > o.rect.x && rc.y < o.rect.y + o.rect.h && rc.y + rc.h > o.rect.y,
+            );
             if (!covered) out.push({ kind: 'url', url, rect: rc });
           }
         }
@@ -522,7 +625,7 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: r });
     }
     case 'render': {
-      const r = await render(job.doc, job.page, job.width);
+      const r = await render(job.doc, job.page, job.width, job.clip);
       return post({ id: job.id, ok: true, result: r }, [r.bitmap]);
     }
     case 'cover':
@@ -533,8 +636,8 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: pageText(job.doc, job.page) });
     case 'links':
       return post({ id: job.id, ok: true, result: pageLinks(job.doc, job.page) });
-    case 'lines':
-      return post({ id: job.id, ok: true, result: job.pages.map((pg) => pageLines(job.doc, pg)) });
+    case 'layout':
+      return post({ id: job.id, ok: true, result: job.pages.map((pg) => pageLayout(job.doc, pg)) });
     case 'close':
       close(job.doc);
       return post({ id: job.id, ok: true, result: null });
