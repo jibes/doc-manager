@@ -13,8 +13,8 @@ type State =
   | { status: 'ready'; handle: DocHandle; cache: RasterCache };
 
 /** Opens a stored document, asking for its password if needed (`name` is shown in the prompt). */
-export function useDocument(id: string, name: string | undefined): State {
-  const [result, setResult] = useState<{ id: string; state: State } | null>(null);
+export function useDocument(id: string, name: string | undefined, attempt = 0): State {
+  const [result, setResult] = useState<{ id: string; attempt: number; state: State } | null>(null);
 
   useEffect(() => {
     // Wait for the library record: its file name labels the password prompt.
@@ -29,10 +29,10 @@ export function useDocument(id: string, name: string | undefined): State {
         if (res.password) rememberPassword(id, res.password);
         const handle = res.value;
         opened = { handle, cache: new RasterCache(handle) };
-        if (alive) setResult({ id, state: { status: 'ready', ...opened } });
+        if (alive) setResult({ id, attempt, state: { status: 'ready', ...opened } });
         else close();
       })
-      .catch((e) => alive && setResult({ id, state: { status: 'error', message: e instanceof Error ? e.message : String(e) } }));
+      .catch((e) => alive && setResult({ id, attempt, state: { status: 'error', message: e instanceof Error ? e.message : String(e) } }));
 
     function close() {
       opened?.cache.dispose();
@@ -42,7 +42,7 @@ export function useDocument(id: string, name: string | undefined): State {
       alive = false;
       close();
     };
-  }, [id, name]);
+  }, [id, name, attempt]);
 
-  return result?.id === id ? result.state : { status: 'loading' };
+  return result?.id === id && result.attempt === attempt ? result.state : { status: 'loading' };
 }

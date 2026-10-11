@@ -3,12 +3,14 @@ import { StyleSheet, View } from 'react-native';
 
 import { t } from '@/i18n';
 import { fonts, radius } from '@/design/tokens';
-import { itemsFromFiles } from '@/lib/pick';
+import { isFileHandle, type FileHandle } from '@/lib/fsa';
+import { itemsFromFiles, itemsFromHandles } from '@/lib/pick';
 import type { ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { T } from './primitives';
 
-type LaunchQueue = { setConsumer(fn: (p: { files: { getFile(): Promise<File> }[] }) => void): void };
+type LaunchQueue = { setConsumer(fn: (p: { files: FileHandle[] }) => void): void };
+type HandleItem = DataTransferItem & { getAsFileSystemHandle?: () => Promise<unknown> };
 
 /** Window-wide PDF drop target, plus OS "Open with" via the File Handling API. */
 export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: (items: ImportItem[]) => void }) {
@@ -37,15 +39,21 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
       e.preventDefault();
       depth.current = 0;
       setOver(false);
-      const items = itemsFromFiles(e.dataTransfer?.files ?? []);
-      if (items.length) cb.current(items);
+      // Handles must be requested synchronously, inside the drop event; they let the file open in place.
+      const dt = e.dataTransfer;
+      const files = [...(dt?.files ?? [])];
+      const handles = [...(dt?.items ?? [])].filter((i) => i.kind === 'file').map((i) => (i as HandleItem).getAsFileSystemHandle?.().catch(() => null) ?? null);
+      Promise.all(handles).then((hs) => {
+        const items = itemsFromFiles(files, hs.map((h) => (isFileHandle(h) ? h : null)));
+        if (items.length) cb.current(items);
+      });
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragleave', leave);
     window.addEventListener('dragover', overFn);
     window.addEventListener('drop', drop);
     (window as unknown as { launchQueue?: LaunchQueue }).launchQueue?.setConsumer(async ({ files }) => {
-      const items = itemsFromFiles(await Promise.all(files.map((f) => f.getFile())));
+      const items = await itemsFromHandles(files);
       if (items.length) cb.current(items);
     });
     return () => {

@@ -1,6 +1,6 @@
 // End-to-end smoke test against a running web build (default: expo dev server on :8081).
 // Usage: BASE=http://localhost:8081 node e2e/smoke.mjs
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE ?? 'http://localhost:8081';
@@ -13,13 +13,23 @@ const browser = await chromium.launch(existsSync(preinstalled) ? { executablePat
 const errors = [];
 let failures = 0;
 
+/**
+ * Most checks use the copy-into-library path (Firefox, Safari, and Chromium without a picker):
+ * Playwright can't answer the File System Access picker, so it's removed here and faked in linked().
+ */
+async function newContext(opts, { fsa = false } = {}) {
+  const ctx = await browser.newContext(opts);
+  if (!fsa) await ctx.addInitScript(() => delete window.showOpenFilePicker);
+  return ctx;
+}
+
 function check(cond, msg) {
   console.log(`${cond ? '✓' : '✗'} ${msg}`);
   if (!cond) failures++;
 }
 
 async function run(name, viewport, isMobile) {
-  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile, hasTouch: isMobile, acceptDownloads: true });
+  const ctx = await newContext({ viewport, deviceScaleFactor: 2, isMobile, hasTouch: isMobile, acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => (errors.push(`${name}: ${e.message}`), console.log('pageerror:', e.message.slice(0, 400))));
   page.on('console', (m) => m.type() === 'error' && !/favicon|404/.test(m.text()) && (errors.push(`${name}: ${m.text()}`), console.log('console:', m.text().slice(0, 600))));
@@ -224,7 +234,7 @@ async function run(name, viewport, isMobile) {
 
 // Encrypted PDFs: wrong password is rejected, right one opens, nothing is persisted.
 async function locked() {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`locked: ${e.message}`));
   await page.goto(BASE);
@@ -250,7 +260,7 @@ async function locked() {
 
 // Tagged PDFs reflow from their structure: headings kept, running header/footer (artifacts) dropped.
 async function tagged() {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`tagged: ${e.message}`));
   await page.goto(BASE);
@@ -286,7 +296,7 @@ async function openFixture(page, file) {
 
 // Text view v2: two columns read in order, figures and tables inline, figure tap opens its page.
 async function columns() {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`columns: ${e.message}`));
   await openFixture(page, 'columns.pdf');
@@ -313,7 +323,7 @@ async function columns() {
 
 // Scanned PDF: on-device OCR feeds text view, page by page, and is kept for next time.
 async function scan() {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`scan: ${e.message}`));
   await openFixture(page, 'scan.pdf');
@@ -335,9 +345,60 @@ async function scan() {
   await ctx.close();
 }
 
+// Open in place (Chromium): the library links to the user's file. Handles come from the origin-private
+// file system, standing in for the picker; they behave like real ones (read, write, vanish).
+async function linked() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showOpenFilePicker = async () => [await (await navigator.storage.getDirectory()).getFileHandle(window.localStorage.getItem('pick') ?? 'linked.pdf')];
+  });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`linked: ${e.message}`));
+  const put = (name, file) =>
+    page.evaluate(
+      async ([name, b64]) => {
+        const h = await (await navigator.storage.getDirectory()).getFileHandle(name, { create: true });
+        const w = await h.createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+      },
+      [name, readFileSync(new URL(`./fixtures/${file}`, import.meta.url)).toString('base64')],
+    );
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  await put('linked.pdf', 'columns.pdf');
+  await page.getByTestId('sample').click();
+  await page.getByTestId('back').click();
+  await page.getByTestId('add').click();
+  await page.getByTestId('reader').waitFor();
+  check((await page.getByTestId('page-label').innerText()).includes('2'), 'linked: opens the picked file in place');
+  await page.getByTestId('back').click();
+  check((await page.getByTestId('recent-row').first().innerText()).includes('In place'), 'linked: library marks it as opened in place');
+  // Edited elsewhere: the library reads the file as it is now.
+  await put('linked.pdf', 'tagged.pdf');
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(500);
+  check(/\/\s*4/.test(await page.getByTestId('page-label').innerText()), 'linked: changes to the original show up on reopen');
+  await page.getByTestId('back').click();
+  // Moved away: say so, and let the reader find it again.
+  await page.evaluate(async () => (await navigator.storage.getDirectory()).removeEntry('linked.pdf'));
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('open-error').waitFor();
+  check(/isn’t where it was/.test(await page.getByTestId('open-error').innerText()), 'linked: a moved file is reported as moved');
+  await put('found.pdf', 'columns.pdf');
+  await page.evaluate(() => window.localStorage.setItem('pick', 'found.pdf'));
+  await page.getByTestId('locate-file').click();
+  await page.getByTestId('reader').waitFor({ timeout: 5000 }).then(
+    () => check(true, 'linked: finding the file again reopens it'),
+    () => check(false, 'linked: finding the file again reopens it'),
+  );
+  await ctx.close();
+}
+
 // Interface language follows the OS/browser locale.
 async function german() {
-  const ctx = await browser.newContext({ locale: 'de-DE', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const ctx = await newContext({ locale: 'de-DE', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`german: ${e.message}`));
   await page.goto(BASE);
@@ -351,13 +412,17 @@ async function german() {
   await ctx.close();
 }
 
-await german();
-await locked();
-await tagged();
-await columns();
-await scan();
-await run('desktop', { width: 1440, height: 900 }, false);
-await run('mobile', { width: 390, height: 844 }, true);
+// ONLY=linked,scan runs a subset while iterating.
+const only = process.env.ONLY?.split(',');
+const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
+await step('german', german);
+await step('locked', locked);
+await step('tagged', tagged);
+await step('columns', columns);
+await step('scan', scan);
+await step('linked', linked);
+await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
+await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));
 await browser.close();
 
 for (const e of errors) console.log('console error:', e);

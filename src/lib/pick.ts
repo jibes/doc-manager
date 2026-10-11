@@ -3,8 +3,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
 import type { ImportItem } from '@/state/library';
+import { canOpenInPlace, pickHandles, type FileHandle } from './fsa';
 
 export async function pickPdfs(): Promise<ImportItem[]> {
+  // Chromium: link to the files where they are; elsewhere the library keeps a copy.
+  if (canOpenInPlace()) return itemsFromHandles(await pickHandles());
   const res = await DocumentPicker.getDocumentAsync({
     type: 'application/pdf',
     multiple: true,
@@ -25,9 +28,17 @@ export async function sampleItem(): Promise<ImportItem> {
   return { name, size: 0, uri: asset.localUri ?? asset.uri };
 }
 
-/** Web: files from drag-and-drop or the File Handling API. */
-export function itemsFromFiles(files: Iterable<File>): ImportItem[] {
+const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+
+/** Web: files from drag-and-drop (handles where the browser gives them, for opening in place). */
+export function itemsFromFiles(files: Iterable<File>, handles: (FileHandle | null)[] = []): ImportItem[] {
   return [...files]
-    .filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name))
-    .map((f) => ({ name: f.name, size: f.size, file: f }));
+    .map((f, i) => ({ name: f.name, size: f.size, file: f, handle: handles[i] ?? undefined }))
+    .filter((it) => isPdf(it.file));
+}
+
+/** Web: picked handles, or files from the OS "Open with" (File Handling API). */
+export async function itemsFromHandles(handles: FileHandle[]): Promise<ImportItem[]> {
+  const files = await Promise.all(handles.map((h) => h.getFile()));
+  return itemsFromFiles(files, handles);
 }

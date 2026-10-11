@@ -3,9 +3,11 @@ import { create } from 'zustand';
 import { errorText, t } from '@/i18n';
 import { asPasswordError, engine } from '@/engine';
 import { askPassword, rememberPassword } from '@/state/password';
+import type { FileHandle } from '@/lib/fsa';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
 
-export type ImportItem = { name: string; size: number; file?: Blob; uri?: string };
+/** `handle`: the file in place (web, Chromium); the library then links to it instead of copying. */
+export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle };
 
 type LibraryState = {
   docs: DocRecord[];
@@ -22,6 +24,10 @@ type LibraryState = {
   toggleReading(id: string): void;
   setView(id: string, view: 'page' | 'text'): void;
   markOpened(id: string): void;
+  /** Record facts that changed with the file itself (a linked file edited elsewhere). */
+  updateFileInfo(id: string, info: { pageCount: number }): void;
+  /** Point a linked document at a new location (after it was moved). */
+  relink(id: string, handle: FileHandle): Promise<void>;
   clearError(): void;
 };
 
@@ -122,10 +128,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
             coverAspect: first.height / first.width,
             addedAt: Date.now(),
             bookmarks: [],
+            linked: item.handle ? true : undefined,
           };
           handle.close();
           if (opened.password) rememberPassword(id, opened.password);
-          await repo.saveFile(id, item.file ?? item.uri!);
+          await repo.saveFile(id, item.handle ?? item.file ?? item.uri!);
           await repo.saveCover(id, cover);
           await repo.put(rec);
           const coverUri = await repo.coverUri(id);
@@ -171,6 +178,17 @@ export const useLibrary = create<LibraryState>((set, get) => {
     markOpened: (id) => {
       patch(id, (d) => ({ ...d, openedAt: Date.now() }));
       set((s) => ({ docs: [...s.docs].sort(byRecent) }));
+    },
+
+    updateFileInfo: (id, info) => {
+      const d = get().docs.find((x) => x.id === id);
+      if (d && d.pageCount !== info.pageCount) patch(id, (x) => ({ ...x, pageCount: info.pageCount }));
+    },
+
+    async relink(id, handle) {
+      const file = await handle.getFile();
+      await repo.saveFile(id, handle);
+      patch(id, (d) => ({ ...d, fileName: file.name, bytes: file.size, linked: true }));
     },
 
     clearError: () => set({ error: null }),

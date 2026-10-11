@@ -49,7 +49,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const fit = usePrefs((s) => s.fit);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, toggleReading, markOpened, setView } = useLibrary();
+  const { savePosition, toggleBookmark, toggleReading, markOpened, setView, updateFileInfo } = useLibrary();
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
   const view = doc.view ?? 'page';
   const textApiRef = useRef<ReflowApi | null>(null);
@@ -97,8 +97,10 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
 
   useEffect(() => {
     markOpened(doc.id);
+    // A linked file may have been edited elsewhere since the library last saw it.
+    updateFileInfo(doc.id, { pageCount: handle.pageCount });
     handle.outline().then((o) => setOutline(flattenOutline(o)), () => setOutline([]));
-  }, [doc.id, handle, markOpened]);
+  }, [doc.id, handle, markOpened, updateFileInfo]);
 
   // Re-anchor to the saved position whenever geometry changes (first layout, zoom, fit, rotation).
   useLayoutEffect(() => {
