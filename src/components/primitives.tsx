@@ -32,9 +32,11 @@ export function IconButton({ icon, label, active, size = 40, color, style, onPre
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ selected: active }}
-      // @ts-expect-error web-only tooltip
+      // Toggles: aria-pressed on web (aria-selected isn't valid on buttons); "selected" on native.
+      accessibilityState={Platform.OS === 'web' ? undefined : { selected: active }}
+      // @ts-expect-error web-only tooltip and toggle state
       title={Platform.OS === 'web' ? label : undefined}
+      aria-pressed={Platform.OS === 'web' && active !== undefined ? active : undefined}
       hitSlop={6}
       onPress={(e) => {
         tick();

@@ -203,7 +203,14 @@ function Blocks({
       }
       scrollToIndex(best);
     };
-    apiRef.current = { scrollToPage: (page) => scrollToIndex(blockAt(blocks, page, 0)), showHit };
+    // A page jump lands on the first block starting on that page (a paragraph carried over from the
+    // previous page would show the wrong page number); past the last block, the end of the text.
+    const scrollToPage = (page: number) => {
+      const i = blocks.findIndex((b) => b.page >= page);
+      if (i < 0 || page >= blocks[blocks.length - 1].page + 1) return list.current?.scrollToEnd({ animated: false });
+      scrollToIndex(i);
+    };
+    apiRef.current = { scrollToPage, showHit };
     return () => {
       apiRef.current = null;
     };
@@ -222,6 +229,8 @@ function Blocks({
   const cellsRef = useRef(new Map<number, View>());
   const currentRef = useRef(start);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // At the very bottom the last blocks can't reach the reading line: the position is then the last block.
+  const atEndRef = useRef(false);
   const locate = () => {
     const line = padTop + space.xl;
     const cells = [...cellsRef.current].sort((a, b) => a[0] - b[0]);
@@ -229,6 +238,7 @@ function Blocks({
       let best = -1;
       for (const [i, y] of tops) if (y <= line) best = i;
       if (best < 0 && tops.length) best = tops[0][0];
+      if (atEndRef.current) best = blocks.length - 1;
       if (best >= 0 && best !== currentRef.current) {
         currentRef.current = best;
         onPosition(blocks[best].page, blocks[best].y);
@@ -236,7 +246,9 @@ function Blocks({
     });
   };
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    onScrollY(e.nativeEvent.contentOffset.y);
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    atEndRef.current = contentOffset.y > 0 && contentOffset.y + layoutMeasurement.height >= contentSize.height - 8;
+    onScrollY(contentOffset.y);
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(locate, 80);
   };

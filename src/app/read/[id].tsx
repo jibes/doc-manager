@@ -56,7 +56,9 @@ export default function ReadScreen() {
       ) : null;
     return (
       <View style={[styles.center, { backgroundColor: p.canvas }]}>
-        <T style={{ fontFamily: fonts.sansSemi, fontSize: 22, letterSpacing: -0.4, textAlign: 'center' }}>{t.cantOpen}</T>
+        <T style={{ fontFamily: fonts.sansSemi, fontSize: 22, letterSpacing: -0.4, textAlign: 'center' }}>
+          {failure === FILE_ACCESS ? t.accessTitle : t.cantOpen}
+        </T>
         <T v="body" color={p.muted} style={{ textAlign: 'center', maxWidth: 420 }} testID="open-error">
           {message}
         </T>
