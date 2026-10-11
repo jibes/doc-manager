@@ -22,6 +22,8 @@ export type Palette = {
   /** Search hit fill on pages. */
   mark: string;
   markActive: string;
+  /** Outline on the current hit so it reads apart from the rest. */
+  markRing: string;
   scrim: string;
   /** Chrome glass over the reading surface. */
   glass: string;
@@ -47,6 +49,7 @@ export const palettes: Record<ThemeName, Palette> = {
     accentSoft: 'rgba(47,79,134,0.11)',
     mark: 'rgba(255,190,40,0.32)',
     markActive: 'rgba(255,150,0,0.55)',
+    markRing: '#D06A00',
     scrim: 'rgba(27,26,23,0.28)',
     glass: 'rgba(247,245,240,0.82)',
     page: { cssFilter: 'none' },
@@ -68,6 +71,7 @@ export const palettes: Record<ThemeName, Palette> = {
     accentSoft: 'rgba(138,75,36,0.12)',
     mark: 'rgba(214,140,40,0.30)',
     markActive: 'rgba(200,100,20,0.50)',
+    markRing: '#B4570E',
     scrim: 'rgba(58,46,32,0.30)',
     glass: 'rgba(242,232,214,0.84)',
     page: { cssFilter: 'sepia(0.32) saturate(0.92) brightness(0.97)', blend: { color: '#F1E2C4', mode: 'multiply' } },
@@ -89,6 +93,7 @@ export const palettes: Record<ThemeName, Palette> = {
     accentSoft: 'rgba(157,183,230,0.14)',
     mark: 'rgba(255,200,80,0.26)',
     markActive: 'rgba(255,180,40,0.48)',
+    markRing: '#FFB238',
     scrim: 'rgba(0,0,0,0.45)',
     glass: 'rgba(34,35,39,0.80)',
     page: { cssFilter: 'invert(0.86) hue-rotate(180deg) contrast(0.94)', blend: { color: '#DCDCDC', mode: 'difference' } },
@@ -110,6 +115,7 @@ export const palettes: Record<ThemeName, Palette> = {
     accentSoft: 'rgba(169,190,227,0.13)',
     mark: 'rgba(255,200,80,0.24)',
     markActive: 'rgba(255,180,40,0.44)',
+    markRing: '#FFAA30',
     scrim: 'rgba(0,0,0,0.6)',
     glass: 'rgba(14,14,15,0.80)',
     page: { cssFilter: 'invert(1) hue-rotate(180deg) brightness(0.84) contrast(0.96)', blend: { color: '#D2D2D2', mode: 'difference' } },

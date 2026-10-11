@@ -72,6 +72,19 @@ async function run(name, viewport, isMobile) {
   check(/of \d+ results?/.test(status), `${name}: search "${status}"`);
   await page.keyboard.press('Escape');
 
+  // Find-in-page persists after the panel closes: highlights stay, the bar steps and clears.
+  await page.getByTestId('find-bar').waitFor();
+  const marks = await page.getByTestId('hit').count() + (await page.getByTestId('hit-active').count());
+  check(marks > 0 && (await page.getByTestId('hit-active').count()) > 0, `${name}: ${marks} highlights on page with panel closed`);
+  await page.getByTestId('find-next').click();
+  await page.waitForTimeout(500);
+  const findStatus = await page.getByTestId('find-bar').innerText();
+  check(/2 of \d+/.test(findStatus), `${name}: find bar stepped → ${findStatus.replace(/\s+/g, ' ')}`);
+  await shot('4b-findbar');
+  await page.getByTestId('find-clear').click();
+  await page.waitForTimeout(300);
+  check((await page.getByTestId('hit').count()) === 0 && !(await page.getByTestId('find-bar').isVisible().catch(() => false)), `${name}: clearing removes highlights`);
+
   await reveal();
   await page.getByTestId('open-appearance').click();
   await page.getByLabel('Night').click();

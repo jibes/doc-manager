@@ -25,6 +25,7 @@ import { usePalette, usePrefs } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
 import { AppearancePanel } from './AppearancePanel';
 import { ContentsPanel, flattenOutline, type FlatOutline } from './ContentsPanel';
+import { FindBar } from './FindBar';
 import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
 import { PageView } from './PageView';
 import { isWide } from './Panel';
@@ -72,7 +73,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     [vp, handle.pageSizes, insets.top, insets.bottom, fit, zoom],
   );
   const pages = useMemo(() => handle.pageSizes.map((_, i) => i), [handle.pageSizes]);
-  const contentW = vp && layout ? Math.max(vp.w, layout.maxWidth + 24) : 0;
+  const contentW = vp && layout ? Math.max(vp.w, layout.maxWidth + layout.gutter * 2) : 0;
 
   useEffect(() => {
     markOpened(doc.id);
@@ -168,12 +169,13 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     };
   }, [query, handle]);
 
+  // Highlights persist while a query is active, panel open or not — like find-in-page elsewhere.
   const hitsByPage = useMemo(() => {
     const m = new Map<number, SearchHit[]>();
-    if (panel !== 'search') return m;
     for (const h of hits) m.set(h.page, [...(m.get(h.page) ?? []), h]);
     return m;
-  }, [hits, panel]);
+  }, [hits]);
+  const searchActive = query.trim().length >= 2;
 
   const showHit = useCallback(
     (i: number) => {
@@ -214,7 +216,8 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (mod && (e.key === '=' || e.key === '+')) return e.preventDefault(), setZoom(zoom * 1.2);
       if (mod && e.key === '-') return e.preventDefault(), setZoom(zoom / 1.2);
       if (mod && e.key === '0') return e.preventDefault(), setZoom(1);
-      if (e.key === 'Escape') return panel ? setPanel(null) : goBack();
+      if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
+      if (e.key === 'Escape') return panel ? setPanel(null) : searchActive ? onQuery('') : goBack();
       if (typing || mod) return;
       const step = vp.h * 0.15;
       const pageStep = vp.h - TOP_BAR - BOTTOM_BAR;
@@ -264,7 +267,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc.id, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark]);
+  }, [vp, zoom, panel, page, doc.id, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery]);
 
   // ---------- pinch (native) ----------
   const pinchScale = useSharedValue(1);
@@ -439,6 +442,21 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           />
         </View>
       </View>
+
+      {searchActive && panel !== 'search' && (
+        <FindBar
+          palette={p}
+          query={query.trim()}
+          count={hits.length}
+          active={active}
+          searching={searching}
+          // Fixed below the top bar: moving with the chrome would shift it out from under a pointer.
+          top={insets.top + TOP_BAR + space.sm}
+          onOpen={() => setPanel('search')}
+          onStep={stepHit}
+          onClear={() => onQuery('')}
+        />
+      )}
 
       {panel === 'contents' && (
         <ContentsPanel
