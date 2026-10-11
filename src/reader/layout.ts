@@ -11,6 +11,8 @@ export type PageLayout = {
   padTop: number;
   /** Widest page; drives horizontal scroll when zoomed. */
   maxWidth: number;
+  /** Side margin around pages. */
+  gutter: number;
 };
 
 export type Viewport = { width: number; height: number; padTop: number; padBottom: number };
@@ -40,7 +42,7 @@ export function computeLayout(sizes: Size[], vp: Viewport, fit: FitMode, zoom: n
     y += h + gap;
     maxWidth = Math.max(maxWidth, w);
   }
-  return { widths, heights, offsets, total: y + vp.padBottom, gap, padTop: vp.padTop, maxWidth };
+  return { widths, heights, offsets, total: y + vp.padBottom, gap, padTop: vp.padTop, maxWidth, gutter };
 }
 
 /** Page whose band contains the given y (binary search). */

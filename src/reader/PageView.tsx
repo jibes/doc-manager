@@ -65,6 +65,7 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
           return (
             <View
               key={`${i}-${j}`}
+              testID={active ? 'hit-active' : 'hit'}
               pointerEvents="none"
               style={{
                 position: 'absolute',
@@ -75,6 +76,8 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
                 borderRadius: 2,
                 backgroundColor: active ? palette.markActive : palette.mark,
                 mixBlendMode: palette.dark ? 'screen' : 'multiply',
+                borderWidth: active ? 1.5 : 0,
+                borderColor: palette.markRing,
               }}
             />
           );
