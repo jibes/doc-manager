@@ -345,6 +345,42 @@ async function scan() {
   await ctx.close();
 }
 
+// Forms: fill every kind of field, save, and find the values again after a reload.
+async function forms() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`forms: ${e.message}`));
+  await openFixture(page, 'form.pdf');
+  const name = page.getByTestId('field-name');
+  await name.waitFor({ timeout: 10000 });
+  await name.click();
+  await page.keyboard.type('Ada Lovelace');
+  await page.keyboard.press('Enter');
+  await page.getByTestId('field-size').nth(2).click();
+  await page.getByTestId('field-site').selectOption('2');
+  await page.getByTestId('field-agree').click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="field-agree"]')?.getAttribute('aria-checked') === 'true', null, { timeout: 5000 });
+  check(await page.getByTestId('save').isVisible(), 'forms: editing fields offers Save');
+  // Leaving with unsaved edits asks first (dismissed here: stay).
+  page.once('dialog', (d) => d.dismiss());
+  await page.getByTestId('back').click();
+  check((await page.getByTestId('reader').count()) === 1, 'forms: leaving with unsaved edits asks first');
+  await page.getByTestId('save').click();
+  await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
+  await page.getByTestId('back').click();
+  await page.getByTestId('recent-row').first().waitFor();
+  await page.reload();
+  await page.getByTestId('recent-row').first().click();
+  await name.waitFor({ timeout: 10000 });
+  const kept =
+    (await name.inputValue()) === 'Ada Lovelace' &&
+    (await page.getByTestId('field-size').nth(2).getAttribute('aria-checked')) === 'true' &&
+    (await page.getByTestId('field-site').inputValue()) === '2' &&
+    (await page.getByTestId('field-agree').getAttribute('aria-checked')) === 'true';
+  check(kept, 'forms: text, radio, dropdown and checkbox values saved');
+  await ctx.close();
+}
+
 // Open in place (Chromium): the library links to the user's file. Handles come from the origin-private
 // file system, standing in for the picker; they behave like real ones (read, write, vanish).
 async function linked() {
@@ -393,6 +429,21 @@ async function linked() {
     () => check(true, 'linked: finding the file again reopens it'),
     () => check(false, 'linked: finding the file again reopens it'),
   );
+  // Saving edits writes back into the user's own file.
+  await page.getByTestId('back').click();
+  await put('form.pdf', 'form.pdf');
+  await page.evaluate(() => window.localStorage.setItem('pick', 'form.pdf'));
+  await page.getByTestId('add').click();
+  await page.getByTestId('field-name').click();
+  await page.keyboard.type('Grace Hopper');
+  await page.keyboard.press('Enter');
+  await page.getByTestId('save').click();
+  await page.getByText('Saved to “form.pdf”').waitFor({ timeout: 5000 });
+  const written = await page.evaluate(async () => {
+    const f = await (await (await navigator.storage.getDirectory()).getFileHandle('form.pdf')).getFile();
+    return new TextDecoder('latin1').decode(await f.arrayBuffer()).includes('Grace Hopper');
+  });
+  check(written, 'linked: saving writes the filled form into the original file');
   await ctx.close();
 }
 
@@ -420,6 +471,7 @@ await step('locked', locked);
 await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
+await step('forms', forms);
 await step('linked', linked);
 await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
 await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));

@@ -18,11 +18,11 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '@/i18n';
-import { IconButton, T } from '@/components/primitives';
+import { Button, IconButton, T } from '@/components/primitives';
+import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import type { DocHandle, PageLink, SearchHit } from '@/engine/types';
 import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
-import { goBack } from '@/lib/nav';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
@@ -32,6 +32,7 @@ import { FindBar } from './FindBar';
 import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
 import { PageView } from './PageView';
 import { ReflowView, type ReflowApi } from './ReflowView';
+import { useEdits } from './useEdits';
 import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
@@ -55,6 +56,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const textApiRef = useRef<ReflowApi | null>(null);
   // Reading-list documents get reading behaviour (immersive chrome, progress); everything else is a plain viewer.
   const readingMode = !!doc.reading;
+  const edits = useEdits(doc, handle);
 
   const list = useRef<FlatList<number>>(null);
   const [vp, setVp] = useState<{ w: number; h: number } | null>(null);
@@ -292,9 +294,10 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     if (Platform.OS !== 'web' || !vp) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      const typing = (e.target as HTMLElement)?.tagName === 'INPUT';
-      if (mod && e.key === 'p') return e.preventDefault(), void printDoc(doc).catch(() => {});
-      if (mod && e.key === 's') return e.preventDefault(), void downloadDoc(doc).catch(() => {});
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
+      if (mod && e.key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
+      // ⌘S saves edits when there are any; otherwise it downloads, as before.
+      if (mod && e.key === 's') return e.preventDefault(), void (edits.dirty ? edits.save() : downloadDoc(doc).catch(() => {}));
       if (mod && e.key === 'f') {
         e.preventDefault();
         setChrome(true);
@@ -304,7 +307,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (mod && e.key === '-') return e.preventDefault(), setZoom(zoom / 1.2);
       if (mod && e.key === '0') return e.preventDefault(), setZoom(1);
       if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
-      if (e.key === 'Escape') return panel ? setPanel(null) : searchActive ? onQuery('') : goBack();
+      if (e.key === 'Escape') return panel ? setPanel(null) : searchActive ? onQuery('') : edits.leave();
       if (typing || mod) return;
       const step = vp.h * 0.15;
       const pageStep = vp.h - TOP_BAR - BOTTOM_BAR;
@@ -355,7 +358,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view]);
+  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits]);
 
   // ---------- pinch (native) ----------
   const pinchScale = useSharedValue(1);
@@ -407,9 +410,9 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   };
   const menuItems: MenuItem[] = [
     ...(narrow ? [readingItem] : []),
-    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc).catch(() => {}) },
-    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
-    { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc).catch(() => {}) },
+    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
+    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
+    { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
 
   const onLink = useCallback(
@@ -474,6 +477,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
                       activeHit={hits[active]}
                       onPress={onPagePress}
                       onLink={onLink}
+                      onEdited={edits.markDirty}
                     />
                   </View>
                 )}
@@ -496,13 +500,16 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         pointerEvents={chromeShown ? 'box-none' : 'none'}
         style={[styles.top, { paddingTop: insets.top, height: insets.top + TOP_BAR, backgroundColor: p.glass, borderColor: p.hairline }, topStyle]}
       >
-        <IconButton icon="back" label={t.library} onPress={goBack} testID="back" />
+        <IconButton icon="back" label={t.library} onPress={edits.leave} testID="back" />
         <View style={styles.titleWrap}>
           <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15, letterSpacing: -0.2 }}>
             {doc.title}
           </T>
         </View>
-        <View style={{ flexDirection: 'row' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {edits.dirty && (
+            <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginRight: space.sm }} />
+          )}
           {!narrow && (
             <IconButton
               icon={readingMode ? 'readingOn' : 'readingAdd'}
@@ -642,6 +649,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       )}
       {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
       {panel === 'appearance' && <AppearancePanel palette={p} view={view} zoom={zoom} onZoom={setZoom} onClose={() => setPanel(null)} />}
+      <Toast message={edits.notice} onDismiss={edits.clearNotice} />
     </View>
   );
 }

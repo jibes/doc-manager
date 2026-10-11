@@ -2,9 +2,13 @@ import { repo, type DocRecord } from '@/storage';
 
 export const canDownload = true;
 
-async function asFile(doc: DocRecord): Promise<File> {
-  const src = await repo.source(doc.id);
-  const bytes = src.kind === 'bytes' ? src.bytes : await (await fetch(src.uri)).arrayBuffer();
+/** Unsaved edits: the document as it is on screen, rather than as stored. */
+export type Current = () => Promise<ArrayBuffer> | undefined;
+
+async function asFile(doc: DocRecord, current?: Current): Promise<File> {
+  const live = current?.();
+  const src = live ? null : await repo.source(doc.id);
+  const bytes = live ? await live : src!.kind === 'bytes' ? src!.bytes : await (await fetch(src!.uri)).arrayBuffer();
   return new File([bytes], doc.fileName, { type: 'application/pdf' });
 }
 
@@ -19,13 +23,13 @@ function save(file: File) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export async function downloadDoc(doc: DocRecord) {
-  save(await asFile(doc));
+export async function downloadDoc(doc: DocRecord, current?: Current) {
+  save(await asFile(doc, current));
 }
 
 /** System share sheet where the browser can share files (mostly mobile); otherwise a download. */
-export async function shareDoc(doc: DocRecord) {
-  const file = await asFile(doc);
+export async function shareDoc(doc: DocRecord, current?: Current) {
+  const file = await asFile(doc, current);
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: doc.title });
@@ -41,11 +45,11 @@ export async function shareDoc(doc: DocRecord) {
  * Prints the original PDF (not the app UI). Desktop browsers print it from a hidden frame;
  * where PDFs can't load in frames (mobile), it opens in the browser's own viewer instead.
  */
-export async function printDoc(doc: DocRecord) {
+export async function printDoc(doc: DocRecord, current?: Current) {
   const coarse = matchMedia('(pointer: coarse)').matches;
   // Open synchronously within the click so popup blockers allow it.
   const popup = coarse ? window.open('', '_blank') : null;
-  const url = URL.createObjectURL(await asFile(doc));
+  const url = URL.createObjectURL(await asFile(doc, current));
   if (popup) {
     popup.location.href = url;
     return;

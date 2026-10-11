@@ -4,6 +4,9 @@ import * as Sharing from 'expo-sharing';
 
 import { repo, type DocRecord } from '@/storage';
 
+/** Unsaved edits (web only for now: native can't edit yet). */
+export type Current = () => Promise<ArrayBuffer> | undefined;
+
 /** On native, "download" is the share sheet's Save to Files. */
 export const canDownload = false;
 
@@ -17,14 +20,14 @@ async function namedCopy(doc: DocRecord): Promise<string> {
   return dest.uri;
 }
 
-export async function shareDoc(doc: DocRecord) {
+export async function shareDoc(doc: DocRecord, _current?: Current) {
   await Sharing.shareAsync(await namedCopy(doc), { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: doc.title });
 }
 
-export async function downloadDoc(doc: DocRecord) {
+export async function downloadDoc(doc: DocRecord, _current?: Current) {
   await shareDoc(doc);
 }
 
-export async function printDoc(doc: DocRecord) {
+export async function printDoc(doc: DocRecord, _current?: Current) {
   await Print.printAsync({ uri: await namedCopy(doc) });
 }

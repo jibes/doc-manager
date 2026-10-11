@@ -82,6 +82,7 @@ function handleFrom(r: OpenResult): DocHandle {
     pageCount: r.pageCount,
     pageSizes: r.pageSizes,
     metadata: r.metadata,
+    hasForm: r.hasForm,
     async renderPage(page, { width, clip, signal }): Promise<Raster> {
       const out = await client.call('render', { doc: r.doc, page, width, clip }, { signal });
       return { kind: 'bitmap', ...out };
@@ -93,6 +94,9 @@ function handleFrom(r: OpenResult): DocHandle {
     pageText: (page) => memo(textCache, page, () => client.call('text', { doc: r.doc, page })),
     links: (page) => memo(linkCache, page, () => client.call('links', { doc: r.doc, page })),
     layout: (pages) => client.call('layout', { doc: r.doc, pages }),
+    fields: (page) => (r.hasForm ? client.call('fields', { doc: r.doc, page }) : Promise.resolve([])),
+    setField: (page, index, value) => client.call('setField', { doc: r.doc, page, index, value }),
+    save: () => client.call('save', { doc: r.doc }),
     close: () => void client.call('close', { doc: r.doc }).catch(() => {}),
   };
   docIds.set(handle, r.doc);

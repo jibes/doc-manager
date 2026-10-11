@@ -39,8 +39,36 @@ export class RasterCache {
   private inflight = 0;
   private px = 0;
   private focus = 0;
+  /** Bumped when a page's content changes (form edit, annotation); views re-render it. */
+  private versions = new Map<number, number>();
+  private listeners = new Set<() => void>();
 
   constructor(readonly handle: DocHandle) {}
+
+  version = (page: number) => this.versions.get(page) ?? 0;
+
+  subscribe = (fn: () => void) => {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  };
+
+  /** Drops a page's rasters after its content changed; mounted views fetch it again. */
+  invalidate(page: number) {
+    for (const [k, e] of this.entries)
+      if (k.startsWith(`${page}@`)) {
+        this.entries.delete(k);
+        this.px -= e.px;
+        if (e.raster.kind === 'bitmap') e.raster.bitmap.close();
+      }
+    for (const [k, j] of this.jobs)
+      if (j.page === page) {
+        this.jobs.delete(k);
+        j.ctrl.abort();
+        j.reject(new DOMException('Aborted', 'AbortError'));
+      }
+    this.versions.set(page, this.version(page) + 1);
+    this.listeners.forEach((l) => l());
+  }
 
   private key = (page: number, width: number) => `${page}@${width}`;
 
