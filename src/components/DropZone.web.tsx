@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { t } from '@/i18n';
 import { fonts, radius } from '@/design/tokens';
 import { itemsFromFiles } from '@/lib/pick';
 import type { ImportItem } from '@/state/library';
@@ -67,8 +68,8 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
         ]}
       >
         <View style={[styles.frame, { borderColor: p.accent }]}>
-          <T style={{ fontFamily: fonts.serif, fontSize: 32, letterSpacing: -0.5 }}>Drop to add</T>
-          <T v="label" color={p.muted}>PDFs stay on this device</T>
+          <T style={{ fontFamily: fonts.serif, fontSize: 32, letterSpacing: -0.5 }}>{t.dropTitle}</T>
+          <T v="label" color={p.muted}>{t.dropBody}</T>
         </View>
       </View>
     </View>

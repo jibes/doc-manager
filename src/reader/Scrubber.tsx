@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { StyleSheet, View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 
+import { t } from '@/i18n';
 import { T, tick } from '@/components/primitives';
 import { elevation, fonts, radius, space, type Palette } from '@/design/tokens';
 import type { Size } from '@/engine/types';
@@ -81,8 +82,8 @@ export function Scrubber({ page, pageCount, sizes, cache, palette: p, chapters, 
       onLayout={onLayout}
       accessible
       accessibilityRole="adjustable"
-      accessibilityLabel="Page"
-      accessibilityValue={{ min: 1, max: pageCount, now: shown + 1, text: `Page ${shown + 1} of ${pageCount}` }}
+      accessibilityLabel={t.page}
+      accessibilityValue={{ min: 1, max: pageCount, now: shown + 1, text: t.pageOf(shown + 1, pageCount) }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => onSeek(Math.min(max, Math.max(0, page + (e.nativeEvent.actionName === 'increment' ? 1 : -1))))}
       style={[styles.hit, { cursor: 'pointer' } as object]}

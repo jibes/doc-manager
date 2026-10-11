@@ -16,6 +16,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { t } from '@/i18n';
 import { IconButton, T } from '@/components/primitives';
 import { fonts, radius, space } from '@/design/tokens';
 import type { DocHandle, SearchHit } from '@/engine/types';
@@ -362,16 +363,16 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         pointerEvents={chromeShown ? 'box-none' : 'none'}
         style={[styles.top, { paddingTop: insets.top, height: insets.top + TOP_BAR, backgroundColor: p.glass, borderColor: p.hairline }, topStyle]}
       >
-        <IconButton icon="back" label="Library" onPress={goBack} testID="back" />
+        <IconButton icon="back" label={t.library} onPress={goBack} testID="back" />
         <View style={styles.titleWrap}>
           <T numberOfLines={1} style={{ fontFamily: fonts.serif, fontSize: 16, letterSpacing: -0.1 }}>
             {doc.title}
           </T>
         </View>
         <View style={{ flexDirection: 'row' }}>
-          <IconButton icon="search" label="Search (⌘F)" active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
-          <IconButton icon="contents" label="Contents (T)" active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
-          <IconButton icon="type" label="Appearance" active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
+          <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
+          <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
+          <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
         </View>
       </Animated.View>
 
@@ -395,7 +396,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
                 style={[styles.pageInput, { color: p.ink }]}
               />
             ) : (
-              <Pressable accessibilityRole="button" accessibilityLabel="Go to page" onPress={() => setEditingPage(true)} testID="page-label">
+              <Pressable accessibilityRole="button" accessibilityLabel={t.goToPage} onPress={() => setEditingPage(true)} testID="page-label">
                 <T v="numeral" style={{ fontSize: 13 }}>
                   {page + 1}
                   <T v="numeral" color={p.muted} style={{ fontSize: 13 }}>
@@ -409,18 +410,18 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           <View style={[styles.pill, styles.tools, { backgroundColor: p.glass, borderColor: p.hairline }]}>
             {wide && (
               <>
-                <IconButton icon="zoomOut" label="Zoom out (⌘−)" size={34} onPress={() => setZoom(zoom / 1.2)} />
-                <Pressable onPress={() => setZoom(1)} accessibilityLabel="Reset zoom">
+                <IconButton icon="zoomOut" label={`${t.zoomOut} (⌘−)`} size={34} onPress={() => setZoom(zoom / 1.2)} />
+                <Pressable onPress={() => setZoom(1)} accessibilityLabel={t.resetZoom}>
                   <T v="numeral" color={p.muted} style={{ minWidth: 40, textAlign: 'center' }}>
                     {Math.round(zoom * 100)}%
                   </T>
                 </Pressable>
-                <IconButton icon="zoomIn" label="Zoom in (⌘+)" size={34} onPress={() => setZoom(zoom * 1.2)} />
+                <IconButton icon="zoomIn" label={`${t.zoomIn} (⌘+)`} size={34} onPress={() => setZoom(zoom * 1.2)} />
               </>
             )}
             <IconButton
               icon={bookmarked ? 'bookmarkFill' : 'bookmark'}
-              label={bookmarked ? 'Remove bookmark (B)' : 'Bookmark page (B)'}
+              label={bookmarked ? t.removeBookmark : t.bookmarkPage}
               size={34}
               active={bookmarked}
               onPress={() => toggleBookmark(doc.id, page)}

@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { t } from '@/i18n';
 import { IconButton, T, tick } from '@/components/primitives';
 import { fonts, palettes, radius, space, type Palette, type ThemeName } from '@/design/tokens';
 import { usePalette, usePrefs, type FitMode } from '@/state/prefs';
@@ -15,7 +16,7 @@ function Swatch({ name, selected, onPress }: { name: ThemeName | null; selected:
     <Pressable
       accessibilityRole="radio"
       accessibilityState={{ selected }}
-      accessibilityLabel={name ? palettes[name].label : 'Automatic'}
+      accessibilityLabel={name ? t.themes[name] : t.themeAutoA11y}
       onPress={() => {
         tick();
         onPress();
@@ -34,7 +35,7 @@ function Swatch({ name, selected, onPress }: { name: ThemeName | null; selected:
         </View>
       </View>
       <T v="caption" color={selected ? p.ink : p.muted} style={{ fontFamily: fonts.sansMedium }}>
-        {name ? palettes[name].label : 'Auto'}
+        {name ? t.themes[name] : t.themeAuto}
       </T>
     </Pressable>
   );
@@ -43,11 +44,11 @@ function Swatch({ name, selected, onPress }: { name: ThemeName | null; selected:
 export function AppearancePanel({ palette: p, zoom, onZoom, onClose }: { palette: Palette; zoom: number; onZoom: (z: number) => void; onClose: () => void }) {
   const { theme, fit, set } = usePrefs();
   const fits: [FitMode, string][] = [
-    ['width', 'Fit width'],
-    ['page', 'Fit page'],
+    ['width', t.fitWidth],
+    ['page', t.fitPage],
   ];
   return (
-    <Panel title="Appearance" onClose={onClose} compact testID="appearance-panel">
+    <Panel title={t.appearance} onClose={onClose} compact testID="appearance-panel">
       <View style={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.xl }}>
         <View style={styles.swatches} accessibilityRole="radiogroup">
           {([null, 'paper', 'sepia', 'dusk', 'night'] as (ThemeName | null)[]).map((n) => (
@@ -56,7 +57,7 @@ export function AppearancePanel({ palette: p, zoom, onZoom, onClose }: { palette
         </View>
 
         <View style={{ gap: space.sm }}>
-          <T v="kicker" color={p.muted}>Layout</T>
+          <T v="kicker" color={p.muted}>{t.layout}</T>
           <View style={[styles.segment, { backgroundColor: p.hairline }]}>
             {fits.map(([k, label]) => (
               <Pressable
@@ -76,13 +77,13 @@ export function AppearancePanel({ palette: p, zoom, onZoom, onClose }: { palette
         </View>
 
         <View style={{ gap: space.sm }}>
-          <T v="kicker" color={p.muted}>Zoom</T>
+          <T v="kicker" color={p.muted}>{t.zoom}</T>
           <View style={styles.zoom}>
-            <IconButton icon="zoomOut" label="Zoom out" onPress={() => onZoom(zoom / 1.2)} disabled={zoom <= 0.5} />
-            <Pressable onPress={() => onZoom(1)} accessibilityLabel="Reset zoom" style={styles.zoomVal}>
+            <IconButton icon="zoomOut" label={t.zoomOut} onPress={() => onZoom(zoom / 1.2)} disabled={zoom <= 0.5} />
+            <Pressable onPress={() => onZoom(1)} accessibilityLabel={t.resetZoom} style={styles.zoomVal}>
               <T v="numeral" style={{ fontSize: 15 }}>{Math.round(zoom * 100)}%</T>
             </Pressable>
-            <IconButton icon="zoomIn" label="Zoom in" onPress={() => onZoom(zoom * 1.2)} disabled={zoom >= 4} />
+            <IconButton icon="zoomIn" label={t.zoomIn} onPress={() => onZoom(zoom * 1.2)} disabled={zoom >= 4} />
           </View>
         </View>
       </View>

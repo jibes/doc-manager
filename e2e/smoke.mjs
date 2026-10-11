@@ -125,6 +125,23 @@ async function run(name, viewport, isMobile) {
   await ctx.close();
 }
 
+// Interface language follows the OS/browser locale.
+async function german() {
+  const ctx = await browser.newContext({ locale: 'de-DE', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`german: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Ein ruhiger Ort').waitFor();
+  await page.getByTestId('sample').click();
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-search').click();
+  await page.getByTestId('search-input').fill('quire');
+  await page.waitForFunction(() => /\d+ Treffer/.test(document.body.innerText), null, { timeout: 10000 });
+  check((await page.locator('html').getAttribute('lang')) === 'de', 'german: UI and <html lang> follow de-DE locale');
+  await ctx.close();
+}
+
+await german();
 await run('desktop', { width: 1440, height: 900 }, false);
 await run('mobile', { width: 390, height: 844 }, true);
 await browser.close();

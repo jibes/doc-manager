@@ -6,6 +6,7 @@ Expo SDK 57 / React Native 0.86 app. Expo APIs change every SDK: verify against 
 - Routes live in `src/app/`; everything else outside it.
 - Never hand-edit `ios/` or `android/` (Continuous Native Generation). Native engine code lives in `modules/pdf-engine`.
 - UI must depend only on `src/engine/types.ts`, never on PDFium or native module internals.
+- UI strings live in `src/i18n/en.ts` + `de.ts` (German is type-checked against English); never hard-code user-facing text.
 - React Compiler is on: keep `npx eslint .` clean (no refs or setState during render or effect bodies).
 - After editing `src/engine/pdfium/worker.ts`, run `npm run engine`.
 - Before finishing: `npm run typecheck`, `npx eslint .`, `npm run test:e2e` against a running `npm run web` (start Metro without `CI=1`, which disables file watching).

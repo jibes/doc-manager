@@ -1,6 +1,7 @@
 import { Platform, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
 
+import { t } from '@/i18n';
 import { elevation, fonts, space } from '@/design/tokens';
 import { usePalette } from '@/state/prefs';
 import { Button, T } from './primitives';
@@ -45,15 +46,15 @@ export function EmptyLibrary({ onAdd, onSample }: { onAdd: () => void; onSample:
       </Animated.View>
       <Animated.View entering={FadeInUp.delay(120).duration(500)} style={{ alignItems: 'center', gap: space.md, maxWidth: 420 }}>
         <T style={{ fontFamily: fonts.serif, fontSize: 38, lineHeight: 42, letterSpacing: -0.8, textAlign: 'center' }}>
-          A quiet place{'\n'}to read.
+          {t.emptyTitle}
         </T>
         <T v="body" color={p.muted} style={{ textAlign: 'center' }}>
-          Add a PDF to begin. Everything stays on this device{Platform.OS === 'web' ? ' — or drop a file anywhere.' : '.'}
+          {Platform.OS === 'web' ? t.emptyBodyWeb : t.emptyBody}
         </T>
       </Animated.View>
       <Animated.View entering={FadeInUp.delay(220).duration(500)} style={styles.actions}>
-        <Button testID="add" label="Add PDF" icon="plus" onPress={onAdd} />
-        <Button testID="sample" label="Open a sample" kind="quiet" onPress={onSample} />
+        <Button testID="add" label={t.addPdf} icon="plus" onPress={onAdd} />
+        <Button testID="sample" label={t.openSample} kind="quiet" onPress={onSample} />
       </Animated.View>
     </View>
   );

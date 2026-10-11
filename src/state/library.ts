@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { errorText, t } from '@/i18n';
 import { engine } from '@/engine';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
 
@@ -30,7 +31,7 @@ export function cleanTitle(metaTitle: string | undefined, fileName: string): str
   const junk = /^(untitled|document|microsoft word|slide ?\d*|title|\s*)$/i;
   const meta = metaTitle?.replace(/^Microsoft (Word|PowerPoint) - /i, '').replace(/\.(docx?|pptx?)$/i, '').trim();
   if (meta && !junk.test(meta) && meta.length < 160) return meta;
-  return fileName.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Untitled';
+  return fileName.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim() || t.untitled;
 }
 
 const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.openedAt ?? a.addedAt);
@@ -103,7 +104,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
           set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: coverUri } }));
           added.push(rec);
         } catch (e) {
-          set({ error: `Couldn’t add “${item.name}”. ${e instanceof Error ? e.message : ''}`.trim() });
+          set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
         } finally {
           set((s) => ({ importing: s.importing.filter((n) => n !== item.name) }));
         }

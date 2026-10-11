@@ -4,7 +4,6 @@ export type ThemeName = 'paper' | 'sepia' | 'dusk' | 'night';
 
 export type Palette = {
   name: ThemeName;
-  label: string;
   dark: boolean;
   /** Behind pages / app background. */
   canvas: string;
@@ -35,7 +34,6 @@ export type Palette = {
 export const palettes: Record<ThemeName, Palette> = {
   paper: {
     name: 'paper',
-    label: 'Paper',
     dark: false,
     canvas: '#ECE8DF',
     surface: '#F7F5F0',
@@ -57,7 +55,6 @@ export const palettes: Record<ThemeName, Palette> = {
   },
   sepia: {
     name: 'sepia',
-    label: 'Sepia',
     dark: false,
     canvas: '#E6DAC3',
     surface: '#F2E8D6',
@@ -79,7 +76,6 @@ export const palettes: Record<ThemeName, Palette> = {
   },
   dusk: {
     name: 'dusk',
-    label: 'Dusk',
     dark: true,
     canvas: '#18191C',
     surface: '#222327',
@@ -101,7 +97,6 @@ export const palettes: Record<ThemeName, Palette> = {
   },
   night: {
     name: 'night',
-    label: 'Night',
     dark: true,
     canvas: '#000000',
     surface: '#0E0E0F',
