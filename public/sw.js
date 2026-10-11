@@ -1,5 +1,5 @@
 // Offline shell: navigations network-first, everything else stale-while-revalidate.
-const CACHE = 'quire-v2';
+const CACHE = 'quire-v3';
 // Paths resolve against the worker's own URL, so the app works under any base path.
 const ROOT = new URL('./', self.location.href).href;
 const SHELL = [ROOT, 'engine/pdfium-worker.js', 'engine/pdfium.wasm', 'manifest.webmanifest'];

@@ -10,6 +10,7 @@ import { Icon } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
+import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
 import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
@@ -43,6 +44,8 @@ export default function Library() {
   const { width } = useWindowDimensions();
   const { docs, covers, loaded, importing, error, load, importFiles, remove, clearError } = useLibrary();
   const [query, setQuery] = useState('');
+  const [hint, setHint] = useState<string | null>(null);
+  const { kind: installKind, install } = useInstall();
 
   useEffect(() => {
     load();
@@ -80,6 +83,17 @@ export default function Library() {
           <View style={styles.masthead}>
             <T style={{ fontFamily: fonts.serifSemi, fontSize: 24, letterSpacing: -0.4 }}>Quire</T>
             <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
+              {installKind && (
+                <Button
+                  testID="install"
+                  kind="quiet"
+                  icon="install"
+                  label="Install"
+                  onPress={() =>
+                    installKind === 'prompt' ? install() : setHint('To install: tap Share, then “Add to Home Screen”.')
+                  }
+                />
+              )}
               {docs.length > 0 && <Button testID="add" label={wide ? 'Add PDF' : 'Add'} icon="plus" onPress={async () => add(await pickPdfs())} />}
             </View>
           </View>
@@ -135,7 +149,7 @@ export default function Library() {
           </T>
         </Pressable>
       </ScrollView>
-      <Toast message={error} onDismiss={clearError} />
+      <Toast message={error ?? hint} onDismiss={() => (error ? clearError() : setHint(null))} />
     </DropZone>
   );
 }
