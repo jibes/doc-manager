@@ -1,5 +1,5 @@
 {
-  "name": "quire",
+  "name": "tessel",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
@@ -55,7 +55,7 @@
     "engine": "node scripts/build-engine.mjs --minify",
     "postinstall": "node scripts/build-engine.mjs --minify",
     "build:web": "npm run engine && expo export -p web && node scripts/postexport.mjs",
-    "sample": "python3 scripts/make-sample-pdf.py assets/samples/elements-of-reading.pdf",
+    "sample": "python3 scripts/make-sample-pdf.py assets/samples/welcome-to-tessel.pdf",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "test:e2e": "node e2e/smoke.mjs"

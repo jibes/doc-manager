@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 type InstallPrompt = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 type Kind = 'prompt' | 'ios' | null;
 
-const EVENT = 'quire:installable';
+const EVENT = 'tessel:installable';
 const w = () => window as unknown as { __installPrompt?: InstallPrompt | null };
 
 const standalone = () =>

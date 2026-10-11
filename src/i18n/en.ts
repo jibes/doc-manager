@@ -1,33 +1,59 @@
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+/** Human file size with a locale decimal separator. */
+export const size = (bytes: number, dot: string) =>
+  bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1).replace('.', dot)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+
+export type AgoWords = { now: string; min: (n: number) => string; h: (n: number) => string; d: (n: number) => string; locale: string };
+const AGO_EN: AgoWords = { now: 'just now', min: (n) => `${n} min ago`, h: (n) => `${n} h ago`, d: (n) => (n === 1 ? 'yesterday' : `${n} days ago`), locale: 'en' };
+
+/** Coarse relative time; older than a week shows the date. */
+export function ago(ts: number, w: AgoWords): string {
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60) return w.now;
+  if (s < 3600) return w.min(Math.floor(s / 60));
+  if (s < 86400) return w.h(Math.floor(s / 3600));
+  if (s < 7 * 86400) return w.d(Math.floor(s / 86400));
+  return new Date(ts).toLocaleDateString(w.locale, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 export const en = {
   // Library
-  add: 'Add',
-  addPdf: 'Add PDF',
+  add: 'Open',
+  addPdf: 'Open PDF',
+  tagline: 'PDF Viewer',
   install: 'Install',
   installHintIos: 'To install: tap Share, then “Add to Home Screen”.',
   continueReading: 'Continue reading',
   continueReadingA11y: (title: string, page: number) => `Continue reading ${title}, page ${page}`,
   pageOf: (page: number, total: number) => `Page ${page} of ${total}`,
-  libraryCount: (n: number) => `Library · ${n}`,
+  recentCount: (n: number) => `Recent · ${n}`,
+  readingList: 'Reading list',
+  readingListCount: (n: number) => `Reading list · ${n}`,
+  finishedCount: (n: number) => `Finished · ${n}`,
+  addToReadingList: 'Add to reading list',
+  removeFromReadingList: 'Remove from reading list',
+  percentRead: (n: number) => `${n}%`,
+  docMeta: (pages: number, bytes: number, openedAt?: number) =>
+    [plural(pages, 'page', 'pages'), bytes ? size(bytes, '.') : '', openedAt ? ago(openedAt, AGO_EN) : ''].filter(Boolean).join(' · '),
   found: (n: number) => `${n} found`,
   filter: 'Filter',
   adding: 'Adding…',
   pages: (n: number) => plural(n, 'page', 'pages'),
   remove: 'Remove',
   removeTitle: 'Remove document',
-  removeConfirm: (title: string) => `Remove “${title}” from Quire? The original file stays where it is.`,
+  removeConfirm: (title: string) => `Remove “${title}” from Tessel? The original file stays where it is.`,
   cancel: 'Cancel',
-  colophon: 'Quire is free software · Source (AGPL-3.0)',
+  colophon: 'Tessel is free software · No ads · Source (AGPL-3.0)',
   importFailed: (name: string) => `Couldn’t add “${name}”.`,
   untitled: 'Untitled',
   // Empty state + drop
-  emptyTitle: 'A quiet place\nto read.',
-  emptyBody: 'Add a PDF to begin. Everything stays on this device.',
-  emptyBodyWeb: 'Add a PDF to begin. Everything stays on this device — or drop a file anywhere.',
-  openSample: 'Open a sample',
+  emptyTitle: 'Every document,\nin its place.',
+  emptyBody: 'Open a PDF to start. Files stay on this device — no ads, no account.',
+  emptyBodyWeb: 'Open a PDF to start, or drop one anywhere. Files stay on this device — no ads, no account.',
+  openSample: 'Open sample',
   dropTitle: 'Drop to add',
-  dropBody: 'PDFs stay on this device',
+  dropBody: 'Files stay on this device',
   // Opening
   opening: (title: string) => `Opening ${title}…`,
   cantOpen: 'Can’t open this document',
@@ -73,7 +99,7 @@ export const en = {
   // Appearance
   themeAuto: 'Auto',
   themeAutoA11y: 'Automatic',
-  themes: { paper: 'Paper', sepia: 'Sepia', dusk: 'Dusk', night: 'Night' },
+  themes: { paper: 'Light', sepia: 'Sepia', dusk: 'Dark', night: 'Black' },
   layout: 'Layout',
   fitWidth: 'Fit width',
   fitPage: 'Fit page',

@@ -45,7 +45,9 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const fit = usePrefs((s) => s.fit);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, markOpened } = useLibrary();
+  const { savePosition, toggleBookmark, toggleReading, markOpened } = useLibrary();
+  // Reading-list documents get reading behaviour (immersive chrome, progress); everything else is a plain viewer.
+  const readingMode = !!doc.reading;
 
   const list = useRef<FlatList<number>>(null);
   const [vp, setVp] = useState<{ w: number; h: number } | null>(null);
@@ -129,7 +131,8 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       const rp = readingPage(layout, y, vp.h);
       cache.setFocus(rp);
       setPage((old) => (old === rp ? old : rp));
-      // Immersive: hide chrome reading forward, reveal on a deliberate scroll back.
+      // Immersive (reading list only): hide chrome reading forward, reveal on a deliberate scroll back.
+      if (!readingMode) return;
       const d = lastDir.current;
       const delta = y - d.y;
       d.acc = Math.sign(delta) === Math.sign(d.acc) ? d.acc + delta : delta;
@@ -137,7 +140,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (d.acc > 48 && y > 120) setChrome(false);
       else if (d.acc < -64) setChrome(true);
     },
-    [layout, vp, doc.id, savePosition, cache],
+    [layout, vp, doc.id, savePosition, cache, readingMode],
   );
 
   // ---------- search ----------
@@ -288,7 +291,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const pinchStyle = useAnimatedStyle(() => ({ transform: [{ scale: pinchScale.value }] }));
 
   // ---------- chrome animation ----------
-  const chromeShown = chrome || panel != null;
+  const chromeShown = chrome || panel != null || !readingMode;
   const chromeV = useSharedValue(1);
   useEffect(() => {
     chromeV.set(withTiming(chromeShown ? 1 : 0, { duration: 240 }));
@@ -302,8 +305,8 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const wide = isWide(winW);
   const onPagePress = useCallback(() => {
     if (panel && !wide) return setPanel(null);
-    setChrome((c) => !c);
-  }, [panel, wide]);
+    if (readingMode) setChrome((c) => !c);
+  }, [panel, wide, readingMode]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -365,11 +368,18 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       >
         <IconButton icon="back" label={t.library} onPress={goBack} testID="back" />
         <View style={styles.titleWrap}>
-          <T numberOfLines={1} style={{ fontFamily: fonts.serif, fontSize: 16, letterSpacing: -0.1 }}>
+          <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15, letterSpacing: -0.2 }}>
             {doc.title}
           </T>
         </View>
         <View style={{ flexDirection: 'row' }}>
+          <IconButton
+            icon={readingMode ? 'readingOn' : 'readingAdd'}
+            label={readingMode ? t.removeFromReadingList : t.addToReadingList}
+            active={readingMode}
+            onPress={() => toggleReading(doc.id)}
+            testID="reading-toggle"
+          />
           <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
           <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
@@ -402,6 +412,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
                   <T v="numeral" color={p.muted} style={{ fontSize: 13 }}>
                     {'  /  '}
                     {handle.pageCount}
+                    {readingMode ? `  ·  ${t.percentRead(Math.round(((page + 1) / handle.pageCount) * 100))}` : ''}
                   </T>
                 </T>
               </Pressable>

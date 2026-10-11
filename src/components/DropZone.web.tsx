@@ -68,7 +68,7 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
         ]}
       >
         <View style={[styles.frame, { borderColor: p.accent }]}>
-          <T style={{ fontFamily: fonts.serif, fontSize: 32, letterSpacing: -0.5 }}>{t.dropTitle}</T>
+          <T style={{ fontFamily: fonts.sansSemi, fontSize: 28, letterSpacing: -0.6 }}>{t.dropTitle}</T>
           <T v="label" color={p.muted}>{t.dropBody}</T>
         </View>
       </View>

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#ECE8DF" />
-    <meta name="description" content="Quire — a quiet place to read. Local-first PDF reader." />
+    <meta name="description" content="Tessel — a calm PDF viewer. No ads, no account; files stay on your device." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -25,18 +25,18 @@
     </style>
   </head>
   <body>
-    <noscript>Quire needs JavaScript to run.</noscript>
+    <noscript>Tessel needs JavaScript to run.</noscript>
     <div id="root"></div>
     <script>
       // Capture the install prompt before the app mounts; it fires once, early.
       addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
         window.__installPrompt = e;
-        dispatchEvent(new Event('quire:installable'));
+        dispatchEvent(new Event('tessel:installable'));
       });
       addEventListener('appinstalled', () => {
         window.__installPrompt = null;
-        dispatchEvent(new Event('quire:installable'));
+        dispatchEvent(new Event('tessel:installable'));
       });
       if ('serviceWorker' in navigator && location.port !== '8081') {
         addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

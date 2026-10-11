@@ -18,6 +18,7 @@ type LibraryState = {
   remove(id: string): Promise<void>;
   savePosition(id: string, position: ReadingPosition): void;
   toggleBookmark(id: string, page: number): void;
+  toggleReading(id: string): void;
   markOpened(id: string): void;
   clearError(): void;
 };
@@ -117,7 +118,18 @@ export const useLibrary = create<LibraryState>((set, get) => {
       await repo.remove(id);
     },
 
-    savePosition: (id, position) => patch(id, (d) => ({ ...d, position }), true),
+    savePosition: (id, position) =>
+      patch(
+        id,
+        (d) => {
+          // Reaching the last page finishes a reading-list document; it moves to "Finished".
+          const done = d.reading && !d.reading.finishedAt && position.page >= d.pageCount - 1;
+          return { ...d, position, reading: done ? { ...d.reading!, finishedAt: Date.now() } : d.reading };
+        },
+        true,
+      ),
+
+    toggleReading: (id) => patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } })),
 
     toggleBookmark: (id, page) =>
       patch(id, (d) => ({

@@ -1,23 +1,25 @@
-# Quire
+# Tessel
 
-A quiet place to read. Local-first PDF reader: native-first (iOS, Android) with a first-class web build from one Expo codebase.
+**Every document, in its place.** A calm PDF viewer: no ads, no account, files stay on your device. Native-first (iOS, Android) with a first-class web build from one Expo codebase.
+
+Live web app: https://jibes.github.io/doc-reader/
 
 ## Principles
 
-1. **Content is the interface.** Chrome fades while reading forward and returns on a scroll back, a tap, or the pointer nearing an edge.
-2. **Performance before size.** Each platform's best PDF engine, rendering off the main thread, scheduled by distance from the page being read.
-3. **Remember faithfully.** Position, bookmarks and preferences persist per device; reopening lands on the exact line.
-4. **One voice.** Newsreader for reading-adjacent type, Inter for interface, warm paper neutrals, one ink accent per theme.
+1. **Viewer first, reading when you want it.** Documents open in a plain viewer with a toolbar that's always there. Add a document to the reading list and it opens with reading behaviour: toolbars step aside as you read forward, and progress is shown.
+2. **Always back where you left off.** Every document remembers its position; bookmarks mark pages.
+3. **Order, not overwhelm.** One home screen: Reading list on top, Recent below. No ads, no upsells, no accounts.
+4. **Performance before size.** Each platform's best PDF engine, rendering off the main thread, scheduled by distance from the page you're on.
 
 ## Scope (MECE)
 
 | Domain | Shipped | Next |
 |---|---|---|
-| Library — acquire, organise, resume | Picker, drag-and-drop, OS "Open with" (PWA File Handling), page-1 covers, continue-reading, filter, remove | Collections, sort, share-sheet import on native |
-| Reader — render, navigate, find | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, spine scrubber with chapter notches, go-to-page, full-text search with on-page highlights | Text selection layer, two-page spread, reflow |
-| Marking | Bookmarks | Highlights, notes, export |
-| Personalisation | Paper, Sepia, Dusk, Night (OLED), Auto | Typography for reflow, TTS |
-| Platform | Offline PWA, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds, sync |
+| Home — acquire, organise, resume | Open/picker, drag-and-drop, OS "Open with" (PWA File Handling), Recent list, reading list with progress + Finished, filter, remove (keeps the original) | Open in place without copying |
+| Viewer — render, navigate, find | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, scrubber with chapter marks, go-to-page, full-text search with persistent highlights and find bar | Text selection, links, password prompt, share/print |
+| Reading | Reading list, immersive chrome, progress, bookmarks | Reflowed text view (phase 3) |
+| Personalisation | Light, Sepia, Dark, Black, Auto; English and German (follows OS) | More languages |
+| Platform | Offline PWA, install button, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds |
 
 ## Architecture
 
@@ -47,7 +49,7 @@ npm run ios|android    # dev build (needs Xcode / Android SDK; Expo Go can't loa
 npm run build:web      # production web export → dist/
 npm run typecheck && npx eslint .
 npm run test:e2e       # Playwright smoke test; BASE=http://… to target another server
-npm run sample         # regenerate the bundled sample PDF (needs reportlab)
+npm run sample         # regenerate the bundled sample guide PDF (needs reportlab)
 node scripts/make-icons.mjs  # regenerate icons from the mark
 ```
 
@@ -67,7 +69,9 @@ node scripts/make-icons.mjs  # regenerate icons from the mark
 
 ## License
 
-[GNU AGPL-3.0-or-later](LICENSE). Use, study, modify and share freely. Any distributed or network-hosted version, modified or not, must publish its complete source under the same license, so Quire can't be turned into closed, proprietary software.
+[GNU AGPL-3.0-or-later](LICENSE) with an [app store permission](LICENSE-EXCEPTION.md). Use, study, modify and share freely. Any distributed or network-hosted version, modified or not, must publish its complete source under the same license, so Tessel can't be turned into closed, proprietary software.
+
+The name and mark are covered by the [trademark policy](TRADEMARKS.md): forks are welcome under a different name. Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Deployment
 

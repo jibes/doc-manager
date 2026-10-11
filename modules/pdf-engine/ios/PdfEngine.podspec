@@ -1,9 +1,9 @@
 Pod::Spec.new do |s|
   s.name           = 'PdfEngine'
   s.version        = '0.1.0'
-  s.summary        = 'Quire PDF engine (PDFKit)'
+  s.summary        = 'Tessel PDF engine (PDFKit)'
   s.license        = 'MIT'
-  s.author         = 'Quire'
+  s.author         = 'Tessel'
   s.homepage       = 'https://github.com/jibes/doc-reader'
   s.platforms      = { :ios => '16.4' }
   s.swift_version  = '5.9'

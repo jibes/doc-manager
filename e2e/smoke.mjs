@@ -26,7 +26,7 @@ async function run(name, viewport, isMobile) {
   const shot = (n) => page.screenshot({ path: `${OUT}${name}-${n}.png` });
 
   await page.goto(BASE);
-  await page.getByText('A quiet place').waitFor();
+  await page.getByText('Every document').waitFor();
   await page.waitForTimeout(700);
   await shot('1-empty');
 
@@ -42,9 +42,11 @@ async function run(name, viewport, isMobile) {
   for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 700);
   await page.waitForTimeout(600);
   const label = await page.getByTestId('page-label').innerText().catch(() => '');
-  check(/^\s*[3-9]|1\d/.test(label), `${name}: page indicator advanced (${label.replace(/\s+/g, ' ')})`);
+  check(parseInt(label, 10) >= 3, `${name}: page indicator advanced (${label.replace(/\s+/g, ' ')})`);
+  // Plain viewer: the toolbar never hides.
+  check(await page.getByTestId('open-contents').isVisible(), `${name}: viewer keeps toolbar visible after scrolling`);
 
-  // Chrome hides while reading forward; a short scroll back reveals it.
+  // Reading-list documents hide chrome while reading forward; a short scroll back reveals it.
   const reveal = async () => {
     await page.mouse.wheel(0, -160);
     await page.waitForTimeout(350);
@@ -54,15 +56,15 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('contents-panel').waitFor();
   await page.waitForTimeout(400);
   await shot('3-contents');
-  await page.getByText('The Margin', { exact: true }).click();
+  await page.getByTestId('contents-panel').getByText('The reading list', { exact: true }).click();
   await page.waitForTimeout(500);
   const afterToc = await page.getByTestId('page-label').innerText().catch(() => '');
-  check(afterToc.trim().startsWith('10'), `${name}: TOC jump to "The Margin" → page ${afterToc.trim().split(/\s/)[0]}`);
+  check(parseInt(afterToc, 10) === 5, `${name}: TOC jump to "The reading list" → page ${parseInt(afterToc, 10)}`);
   if (!isMobile) await page.getByTestId('open-contents').click();
 
   await reveal();
   await page.getByTestId('open-search').click();
-  await page.getByTestId('search-input').fill('quire');
+  await page.getByTestId('search-input').fill('tessel');
   await page.waitForFunction(() => document.body.innerText.match(/\d+ results?/), null, { timeout: 10000 });
   await page.waitForTimeout(300);
   await page.getByTestId('search-input').press('Enter');
@@ -76,10 +78,12 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('find-bar').waitFor();
   const marks = await page.getByTestId('hit').count() + (await page.getByTestId('hit-active').count());
   check(marks > 0 && (await page.getByTestId('hit-active').count()) > 0, `${name}: ${marks} highlights on page with panel closed`);
+  const nth = async () => parseInt((await page.getByTestId('find-bar').innerText()).match(/(\d+) of/)?.[1] ?? '0', 10);
+  const before = await nth();
   await page.getByTestId('find-next').click();
   await page.waitForTimeout(500);
-  const findStatus = await page.getByTestId('find-bar').innerText();
-  check(/2 of \d+/.test(findStatus), `${name}: find bar stepped → ${findStatus.replace(/\s+/g, ' ')}`);
+  const after = await nth();
+  check(after === before + 1 || (after === 1 && before > 1), `${name}: find bar stepped ${before} → ${after}`);
   await shot('4b-findbar');
   await page.getByTestId('find-clear').click();
   await page.waitForTimeout(300);
@@ -87,7 +91,7 @@ async function run(name, viewport, isMobile) {
 
   await reveal();
   await page.getByTestId('open-appearance').click();
-  await page.getByLabel('Night').click();
+  await page.getByLabel('Black').click();
   await page.waitForTimeout(500);
   await shot('5-night');
   await page.getByLabel('Sepia').click();
@@ -106,14 +110,20 @@ async function run(name, viewport, isMobile) {
   await page.mouse.up();
   await page.waitForTimeout(600);
   const scrubbed = parseInt((await page.getByTestId('page-label').innerText()).trim(), 10);
-  check(scrubbed >= 15, `${name}: scrubber seek → page ${scrubbed}`);
+  check(scrubbed >= 5, `${name}: scrubber seek → page ${scrubbed}`);
 
   await reveal();
   await page.getByTestId('bookmark').click();
+
+  // Reading list: the toggle switches to reading behaviour (progress in the page pill).
+  await page.getByTestId('reading-toggle').click();
+  await page.waitForTimeout(300);
+  check(/%/.test(await page.getByTestId('page-label').innerText()), `${name}: reading-list document shows progress`);
   await page.getByTestId('back').click();
   await page.getByTestId('continue').waitFor();
+  check(await page.getByTestId('recent-row').first().isVisible(), `${name}: home shows Reading list and Recent`);
   await page.waitForTimeout(800);
-  await shot('8-library');
+  await shot('8-home');
 
   // Persistence: reload, reopen, expect the same page.
   await page.reload();
@@ -122,6 +132,20 @@ async function run(name, viewport, isMobile) {
   await page.waitForTimeout(1200);
   const resumed = parseInt((await page.getByTestId('page-label').innerText()).trim(), 10);
   check(Math.abs(resumed - scrubbed) <= 1, `${name}: resumed at page ${resumed} (left at ${scrubbed})`);
+
+  // Reaching the last page moves it to Finished.
+  if (!isMobile) {
+    await page.keyboard.press('End');
+    await page.waitForTimeout(1200);
+    await page.mouse.wheel(0, 4000);
+    await page.waitForTimeout(1000);
+    await page.keyboard.press('Escape');
+    await page.getByText(/Finished · 1/).waitFor({ timeout: 5000 }).then(
+      () => check(true, `${name}: last page moves the document to Finished`),
+      () => check(false, `${name}: last page moves the document to Finished`),
+    );
+    await shot('9-finished');
+  }
   await ctx.close();
 }
 
@@ -131,11 +155,11 @@ async function german() {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`german: ${e.message}`));
   await page.goto(BASE);
-  await page.getByText('Ein ruhiger Ort').waitFor();
+  await page.getByText('Jedes Dokument').waitFor();
   await page.getByTestId('sample').click();
   await page.getByTestId('reader').waitFor();
   await page.getByTestId('open-search').click();
-  await page.getByTestId('search-input').fill('quire');
+  await page.getByTestId('search-input').fill('tessel');
   await page.waitForFunction(() => /\d+ Treffer/.test(document.body.innerText), null, { timeout: 10000 });
   check((await page.locator('html').getAttribute('lang')) === 'de', 'german: UI and <html lang> follow de-DE locale');
   await ctx.close();
