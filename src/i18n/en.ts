@@ -116,6 +116,23 @@ export const en = {
   fitWidth: 'Fit width',
   fitPage: 'Fit page',
   zoom: 'Zoom',
+  textView: 'Text view',
+  pageView: 'Page view',
+  preparingText: (pct: number) => `Preparing text view… ${pct}%`,
+  noTextLayer: 'This PDF has no text layer — it’s probably a scan — so there’s nothing to reflow.',
+  textViewUnsupported: 'Text view is coming to the app soon. It already works in the web version.',
+  backToPageView: 'Back to page view',
+  textSettings: 'Text',
+  font: 'Font',
+  serif: 'Serif',
+  sans: 'Sans',
+  size: 'Size',
+  smaller: 'Smaller',
+  larger: 'Larger',
+  lineSpacing: 'Line spacing',
+  leading: { compact: 'Compact', normal: 'Normal', relaxed: 'Relaxed' },
+  width: 'Width',
+  widths: { narrow: 'Narrow', medium: 'Medium', wide: 'Wide' },
 };
 
 export type Strings = typeof en;

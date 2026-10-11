@@ -47,7 +47,8 @@
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.0",
     "playwright-core": "^1.64.0",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^3.2.7"
   },
   "scripts": {
     "start": "expo start",
@@ -60,7 +61,8 @@
     "sample": "python3 scripts/make-sample-pdf.py assets/samples/welcome-to-tessel.pdf",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test:e2e": "node e2e/smoke.mjs"
+    "test:e2e": "node e2e/smoke.mjs",
+    "test": "vitest run"
   },
   "private": true,
   "license": "AGPL-3.0-or-later"

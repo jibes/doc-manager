@@ -27,6 +27,7 @@ export const engine: DocumentEngine = {
       // Text layer and links aren't bridged from PDFKit/PdfRenderer yet (phase 3 moves native to PDFium).
       pageText: async () => [],
       links: async () => [],
+      textLines: async () => null,
       close: () => PdfEngine.close(r.handle),
     };
     return handle;

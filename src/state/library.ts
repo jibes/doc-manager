@@ -20,6 +20,7 @@ type LibraryState = {
   savePosition(id: string, position: ReadingPosition): void;
   toggleBookmark(id: string, page: number): void;
   toggleReading(id: string): void;
+  setView(id: string, view: 'page' | 'text'): void;
   markOpened(id: string): void;
   clearError(): void;
 };
@@ -154,6 +155,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         },
         true,
       ),
+
+    setView: (id, view) => patch(id, (d) => ({ ...d, view })),
 
     toggleReading: (id) => patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } })),
 

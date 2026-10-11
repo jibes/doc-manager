@@ -5,7 +5,7 @@
  */
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
-import type { NormRect, OutlineItem, PageLink, SearchHit, Size, TextRun } from '../types';
+import type { NormRect, OutlineItem, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -232,10 +232,18 @@ function withTextPage<T>(d: Doc, pageIndex: number, fallback: T, fn: (page: numb
   try {
     if (!text) return fallback;
     return withScratch(8, (s) => {
-      const dev = (x: number, y: number) => {
+      const devCall = (x: number, y: number) => {
         M.FPDF_PageToDevice(page, 0, 0, DW, DH, 0, x, y, s, s + 4);
         return [M.pdfium.getValue(s, 'i32') / DW, M.pdfium.getValue(s + 4, 'i32') / DH];
       };
+      // Page→device is affine: sample it at three points once, then transform in JS
+      // (two WASM calls per character otherwise dominated text extraction).
+      const K = 1000;
+      const [ox, oy] = devCall(0, 0);
+      const [ax, ay] = devCall(K, 0);
+      const [bx, by] = devCall(0, K);
+      const [a1, a2, b1, b2] = [(ax - ox) / K, (ay - oy) / K, (bx - ox) / K, (by - oy) / K];
+      const dev = (x: number, y: number) => [ox + a1 * x + b1 * y, oy + a2 * x + b2 * y];
       const norm = (l: number, t: number, r: number, b: number): NormRect => {
         const [x0, y0] = dev(l, t);
         const [x1, y1] = dev(r, b);
@@ -295,6 +303,118 @@ function pageText(docId: number, pageIndex: number): TextRun[] {
     });
     flush(true);
     return runs;
+  });
+}
+
+type Role = { type: string; sid: number };
+// Inline structure types take the role of their block parent.
+const INLINE_ROLES = /^(Span|Link|Lbl|Quote|Note|Reference|BibEntry|Code|Em|Strong|Annot|Ruby|Warichu|Sub)$/;
+
+/** Tagged PDFs: map marked-content ids on this page to their block-level structure element. */
+function structRoles(page: number): Map<number, Role> | null {
+  const tree = M.FPDF_StructTree_GetForPage(page);
+  if (!tree) return null;
+  const map = new Map<number, Role>();
+  let sid = 0;
+  let budget = 20000;
+  const walk = (el: number, inherited: Role | undefined, depth: number) => {
+    if (!el || budget-- <= 0 || depth > 40) return;
+    const type = readUtf16((b, l) => M.FPDF_StructElement_GetType(el, b, l)) || 'Span';
+    // Inline types, and the label/body/paragraph parts of a list item, belong to their parent block.
+    const inList = inherited && /^(LI|LBody)$/.test(inherited.type) && /^(P|LBody|Lbl|Span)$/.test(type);
+    const role = inherited && (INLINE_ROLES.test(type) || inList) ? inherited : { type, sid: ++sid };
+    // Kids are either elements or marked-content refs; per-child MCIDs are scoped to this page
+    // (an element's full MCID list spans pages, and MCIDs restart on every page).
+    const c = M.FPDF_StructElement_CountChildren(el);
+    for (let i = 0; i < c; i++) {
+      const child = M.FPDF_StructElement_GetChildAtIndex(el, i);
+      if (child) walk(child, role, depth + 1);
+      else {
+        const mcid = M.FPDF_StructElement_GetChildMarkedContentID(el, i);
+        if (mcid >= 0) map.set(mcid, role);
+      }
+    }
+  };
+  const top = M.FPDF_StructTree_CountChildren(tree);
+  for (let i = 0; i < top; i++) walk(M.FPDF_StructTree_GetChildAtIndex(tree, i), undefined, 0);
+  M.FPDF_StructTree_Close(tree);
+  return map.size ? map : null;
+}
+
+/** Lines with typography for reflow; in tagged PDFs, untagged characters (artifacts: headers, footers) are dropped. */
+function pageLines(docId: number, pageIndex: number): TextLine[] {
+  const d = getDoc(docId);
+  return withTextPage(d, pageIndex, [], (page, text, norm) => {
+    const roles = structRoles(page);
+    const lines: TextLine[] = [];
+    const n = M.FPDFText_CountChars(text);
+    let cur: (TextLine & { right: number }) | null = null;
+    const flush = () => {
+      const c = cur;
+      cur = null;
+      if (!c) return;
+      const trimmed = c.text.replace(/\s+$/, '');
+      if (!trimmed) return;
+      lines.push({ text: trimmed, rect: c.rect, size: c.size, bold: c.bold, italic: c.italic, hyphen: c.hyphen || /[-\u00ad]$/.test(trimmed), role: c.role, sid: c.sid });
+    };
+    withScratch(80, (s) => {
+      const box = s;
+      const flags = s + 16;
+      const nameBuf = s + 20;
+      for (let i = 0; i < n; i++) {
+        const ch = String.fromCharCode(M.FPDFText_GetUnicode(text, i));
+        if (ch === '\r' || ch === '\n') {
+          if (cur && M.FPDFText_IsHyphen(text, i - 1)) cur.hyphen = true;
+          flush();
+          continue;
+        }
+        let role: Role | undefined;
+        if (roles) {
+          const obj = M.FPDFText_GetTextObject(text, i);
+          role = obj ? roles.get(M.FPDFPageObj_GetMarkedContentID(obj)) : undefined;
+          if (!role) continue; // artifact
+        }
+        const has = M.FPDFText_GetLooseCharBox(text, i, box);
+        const [l, t, r, b] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(box + o, 'float'));
+        if (!has || r <= l || t <= b) {
+          if (cur && ch === ' ') cur.text += ' ';
+          continue;
+        }
+        const rc = norm(l, t, r, b);
+        const c = cur as (TextLine & { right: number }) | null;
+        const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
+        const gap = c ? rc.x - c.right : 0;
+        if (c && sameLine && c.sid === role?.sid && gap < c.rect.h * 1.5 && gap > -c.rect.h) {
+          if (gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+          c.text += ch;
+          const x1 = Math.max(c.right, rc.x + rc.w);
+          const y0 = Math.min(c.rect.y, rc.y);
+          const y1 = Math.max(c.rect.y + c.rect.h, rc.y + rc.h);
+          c.rect = { x: c.rect.x, y: y0, w: x1 - c.rect.x, h: y1 - y0 };
+          c.right = x1;
+        } else {
+          flush();
+          // Typography from the line's first glyph.
+          const weight = M.FPDFText_GetFontWeight(text, i);
+          M.FPDFText_GetFontInfo(text, i, nameBuf, 60, flags);
+          const fontName = M.pdfium.UTF8ToString(nameBuf);
+          const f = M.pdfium.getValue(flags, 'i32');
+          cur = {
+            text: ch,
+            rect: rc,
+            right: rc.x + rc.w,
+            size: Math.round(M.FPDFText_GetFontSize(text, i) * 10) / 10,
+            bold: weight >= 600 || (f & 0x40000) !== 0 || /bold|black|heavy|semibold/i.test(fontName),
+            italic: (f & 0x40) !== 0 || /italic|oblique/i.test(fontName),
+            hyphen: false,
+            role: role?.type,
+            sid: role?.sid,
+          };
+        }
+      }
+    });
+    flush();
+    return lines;
   });
 }
 
@@ -413,6 +533,8 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: pageText(job.doc, job.page) });
     case 'links':
       return post({ id: job.id, ok: true, result: pageLinks(job.doc, job.page) });
+    case 'lines':
+      return post({ id: job.id, ok: true, result: job.pages.map((pg) => pageLines(job.doc, pg)) });
     case 'close':
       close(job.doc);
       return post({ id: job.id, ok: true, result: null });

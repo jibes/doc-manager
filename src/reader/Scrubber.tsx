@@ -94,8 +94,8 @@ export function Scrubber({ page, pageCount, sizes, cache, palette: p, chapters, 
       </View>
       {(expanded || active) && width > 0 && (
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          {chapters.map((c) => (
-            <View key={`c${c.page}`} style={[styles.notch, { left: (c.page / max) * width, backgroundColor: p.muted }]} />
+          {chapters.map((c, i) => (
+            <View key={`c${i}`} style={[styles.notch, { left: (c.page / max) * width, backgroundColor: p.muted }]} />
           ))}
           {bookmarks.map((b) => (
             <View key={`b${b}`} style={[styles.mark, { left: (b / max) * width - 1, backgroundColor: p.accent }]} />
