@@ -1,6 +1,8 @@
 // Offline shell: navigations network-first, everything else stale-while-revalidate.
 const CACHE = 'quire-v1';
-const SHELL = ['/', '/engine/pdfium-worker.js', '/engine/pdfium.wasm', '/manifest.webmanifest'];
+// Paths resolve against the worker's own URL, so the app works under any base path.
+const ROOT = new URL('./', self.location.href).href;
+const SHELL = [ROOT, 'engine/pdfium-worker.js', 'engine/pdfium.wasm', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -21,10 +23,10 @@ self.addEventListener('fetch', (e) => {
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('/', copy));
+          caches.open(CACHE).then((c) => c.put(ROOT, copy));
           return res;
         })
-        .catch(() => caches.match('/')),
+        .catch(() => caches.match(ROOT)),
     );
     return;
   }

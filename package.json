@@ -53,11 +53,12 @@
     "android": "expo run:android",
     "engine": "node scripts/build-engine.mjs --minify",
     "postinstall": "node scripts/build-engine.mjs --minify",
-    "build:web": "npm run engine && expo export -p web",
+    "build:web": "npm run engine && expo export -p web && node scripts/postexport.mjs",
     "sample": "python3 scripts/make-sample-pdf.py assets/samples/elements-of-reading.pdf",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "test:e2e": "node e2e/smoke.mjs"
   },
-  "private": true
+  "private": true,
+  "license": "AGPL-3.0-or-later"
 }

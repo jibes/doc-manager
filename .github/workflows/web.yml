@@ -1,0 +1,69 @@
+name: Web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_BASE_URL: /${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx eslint .
+      - run: npm run build:web
+
+      # Smoke-test the exact artifact under its sub-path before publishing.
+      - run: npx playwright-core install --with-deps chromium
+      - name: E2E smoke
+        run: |
+          mkdir -p site && cp -r dist "site${EXPO_BASE_URL}"
+          (cd site && python3 -m http.server 8080 >/dev/null 2>&1 &)
+          sleep 1
+          BASE="http://localhost:8080${EXPO_BASE_URL}/" CHROMIUM=none npm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-screenshots
+          path: e2e/out
+
+      # Enabling Pages needs repo admin; if the token can't, enable once in Settings → Pages → Source: GitHub Actions.
+      - uses: actions/configure-pages@v6
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v5
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: dist
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
