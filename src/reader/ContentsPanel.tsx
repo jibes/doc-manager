@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { t } from '@/i18n';
@@ -52,8 +52,9 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
   const tabs: [Tab, string][] = [
     ['contents', t.contents],
     ['pages', t.pagesTab],
-    ['bookmarks', `${t.bookmarks}${bookmarks.length ? ` ${bookmarks.length}` : ''}`],
-    ['notes', `${t.notesTab}${annotations?.length ? ` ${annotations.length}` : ''}`],
+    // Four tabs leave no room for counts (German labels are long); each list shows its own items.
+    ['bookmarks', t.bookmarks],
+    ['notes', t.notesTab],
   ];
 
   return (
@@ -68,7 +69,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
             onPress={() => setTab(k)}
             style={[styles.segBtn, tab === k && [{ backgroundColor: p.raised }, styles.segActive]]}
           >
-            <T v="label" color={tab === k ? p.ink : p.muted} style={{ fontFamily: fonts.sansMedium }}>
+            <T v="label" numberOfLines={1} color={tab === k ? p.ink : p.muted} style={{ fontFamily: fonts.sansMedium, fontSize: 13 }}>
               {label}
             </T>
           </Pressable>
@@ -202,15 +203,26 @@ function PagesGrid({ p, sizes, cache, page, onGo, bookmarks }: { p: Palette; siz
   const cellW = w ? Math.floor((w - space.xl * 2 - space.md * (cols - 1)) / cols) : 0;
   const rowH = cellW * 1.414 + 28;
   const pages = useMemo(() => sizes.map((_, i) => i), [sizes]);
+  const listRef = useRef<FlatList<number>>(null);
+  // Scroll to the current page after the first render. (initialScrollIndex renders only from that row on,
+  // and when the grid fits on screen nothing ever scrolls to fill in the rows above it.)
+  useEffect(() => {
+    if (!cellW) return;
+    const raf = requestAnimationFrame(() => listRef.current?.scrollToIndex({ index: Math.floor(page / cols), animated: false, viewPosition: 0.3 }));
+    return () => cancelAnimationFrame(raf);
+    // Only when the grid first gets its size: later page changes come from taps in the grid itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cellW > 0]);
   return (
     <View style={{ flex: 1 }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
       {cellW > 0 && (
         <FlatList
+          ref={listRef}
           data={pages}
           numColumns={cols}
           keyExtractor={(i) => String(i)}
-          initialScrollIndex={Math.floor(page / cols) * cols}
-          getItemLayout={(_, i) => ({ length: rowH, offset: rowH * Math.floor(i / cols), index: i })}
+          // With numColumns, FlatList indexes rows, not items.
+          getItemLayout={(_, row) => ({ length: rowH, offset: rowH * row, index: row })}
           windowSize={5}
           columnWrapperStyle={{ gap: space.md, paddingHorizontal: space.xl }}
           renderItem={({ item }) => (

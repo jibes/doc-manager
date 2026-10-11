@@ -74,6 +74,7 @@ export const de: Strings = {
   discard: 'Verwerfen',
   accessBody: (name) => `Tessel öffnet „${name}“ dort, wo die Datei gespeichert ist, statt eine Kopie anzulegen – deshalb fragt der Browser vor dem Lesen erneut.`,
   allowAccess: 'Zugriff erlauben',
+  accessTitle: 'Zugriff auf diese Datei erlauben',
   fileMoved: (name) => `„${name}“ ist nicht mehr dort, wo es war. Die Datei wurde vielleicht verschoben, umbenannt oder gelöscht.`,
   locateFile: 'Datei suchen …',
   fileMissing: 'Die Datei dieses Dokuments fehlt im Speicher.',

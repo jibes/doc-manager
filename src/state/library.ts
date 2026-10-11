@@ -19,7 +19,8 @@ type LibraryState = {
   load(): Promise<void>;
   importFiles(items: ImportItem[]): Promise<DocRecord[]>;
   remove(id: string): Promise<void>;
-  savePosition(id: string, position: ReadingPosition): void;
+  /** `atEnd`: the reader reached the end (page view: scrolled to the bottom); defaults to being on the last page. */
+  savePosition(id: string, position: ReadingPosition, atEnd?: boolean): void;
   toggleBookmark(id: string, page: number): void;
   toggleReading(id: string): void;
   setView(id: string, view: 'page' | 'text'): void;
@@ -152,12 +153,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
       await repo.remove(id);
     },
 
-    savePosition: (id, position) =>
+    savePosition: (id, position, atEnd) =>
       patch(
         id,
         (d) => {
-          // Reaching the last page finishes a reading-list document; it moves to "Finished".
-          const done = d.reading && !d.reading.finishedAt && position.page >= d.pageCount - 1;
+          // Reaching the end finishes a reading-list document; it moves to "Finished".
+          const done = d.reading && !d.reading.finishedAt && (atEnd ?? position.page >= d.pageCount - 1);
           return { ...d, position, reading: done ? { ...d.reading!, finishedAt: Date.now() } : d.reading };
         },
         true,

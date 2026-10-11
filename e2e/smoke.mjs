@@ -435,6 +435,74 @@ async function annotations() {
   await ctx.close();
 }
 
+// Regressions found in the full audit (each line names the bug it guards).
+async function regressions() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`regressions: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  await page.getByTestId('sample').click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(800);
+  const pageNo = async () => parseInt(await page.getByTestId('page-label').innerText(), 10);
+  // End scrolled to the top of the last page, not the end of the document.
+  await page.keyboard.press('End');
+  await page.waitForTimeout(800);
+  const atBottom = await page.evaluate(() => { const e = document.querySelector('[data-testid=pages]'); return e.scrollTop + e.clientHeight >= e.scrollHeight - 2; });
+  check(atBottom, 'regression: End scrolls to the end of the document');
+  // Esc with the More menu open left the document.
+  await page.getByTestId('open-more').click();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check((await page.getByTestId('reader').count()) === 1 && (await page.getByTestId('more-menu').count()) === 0, 'regression: Esc closes the More menu, not the document');
+  // Pages grid opened at the last page rendered no rows above it.
+  await page.getByTestId('open-contents').click();
+  await page.getByTestId('tab-pages').click();
+  await page.waitForTimeout(800);
+  check(await page.getByTestId('contents-panel').getByText('1', { exact: true }).isVisible(), 'regression: pages grid renders all rows');
+  check((await page.getByTestId('open-contents').getAttribute('aria-pressed')) === 'true', 'regression: toolbar toggles report aria-pressed');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('open-appearance').click();
+  check((await page.getByRole('radio', { name: 'Auto' }).first().getAttribute('aria-checked')) === 'true', 'regression: theme radios report aria-checked');
+  await page.keyboard.press('Escape');
+  // Text view page jumps landed on the previous page's carried-over paragraph.
+  await page.keyboard.press('v');
+  await page.getByTestId('text-view').waitFor();
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(500);
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(800);
+  check((await pageNo()) === 2, `regression: → in text view goes to the next page (${await pageNo()})`);
+  await page.keyboard.press('End');
+  await page.waitForTimeout(800);
+  check((await pageNo()) === 7, `regression: End in text view reaches the last page (${await pageNo()})`);
+  await page.keyboard.press('v');
+  await page.getByTestId('pages').waitFor();
+  // A selection taller than the screen put the highlight bubble off screen.
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(600);
+  await page.evaluate(() => document.querySelectorAll('.tl[data-page="2"] span')[1].scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => {
+    const spans = (p) => [...document.querySelectorAll(`.tl[data-page="${p}"] span`)].filter((s) => /\w{6,}/.test(s.textContent));
+    const a = spans(1).at(-1);
+    const b = spans(2)[1];
+    getSelection().setBaseAndExtent(a.firstChild, 0, b.firstChild, b.textContent.length);
+  });
+  const bubble = await page.getByTestId('selection-bubble').boundingBox({ timeout: 3000 }).catch(() => null);
+  check(!!bubble && bubble.y >= 0 && bubble.y + bubble.height <= 860, 'regression: highlight bubble stays on screen for long selections');
+  // A last page taller than the screen kept reading-list documents from ever finishing.
+  await page.evaluate(() => getSelection().removeAllRanges());
+  await page.getByTestId('reading-toggle').click();
+  await page.keyboard.press('End');
+  await page.waitForTimeout(1000);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('reading-list').waitFor();
+  check(/Finished · 1/i.test(await page.getByTestId('reading-list').innerText()), 'regression: reaching the end finishes a reading-list document');
+  await ctx.close();
+}
+
 // Open in place (Chromium): the library links to the user's file. Handles come from the origin-private
 // file system, standing in for the picker; they behave like real ones (read, write, vanish).
 async function linked() {
@@ -525,6 +593,7 @@ await step('locked', locked);
 await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
+await step('regressions', regressions);
 await step('forms', forms);
 await step('annotations', annotations);
 await step('linked', linked);

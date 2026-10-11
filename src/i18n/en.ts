@@ -92,6 +92,7 @@ export const en = {
   discard: 'Discard',
   accessBody: (name: string) => `Tessel opens “${name}” where it’s saved rather than keeping a copy, so the browser asks again before reading it.`,
   allowAccess: 'Allow access',
+  accessTitle: 'Allow access to this file',
   fileMoved: (name: string) => `“${name}” isn’t where it was. It may have been moved, renamed or deleted.`,
   locateFile: 'Find the file…',
   passwordProtected: 'This PDF is password protected.',

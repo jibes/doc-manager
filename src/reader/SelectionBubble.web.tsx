@@ -46,9 +46,13 @@ export function SelectionBubble({ palette: p, onHighlight }: Props) {
         const sel = window.getSelection();
         const inLayer = sel && !sel.isCollapsed && sel.anchorNode?.parentElement?.closest('.tl');
         if (!inLayer) return setAt(null);
-        const box = sel.getRangeAt(0).getBoundingClientRect();
+        // Anchor at the end of the selection, where the pointer let go: a long selection's overall box can
+        // reach past the screen on both sides. Keep it on screen either way.
+        const rects = [...sel.getRangeAt(0).getClientRects()].filter((r) => r.width > 0 && r.bottom > 0 && r.top < innerHeight);
+        const box = rects.at(-1) ?? sel.getRangeAt(0).getBoundingClientRect();
         const below = box.top < 120;
-        setAt({ x: box.left + box.width / 2, y: below ? box.bottom + 10 : box.top - 10, below });
+        const y = Math.min(Math.max(below ? box.bottom + 10 : box.top - 10, 70), innerHeight - 70);
+        setAt({ x: box.left + box.width / 2, y, below });
       }, 220);
     };
     const hide = () => setAt(null);

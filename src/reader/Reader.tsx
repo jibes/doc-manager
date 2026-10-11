@@ -68,6 +68,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const [panel, setPanel] = useState<PanelName>(null);
   const [outline, setOutline] = useState<FlatOutline | null>(null);
   const [editingPage, setEditingPage] = useState(false);
+  const [menu, setMenu] = useState(false);
 
   // Position bookkeeping lives in refs: scroll events must not re-render the tree.
   const posRef = useRef(doc.position ?? { page: 0, offset: 0 });
@@ -162,10 +163,14 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (!layout || !vp || !restored.current) return;
-      const y = e.nativeEvent.contentOffset.y;
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const y = contentOffset.y;
       scrollY.current = y;
       posRef.current = positionAt(layout, y);
-      savePosition(doc.id, posRef.current);
+      // The saved position is the top of the viewport, which never reaches a last page shorter than
+      // the screen: the end counts as reached once scrolled to the bottom.
+      const atEnd = y > 0 && y + layoutMeasurement.height >= contentSize.height - 8;
+      savePosition(doc.id, posRef.current, atEnd);
       const rp = readingPage(layout, y, vp.h);
       cache.setFocus(rp);
       setPage((old) => (old === rp ? old : rp));
@@ -370,7 +375,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (mod && e.key === '-') return e.preventDefault(), setZoom(zoom / 1.2);
       if (mod && e.key === '0') return e.preventDefault(), setZoom(1);
       if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
-      if (e.key === 'Escape') return panel ? setPanel(null) : searchActive ? onQuery('') : edits.leave();
+      if (e.key === 'Escape') return menu ? setMenu(false) : panel ? setPanel(null) : searchActive ? onQuery('') : edits.leave();
       if (typing || mod) return;
       const step = vp.h * 0.15;
       const pageStep = vp.h - TOP_BAR - BOTTOM_BAR;
@@ -385,7 +390,8 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         ArrowRight: () => goToPage(page + 1),
         ArrowLeft: () => goToPage(page - 1),
         Home: () => goToPage(0),
-        End: () => goToPage(handle.pageCount - 1),
+        // End means the end of the document, not the top of its last page.
+        End: () => (view === 'text' ? goToPage(handle.pageCount - 1) : scrollTo(Number.MAX_SAFE_INTEGER, false)),
         b: () => toggleBookmark(doc.id, page),
         v: () => switchView(view === 'page' ? 'text' : 'page'),
         t: () => setPanel((x) => (x === 'contents' ? null : 'contents')),
@@ -421,7 +427,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits]);
+  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, menu]);
 
   // ---------- pinch (native) ----------
   const pinchScale = useSharedValue(1);
@@ -460,7 +466,6 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     if (readingMode) setChrome((c) => !c);
   }, [panel, wide, readingMode]);
 
-  const [menu, setMenu] = useState(false);
   const mac = Platform.OS === 'web' && /Mac|iPhone|iPad/.test(navigator.platform);
   const key = (k: string) => (Platform.OS === 'web' ? `${mac ? '⌘' : 'Ctrl+'}${k}` : undefined);
   // Narrow screens: the reading-list toggle moves into the menu to keep the title readable.

@@ -15,7 +15,7 @@ function Swatch({ name, selected, onPress }: { name: ThemeName | null; selected:
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{ selected }}
+      aria-checked={selected}
       accessibilityLabel={name ? t.themes[name] : t.themeAutoA11y}
       onPress={() => {
         tick();
@@ -59,7 +59,7 @@ function Segment<K extends string>({
         <Pressable
           key={k}
           accessibilityRole="radio"
-          accessibilityState={{ selected: value === k }}
+          aria-checked={value === k}
           onPress={() => onChange(k)}
           style={[styles.segBtn, value === k && { backgroundColor: p.raised }]}
         >
