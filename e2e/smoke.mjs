@@ -797,7 +797,7 @@ async function foldersDesktop() {
     },
     [['columns.pdf', fixture('columns.pdf')], ['notes.txt', btoa('not a document')], ['Books/book.epub', fixture('book.epub')], ['form.pdf', fixture('form.pdf')]],
   );
-  await page.getByTestId('files').click();
+  await page.getByTestId('tab-files').locator('visible=true').click();
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   const docs = vis('folder-doc');
@@ -823,7 +823,7 @@ async function foldersDesktop() {
   await page.getByTestId('recent-row').first().waitFor();
   check((await page.getByTestId('recent-row').first().innerText()).includes('In place'), 'folders: opened documents stay where they are (in place)');
   // Thumbnails are kept: on return they come from the cache, without reading the files again.
-  await page.getByTestId('files').click();
+  await page.getByTestId('tab-files').locator('visible=true').click();
   await vis('folder-root').click();
   await vis('folder-grid').waitFor();
   await page.waitForTimeout(400);
@@ -872,7 +872,7 @@ async function foldersDesktop() {
   await page.waitForTimeout(500);
   check(!(await inOpfs('Archive')) && (await text('Archive').count()) === 0, 'folders: a folder can be deleted with what is in it');
   await vis('screen-back').click();
-  await vis('open-settings').click();
+  await vis('home-settings').click();
   check((await vis('all-files').count()) === 0, 'folders: no all-files switch outside the Android app');
   await vis('remove-folder').click();
   await page.waitForTimeout(300);
@@ -1015,7 +1015,7 @@ async function foldersShell() {
   const shownThumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length);
   await page.goto(BASE);
   await page.getByText('Every document').waitFor();
-  await vis('files').click();
+  await vis('tab-files').click();
   await vis('add-folder').click();
   await vis('folder-grid').waitFor({ timeout: 10000 }).catch(() => {});
   check((await vis('folder-grid').count()) === 1, 'folders-shell: a picked folder opens (its ID survives the route)');
@@ -1096,7 +1096,7 @@ async function foldersShell() {
 
   // Copy back to the top folder, share, then delete the copy (and its library entry with it).
   await page.goto(BASE);
-  await vis('files').click();
+  await vis('tab-files').click();
   await vis('folder-root').click();
   await text('Archive').click();
   await vis('select').click();
@@ -1124,8 +1124,8 @@ async function foldersShell() {
   check(!left.some((r) => r.includes('Orderly Notes')), `folders-shell: a deleted document leaves the library (${left.length} left)`);
 
   // All files access (Settings): every document on the device, and internal storage.
-  await vis('files').click();
-  await vis('open-settings').click();
+  await vis('tab-files').click();
+  await vis('home-settings').click();
   await vis('all-files').click();
   await page.waitForTimeout(300);
   await vis('screen-back').click();
@@ -1215,6 +1215,30 @@ async function scanner() {
   await ctx.close();
 }
 
+// Navigation: Library | Files tabs (bottom bar on phones, header tabs on wide windows) and the Scan action.
+async function tabs() {
+  for (const [name, viewport] of [['phone', { width: 390, height: 800 }], ['wide', { width: 1280, height: 800 }]]) {
+    const ctx = await newContext({ viewport });
+    const page = await ctx.newPage();
+    const vis = (id) => page.getByTestId(id).locator('visible=true');
+    page.on('pageerror', (e) => errors.push(`tabs: ${e.message}`));
+    await page.goto(BASE);
+    check((await vis('tab-library').getAttribute('aria-selected')) === 'true', `tabs (${name}): Library is the current tab`);
+    await vis('tab-files').click();
+    await vis('add-folder').first().waitFor();
+    check((await vis('tab-files').getAttribute('aria-selected')) === 'true', `tabs (${name}): Files opens from its tab`);
+    check((await vis('open-other').count()) === 1, `tabs (${name}): Files offers other locations (system picker)`);
+    await vis('tab-library').click();
+    await page.getByText('Open sample').waitFor();
+    // Switching back returns to the library rather than stacking it over Files (stacked screens stay mounted).
+    check((await page.getByTestId('open-other').count()) === 0, `tabs (${name}): switching tabs does not stack screens`);
+    await vis('scan').click();
+    await page.waitForURL(/\/scan/);
+    check(true, `tabs (${name}): Scan opens the camera`);
+    await ctx.close();
+  }
+}
+
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
 await step('german', german);
 await step('locked', locked);
@@ -1222,6 +1246,7 @@ await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
 await step('scanner', scanner);
+await step('tabs', tabs);
 await step('regressions', regressions);
 await step('books', books);
 await step('shell', shellBridge);

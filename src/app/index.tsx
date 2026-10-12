@@ -3,16 +3,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
 import { Icon } from '@/components/Icon';
-import { Mark } from '@/components/Mark';
 import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
-import { folders } from '@/lib/folders';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
 import { useLibrary, type ImportItem } from '@/state/library';
@@ -53,6 +52,7 @@ export default function Home() {
   const [hint, setHint] = useState<string | null>(null);
   const [showFinished, setShowFinished] = useState(false);
   const { kind: installKind, install } = useInstall();
+  const tabBar = useTabBar();
 
   useEffect(() => {
     load();
@@ -84,47 +84,22 @@ export default function Home() {
     <DropZone onFiles={add}>
       <ScrollView
         style={{ flex: 1, backgroundColor: p.canvas }}
-        contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl, alignItems: 'center', flexGrow: 1 }}
+        contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0), alignItems: 'center', flexGrow: 1 }}
       >
         <View style={{ width: contentW, flexGrow: 1 }}>
-          <View style={styles.masthead}>
-            <View style={styles.brand}>
-              <Mark size={26} />
-              <T style={{ fontFamily: fonts.sansSemi, fontSize: 21, letterSpacing: -0.5 }}>Tessel</T>
-              {wide && (
-                <T v="label" color={p.muted}>
-                  {t.tagline}
-                </T>
-              )}
-            </View>
-            <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-              <IconButton testID="home-settings" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />
-              {Platform.OS === 'web' &&
-                (wide ? (
-                  <Button testID="scan" kind="quiet" icon="camera" label={t.scan} onPress={() => router.push('/scan')} />
-                ) : (
-                  <IconButton testID="scan" icon="camera" label={t.scan} onPress={() => router.push('/scan')} />
-                ))}
-              {folders.supported &&
-                (wide ? (
-                  <Button testID="files" kind="quiet" icon="folder" label={t.files} onPress={() => router.push('/files')} />
-                ) : (
-                  <IconButton testID="files" icon="folder" label={t.files} onPress={() => router.push('/files')} />
-                ))}
-              {installKind && (
-                <Button
-                  testID="install"
-                  kind="quiet"
-                  icon="install"
-                  label={t.install}
-                  onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
-                />
-              )}
-              {docs.length > 0 && (
-                <Button testID="add" label={wide ? t.addPdf : t.add} icon="plus" onPress={async () => add(await pickPdfs())} />
-              )}
-            </View>
-          </View>
+          <AppHeader tab="library">
+            {installKind && (
+              <Button
+                testID="install"
+                kind="quiet"
+                icon="install"
+                label={t.install}
+                onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
+              />
+            )}
+            {/* Quiet: Files is where documents are found ("Other location…" there opens the system picker too). */}
+            {docs.length > 0 && <IconButton testID="add" icon="plus" label={t.addPdf} onPress={async () => add(await pickPdfs())} />}
+          </AppHeader>
 
           {docs.length === 0 ? (
             <EmptyLibrary onAdd={async () => add(await pickPdfs())} onSample={async () => add([await sampleItem()])} />
@@ -222,7 +197,8 @@ export default function Home() {
           </T>
         </Pressable>
       </ScrollView>
-      <Toast message={error ?? hint} onDismiss={() => (error ? clearError() : setHint(null))} />
+      <Toast message={error ?? hint} onDismiss={() => (error ? clearError() : setHint(null))} above={tabBar ? TAB_BAR_H : 0} />
+      {tabBar && <TabBar current="library" />}
     </DropZone>
   );
 }
@@ -355,8 +331,6 @@ function Row({
 }
 
 const styles = StyleSheet.create({
-  masthead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 52, marginBottom: space.xl },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: space.sm + 2 },
   section: { marginBottom: space.xxl },
   kicker: { marginBottom: space.md },
   continue: { flexDirection: 'row', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth },
