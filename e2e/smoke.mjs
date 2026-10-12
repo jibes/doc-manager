@@ -904,11 +904,13 @@ async function foldersShell() {
   await page.waitForTimeout(300);
   check(served.form > before, 'folders-shell: library documents reopen from their folder');
   // All files access (Settings): every document on the device, and internal storage.
-  await page.goto(new URL('settings', `${BASE.replace(/\/$/, '')}/`).href);
+  await vis('back').click();
+  await vis('files').click();
+  await vis('open-settings').click();
   await vis('all-files').click();
   await page.waitForTimeout(300);
-  await page.goto(new URL('files', `${BASE.replace(/\/$/, '')}/`).href);
-  await page.getByText('All documents').waitFor({ timeout: 5000 }).catch(() => {});
+  await vis('screen-back').click();
+  await page.getByText('All documents').locator('visible=true').waitFor({ timeout: 5000 }).catch(() => {});
   const roots = await vis('folder-root').allInnerTexts();
   check(roots.join('|').includes('All documents') && roots.join('|').includes('Internal storage'), `folders-shell: all files access adds every document and internal storage (${roots.join(', ')})`);
   await page.getByText('All documents').locator('visible=true').click();
