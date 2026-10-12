@@ -558,8 +558,10 @@ async function books() {
   await page.getByTestId('search-input').fill('first ferry');
   await page.waitForTimeout(500);
   await page.getByTestId('search-input').press('Enter');
-  await page.keyboard.press('Escape');
+  // Esc in the (focused) field closes the panel and keeps the matches.
+  await page.getByTestId('search-input').press('Escape');
   await page.waitForTimeout(800);
+  check((await page.getByTestId('search-panel').count()) === 0 && (await page.getByTestId('find-clear').count()) === 1, 'books: Esc in the search field closes search, keeps matches');
   const marked = await view.evaluate((root) => [...root.querySelectorAll('span')].filter((e) => /^first ferry$/i.test(e.textContent) && getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)').length);
   check(marked > 0, `books: search highlights matches (${marked})`);
   await page.getByTestId('find-clear').click();

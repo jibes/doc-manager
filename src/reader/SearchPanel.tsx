@@ -62,7 +62,10 @@ export function SearchPanel({ palette: p, query, onQuery, hits, active, searchin
             onSubmitEditing={() => onStep(1)}
             onKeyPress={(e) => {
               const ev = e.nativeEvent as { key: string; shiftKey?: boolean };
-              if (Platform.OS === 'web' && ev.key === 'Enter' && ev.shiftKey) onStep(-1);
+              if (Platform.OS !== 'web') return;
+              if (ev.key === 'Enter' && ev.shiftKey) onStep(-1);
+              // The input stops key events from bubbling, so Esc would never reach the reader.
+              else if (ev.key === 'Escape') onClose();
             }}
             style={[styles.input, { color: p.ink }]}
           />
