@@ -1,8 +1,8 @@
 name: Android
 
 # The Android app: the web app bundled in a WebView shell (shell/android). Every push builds and
-# smoke-tests an APK on an emulator; a version tag (v1.2.3), or a manual run with a version, publishes
-# a signed release on GitHub, which Obtainium (or any browser) installs and updates from.
+# smoke-tests an APK on an emulator; a new version in package.json on main, a version tag (v1.2.3) or a
+# manual run with a version publishes a signed release on GitHub, which Obtainium (or any browser) installs and updates from.
 on:
   push:
     branches: [main, 'ccr-*']
@@ -44,6 +44,11 @@ jobs:
           INPUT_RELEASE: ${{ inputs.release }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then REQUESTED="${GITHUB_REF#refs/tags/v}"; else REQUESTED="$INPUT_RELEASE"; fi
+          # A new version in package.json on main publishes itself (once: its tag then exists).
+          if [ -z "$REQUESTED" ] && [ "$GITHUB_REF" = refs/heads/main ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+            PKG="$(node -p "require('./package.json').version")"
+            if [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then REQUESTED="$PKG"; fi
+          fi
           if [ -n "$REQUESTED" ]; then
             if ! [[ "$REQUESTED" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Version must look like 1.2.3"; exit 1; fi
             NAME="$REQUESTED"
