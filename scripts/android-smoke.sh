@@ -182,7 +182,7 @@ echo "--- light sensor theme: listening ---"
 # saved to the library and opened.
 for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
 adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
-wait_for "Every document"
+wait_for "RECENT"
 tap "Scan"
 wait_for "While using the app|Only this time|Allow"
 tap "While using the app" || tap "Allow"
