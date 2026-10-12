@@ -162,7 +162,7 @@ wait_for "Settings"
 tap "Settings"
 wait_for "Light sensor"
 # Connections to the light sensor before and after choosing the theme (the report doesn't name apps).
-light_users() { adb shell dumpsys sensorservice | grep -Eo 'Light sensor \(handle=[^,]+, connections=[0-9]+' | grep -Eo '[0-9]+$' | head -1; }
+light_users() { { adb shell dumpsys sensorservice | grep -Eo 'Light sensor \(handle=[^,]+, connections=[0-9]+' | grep -Eo '[0-9]+$' | head -1; } || true; }
 before=$(light_users); before=${before:-0}
 tap "Light sensor"
 sleep 3
