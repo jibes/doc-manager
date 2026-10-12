@@ -43,6 +43,9 @@ const SMALL_AREA = 0.18;
 /** Mean frame brightness (0..1) below which the scene is too dark. */
 const DARK_LUMA = 0.16;
 
+/** A transparent pixel: no default poster while the stream starts. */
+const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+
 const BLUE = '#5B8CFF';
 const GREEN = '#3DDC84';
 
@@ -429,6 +432,11 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
       <div ref={stage} style={{ position: 'relative', flex: 1, overflow: 'hidden', borderBottomLeftRadius: 24, borderBottomRightRadius: 24 }}>
         <video
           ref={video}
+          // The picture is decoration for screen readers (the status line says what matters), and Android's
+          // WebView would otherwise announce "Unable to play media" and draw its grey play-button poster.
+          aria-hidden
+          poster={BLANK}
+          disablePictureInPicture
           playsInline
           muted
           autoPlay

@@ -190,6 +190,7 @@ wait_for "Point at a page|Move closer|Hold steady|Too dark"
 sleep 2
 adb exec-out screencap -p > "$OUT/9-camera.png"
 echo "--- screen (camera) ---"; screen | head -20
+if ui | grep -q "Unable to play media"; then echo "The camera picture is announced as broken media"; exit 1; fi
 tap "Take photo"
 # Auto-capture may take pages by itself too (the emulated picture can look like a page): any page will do.
 wait_for "Done, review|Full photo"
