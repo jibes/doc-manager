@@ -2,4 +2,6 @@
 <paths>
     <!-- Files handed to other apps (share, print) are written here first. -->
     <cache-path name="outgoing" path="outgoing/" />
+    <!-- Documents shared from the file browser with all files access on. -->
+    <external-path name="storage" path="." />
 </paths>

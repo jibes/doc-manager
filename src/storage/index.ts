@@ -59,6 +59,8 @@ export const repo: LibraryRepo = {
     if (!f.exists) throw new Error('This document’s file is missing from storage.');
     return { kind: 'uri', uri: f.uri };
   },
+  linkedTo: async () => new Map(),
+  relink: async () => {},
   async saveCover(id, data) {
     if (typeof data !== 'string') throw new Error('Native covers are file URIs');
     const dest = cover(id);

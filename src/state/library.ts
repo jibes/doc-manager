@@ -41,7 +41,14 @@ type LibraryState = {
   /** Point a linked document at a new location (after it was moved). */
   relink(id: string, handle: FileHandle): Promise<void>;
   clearError(): void;
+  /** The file browser renamed or moved files: documents linked to them follow. */
+  followFiles(moves: { from: string; to: string }[]): Promise<void>;
+  /** The file browser deleted files: documents linked to them leave the library. */
+  forgetFiles(uris: string[]): Promise<void>;
 };
+
+/** The file name at the end of a file:// or document URI. */
+const nameOfUri = (uri: string) => decodeURIComponent(uri).split(/[/:]/).pop() ?? uri;
 
 const COVER_WIDTH = 360;
 
@@ -244,5 +251,24 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     clearError: () => set({ error: null }),
+
+    async followFiles(moves) {
+      const linked = await repo.linkedTo(moves.map((m) => m.from));
+      for (const [uri, ids] of linked) {
+        // The file itself, or one inside a moved folder: same path below the new place.
+        const m = moves.find((x) => uri === x.from || uri.startsWith(x.from));
+        if (!m) continue;
+        const to = m.to + uri.slice(m.from.length);
+        for (const id of ids) {
+          await repo.relink(id, to);
+          patch(id, (d) => ({ ...d, fileName: nameOfUri(to) }));
+        }
+      }
+    },
+
+    async forgetFiles(uris) {
+      const linked = await repo.linkedTo(uris);
+      for (const ids of linked.values()) for (const id of ids) await get().remove(id);
+    },
   };
 });

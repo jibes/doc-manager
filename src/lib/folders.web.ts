@@ -5,13 +5,13 @@ import type { FolderEntry, FolderRoot, FoldersApi } from './folderTypes';
 import { canPickFolders, pickDirectory, type DirHandle, type FileHandle } from './fsa';
 import { shell, shellDocUrl, shellRequest } from './shell';
 
-export type { FolderEntry, FolderRoot } from './folderTypes';
+export type { FolderEntry, FolderRoot, Place } from './folderTypes';
 
 const kindOf = (name: string): FolderEntry['kind'] | null => (/\.pdf$/i.test(name) ? 'pdf' : /\.epub$/i.test(name) ? 'epub' : null);
 
 /**
- * Android app: folders granted through the system picker (and, with all files access, the whole device),
- * listed and served by the app (see shell/android Folders.kt).
+ * Android app: folders granted through the system folder picker (and, with all files access, the whole
+ * device), listed, served and changed by the app (see shell/android Folders.kt).
  */
 const shellFolders: FoldersApi = {
   supported: true,
@@ -26,7 +26,7 @@ const shellFolders: FoldersApi = {
     const f = await shellRequest<{ uri: string; name: string } | null>('pickFolder');
     return f && { id: f.uri, name: f.name, kind: 'folder' };
   },
-  remove: (id) => shellRequest('forgetFolder', { uri: id }),
+  forget: (id) => shellRequest('forgetFolder', { uri: id }),
   unlock: async () => true,
   list: (root, dir) => shellRequest<FolderEntry[]>('list', { root, dir: dir ?? '' }),
   async read(_root, e) {
@@ -34,6 +34,21 @@ const shellFolders: FoldersApi = {
     if (!res.ok) throw new Error(t.fileGone);
     return res.blob();
   },
+  canEdit: (root) => root !== 'all',
+  canShare: true,
+  mkdir: (root, dir, name) => shellRequest('mkdir', { root, dir: dir ?? '', name }),
+  rename: (_root, _dir, e, name) => shellRequest<string>('rename', { uri: e.uri, name }),
+  delete: (_root, _dir, list) => shellRequest('delete', { uris: list.map((e) => e.uri) }),
+  transfer: (from, list, to, move) =>
+    shellRequest('transfer', {
+      items: list.map((e) => ({ uri: e.uri, name: e.name, dir: e.kind === 'dir' })),
+      srcRoot: from.root,
+      srcDir: from.dir ?? '',
+      root: to.root,
+      dir: to.dir ?? '',
+      move,
+    }),
+  share: (_root, list) => shellRequest('share', { uris: list.map((e) => e.uri) }),
   allFiles: async () => (await shellRequest<{ allFiles: boolean }>('access')).allFiles,
   requestAllFiles: () => shellRequest<boolean>('requestAllFiles'),
 };
@@ -59,6 +74,46 @@ async function dirAt(root: string, path?: string): Promise<DirHandle> {
   return dir;
 }
 
+/** Changing a folder needs the browser's OK to write (asked once; needs the user's tap). */
+async function writable(root: string, path?: string): Promise<DirHandle> {
+  const top = await folderHandle(root);
+  if ((await top.queryPermission({ mode: 'readwrite' })) !== 'granted' && (await top.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+    throw new Error(t.writeDenied);
+  }
+  return dirAt(root, path);
+}
+
+const exists = (dir: DirHandle, name: string) =>
+  dir.getFileHandle(name).then(
+    () => true,
+    () => dir.getDirectoryHandle(name).then(
+      () => true,
+      () => false,
+    ),
+  );
+
+/** "name", or "name (2)", "name (3)"… if taken. */
+async function freeName(dir: DirHandle, name: string, isDir: boolean): Promise<string> {
+  const dot = isDir ? -1 : name.lastIndexOf('.');
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  let candidate = name;
+  for (let n = 2; await exists(dir, candidate); n++) candidate = `${stem} (${n})${ext}`;
+  return candidate;
+}
+
+async function copyEntry(from: DirHandle, name: string, isDir: boolean, into: DirHandle, as = name): Promise<void> {
+  if (!isDir) {
+    const file = await (await from.getFileHandle(name)).getFile();
+    const w = await (await into.getFileHandle(as, { create: true })).createWritable();
+    await w.write(file);
+    await w.close();
+    return;
+  }
+  const src = await from.getDirectoryHandle(name);
+  const dest = await into.getDirectoryHandle(as, { create: true });
+  for await (const [child, h] of src.entries()) await copyEntry(src, child, h.kind === 'directory', dest);
+}
+
 const browserFolders: FoldersApi = {
   supported: true,
   allFilesSupported: false,
@@ -79,7 +134,7 @@ const browserFolders: FoldersApi = {
     await set(id, { name: handle.name, handle } satisfies Saved, store);
     return { id, name: handle.name, kind: 'folder' };
   },
-  remove: (id) => del(id, store),
+  forget: (id) => del(id, store),
   async unlock(id) {
     const h = await folderHandle(id);
     return (await h.requestPermission({ mode: 'read' })) === 'granted';
@@ -101,6 +156,39 @@ const browserFolders: FoldersApi = {
     return out;
   },
   read: (_root, e) => e.handle!.getFile(),
+  canEdit: () => true,
+  canShare: typeof navigator !== 'undefined' && typeof navigator.canShare === 'function',
+  async mkdir(root, dir, name) {
+    await (await writable(root, dir)).getDirectoryHandle(name, { create: true });
+  },
+  async rename(root, dir, e, name) {
+    const parent = await writable(root, dir);
+    if (await exists(parent, name)) throw new Error(t.nameTaken(name));
+    // Chromium can rename in place; elsewhere (or for folders it can't move) copy, then remove the old one.
+    const h = e.kind === 'dir' ? await parent.getDirectoryHandle(e.name) : await parent.getFileHandle(e.name);
+    const move = (h as unknown as { move?: (name: string) => Promise<void> }).move;
+    if (move && (await move.call(h, name).then(() => true, () => false))) return undefined;
+    await copyEntry(parent, e.name, e.kind === 'dir', parent, name);
+    await parent.removeEntry(e.name, { recursive: true });
+    return undefined;
+  },
+  async delete(root, dir, list) {
+    const parent = await writable(root, dir);
+    for (const e of list) await parent.removeEntry(e.name, { recursive: true });
+  },
+  async transfer(from, list, to, move) {
+    const src = await writable(from.root, from.dir);
+    const dest = await writable(to.root, to.dir);
+    for (const e of list) {
+      await copyEntry(src, e.name, e.kind === 'dir', dest, await freeName(dest, e.name, e.kind === 'dir'));
+      if (move) await src.removeEntry(e.name, { recursive: true });
+    }
+    return [];
+  },
+  async share(root, list) {
+    const files = await Promise.all(list.filter((e) => e.handle).map((e) => e.handle!.getFile()));
+    if (files.length && navigator.canShare?.({ files })) await navigator.share({ files }).catch(() => {});
+  },
   allFiles: async () => false,
   requestAllFiles: async () => false,
 };
@@ -110,6 +198,8 @@ const unsupported: FoldersApi = {
   supported: false,
   roots: async () => [],
   add: async () => null,
+  canEdit: () => false,
+  canShare: false,
 };
 
 export const folders: FoldersApi = shell ? shellFolders : canPickFolders() ? browserFolders : unsupported;

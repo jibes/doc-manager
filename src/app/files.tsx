@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Cover } from '@/components/Cover';
@@ -8,20 +8,39 @@ import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
-import { fonts, radius, space } from '@/design/tokens';
+import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, t } from '@/i18n';
-import { folders, type FolderEntry, type FolderRoot } from '@/lib/folders';
+import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
 import { cachedThumb, cancelThumbs, thumb, type Thumb } from '@/lib/thumbs';
+import { ask } from '@/state/ask';
+import { useClipboard } from '@/state/clipboard';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 1120;
 
-type Params = { root?: string; rootName?: string; dir?: string; name?: string };
+/**
+ * Folder IDs are URIs and paths ("…/tree/primary%3ADocs", "100% done"): route params are decoded on the
+ * way, which would change them. They travel base64url-encoded instead.
+ */
+const pack = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function unpack(s: string | undefined): string | undefined {
+  if (!s) return undefined;
+  try {
+    return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
+  } catch {
+    return undefined;
+  }
+}
 
-/** Files: the user's folders, then a folder's PDFs and books as a grid of thumbnails. */
+type Params = { r?: string; rn?: string; d?: string; dn?: string };
+const go = (root: string, rootName: string, dir?: string, name?: string) =>
+  router.push({ pathname: '/files', params: { r: pack(root), rn: pack(rootName), ...(dir ? { d: pack(dir), dn: pack(name ?? '') } : {}) } });
+
+/** Files: the user's folders, then a folder's PDFs and books as a grid of thumbnails, with file operations. */
 export default function Files() {
-  const { root, rootName, dir, name } = useLocalSearchParams<Params>();
+  const params = useLocalSearchParams<Params>();
+  const root = unpack(params.r);
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -36,7 +55,7 @@ export default function Files() {
     <View style={{ flex: 1, backgroundColor: p.canvas, alignItems: 'center', paddingTop: insets.top + space.lg }}>
       <View style={{ width: contentW, flex: 1 }}>
         {root ? (
-          <FolderView root={root} rootName={rootName ?? ''} dir={dir} name={name} width={contentW} bottom={insets.bottom} />
+          <FolderView root={root} rootName={unpack(params.rn) ?? ''} dir={unpack(params.d)} name={unpack(params.dn)} width={contentW} bottom={insets.bottom} />
         ) : (
           <Roots bottom={insets.bottom} />
         )}
@@ -46,8 +65,6 @@ export default function Files() {
 }
 
 const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', device: 'device', all: 'documents' };
-
-const openRoot = (r: FolderRoot) => router.push({ pathname: '/files', params: { root: r.id, rootName: r.name } });
 
 /** The places to browse; adding a folder opens it. */
 function Roots({ bottom }: { bottom: number }) {
@@ -66,12 +83,12 @@ function Roots({ bottom }: { bottom: number }) {
 
   const add = async () => {
     const r = await folders.add().catch((e) => void setError(errorText(e)));
-    if (r) openRoot(r);
+    if (r) go(r.id, r.name);
     refresh();
   };
   const unlockAndOpen = async (r: FolderRoot) => {
     if (r.locked && !(await folders.unlock(r.id).catch(() => false))) return;
-    openRoot(r);
+    go(r.id, r.name);
   };
 
   return (
@@ -133,6 +150,7 @@ function Roots({ bottom }: { bottom: number }) {
           </Pressable>
         </View>
       )}
+      <PasteBar here={null} bottom={bottom} onDone={refresh} onError={setError} />
       <Toast message={error} onDismiss={() => setError(null)} />
     </>
   );
@@ -148,20 +166,30 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const [sort, setSort] = useState<Sort>(root === 'all' ? 'date' : 'name');
   const [query, setQuery] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
-  const { importFiles, error, clearError } = useLibrary();
-  const [openError, setOpenError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const { importFiles, error, clearError, followFiles, forgetFiles } = useLibrary();
+  const version = useClipboard((s) => s.version);
+  const setClip = useClipboard((s) => s.set);
+  const changed = useClipboard((s) => s.changed);
+  const here: Place = useMemo(() => ({ root, dir }), [root, dir]);
+  const editable = folders.canEdit(root);
 
   useEffect(() => {
     let live = true;
     folders
       .list(root, dir)
-      .then((list) => live && setEntries(list))
+      .then((list) => {
+        if (!live) return;
+        setEntries(list);
+        setFailed(false);
+      })
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
       cancelThumbs();
     };
-  }, [root, dir]);
+  }, [root, dir, version]);
 
   const shown = useMemo(() => {
     if (!entries) return [];
@@ -176,11 +204,30 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const cols = Math.max(3, Math.floor((width + gap) / ((width < 600 ? 104 : 150) + gap)));
   const tileW = Math.floor((width - gap * (cols - 1)) / cols);
 
-  const open = async (e: FolderEntry) => {
-    if (e.kind === 'dir') {
-      router.push({ pathname: '/files', params: { root, rootName, dir: e.id, name: e.name } });
-      return;
+  const picked = useMemo(() => (selected ? shown.filter((e) => selected.has(e.id)) : []), [selected, shown]);
+  const toggle = (e: FolderEntry) =>
+    setSelected((s) => {
+      const next = new Set(s ?? []);
+      if (next.has(e.id)) next.delete(e.id);
+      else next.add(e.id);
+      return next;
+    });
+
+  /** Runs a file operation; the folder (and any folder below it on the stack) lists itself again. */
+  const run = async (op: () => Promise<string | void>) => {
+    try {
+      const done = await op();
+      if (done) setMessage(done);
+      setSelected(null);
+    } catch (e) {
+      setMessage(`${t.opFailed} ${errorText(e)}`);
     }
+    changed();
+  };
+
+  const open = async (e: FolderEntry) => {
+    if (selected) return toggle(e);
+    if (e.kind === 'dir') return go(root, rootName, e.id, e.name);
     if (opening) return;
     setOpening(e.id);
     try {
@@ -188,10 +235,39 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       const [doc] = await importFiles([{ name: e.name, size: e.size || file.size, file, handle: e.handle, link: e.uri }]);
       if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id } });
     } catch (err) {
-      setOpenError(errorText(err));
+      setMessage(errorText(err));
     } finally {
       setOpening(null);
     }
+  };
+
+  const newFolder = async () => {
+    const n = await ask({ title: t.newFolder, input: '', placeholder: t.folderName, confirm: t.newFolder });
+    if (n) await run(() => folders.mkdir(root, dir, n));
+  };
+  const rename = async () => {
+    const e = picked[0];
+    const n = await ask({ title: t.rename, input: e.name, placeholder: t.newName, confirm: t.rename });
+    if (!n || n === e.name) return;
+    await run(async () => {
+      const to = await folders.rename(root, dir, e, n);
+      if (to && e.uri) await followFiles([{ from: e.uri, to }]);
+    });
+  };
+  const remove = async () => {
+    const list = picked;
+    const yes = await ask({ title: t.deleteTitle(list.length), body: t.deleteBody(list.length, list[0].name), confirm: t.delete, destructive: true });
+    if (yes == null) return;
+    await run(async () => {
+      await folders.delete(root, dir, list);
+      await forgetFiles(list.flatMap((e) => (e.uri ? [e.uri] : [])));
+      return t.deletedN(list.length);
+    });
+  };
+  const share = () => run(() => folders.share(root, picked));
+  const clip = (move: boolean) => {
+    setClip({ move, from: here, entries: picked });
+    setSelected(null);
   };
 
   const docs = entries?.filter((e) => e.kind !== 'dir').length ?? 0;
@@ -220,7 +296,20 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
 
   return (
     <>
-      <ScreenHeader title={name ?? rootName} over={name ? rootName : t.files} />
+      {selected ? (
+        <View style={styles.selectBar}>
+          <IconButton testID="select-cancel" icon="close" label={t.cancel} onPress={() => setSelected(null)} style={{ marginLeft: -space.sm }} />
+          <T v="headline" style={{ flex: 1, fontSize: 17 }}>
+            {t.selectedCount(selected.size)}
+          </T>
+          <IconButton testID="select-all" icon="select" label={t.selectAll} onPress={() => setSelected(new Set(shown.map((e) => e.id)))} />
+        </View>
+      ) : (
+        <ScreenHeader title={name ?? rootName} over={name ? rootName : t.files}>
+          {editable && <IconButton testID="new-folder" icon="folderAdd" label={t.newFolder} onPress={newFolder} />}
+          {entries && entries.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
+        </ScreenHeader>
+      )}
       {failed ? (
         <T color={p.muted}>{t.folderError}</T>
       ) : !entries ? (
@@ -235,31 +324,160 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
           ListHeaderComponent={header}
           ListEmptyComponent={<T color={p.muted}>{t.folderEmpty}</T>}
           columnWrapperStyle={{ gap }}
-          contentContainerStyle={{ gap: gap + space.xs, paddingBottom: bottom + space.xxl }}
+          contentContainerStyle={{ gap: gap + space.xs, paddingBottom: bottom + space.xxxl * 2 }}
           showsVerticalScrollIndicator={false}
           initialNumToRender={cols * 4}
           windowSize={5}
           renderItem={({ item }) => (
-            <Tile root={root} entry={item} width={tileW} where={root === 'all'} busy={opening === item.id} onPress={() => open(item)} />
+            <Tile
+              root={root}
+              entry={item}
+              width={tileW}
+              where={root === 'all'}
+              busy={opening === item.id}
+              selected={selected ? selected.has(item.id) : undefined}
+              onPress={() => open(item)}
+              onSelect={() => (selected ? toggle(item) : setSelected(new Set([item.id])))}
+            />
           )}
         />
       )}
-      <Toast message={openError ?? error} onDismiss={() => (openError ? setOpenError(null) : clearError())} />
+      {selected ? (
+        <ActionBar bottom={bottom}>
+          {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length || picked.some((e) => e.kind === 'dir')} onPress={share} />}
+          <Action testID="act-copy" icon="copy" label={t.copy} disabled={!picked.length} onPress={() => clip(false)} />
+          <Action testID="act-move" icon="move" label={t.move} disabled={!picked.length} onPress={() => clip(true)} />
+          <Action testID="act-rename" icon="pencil" label={t.rename} disabled={picked.length !== 1} onPress={rename} />
+          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!picked.length} onPress={remove} />
+        </ActionBar>
+      ) : (
+        <PasteBar here={editable ? here : null} bottom={bottom} onDone={() => {}} onError={setMessage} onMessage={setMessage} />
+      )}
+      <Toast message={message ?? error} onDismiss={() => (message ? setMessage(null) : clearError())} />
     </>
   );
 }
 
-function Tile({ root, entry, width, where, busy, onPress }: { root: string; entry: FolderEntry; width: number; where: boolean; busy: boolean; onPress: () => void }) {
+/** "Copy n items here" / "Move n items here" while items wait on the clipboard. */
+function PasteBar({
+  here,
+  bottom,
+  onDone,
+  onError,
+  onMessage,
+}: {
+  here: Place | null;
+  bottom: number;
+  onDone: () => void;
+  onError: (msg: string) => void;
+  onMessage?: (msg: string) => void;
+}) {
+  const p = usePalette();
+  const clip = useClipboard((s) => s.clip);
+  const setClip = useClipboard((s) => s.set);
+  const changed = useClipboard((s) => s.changed);
+  const followFiles = useLibrary((s) => s.followFiles);
+  const [busy, setBusy] = useState(false);
+  if (!clip) return null;
+  const same = here && here.root === clip.from.root && (here.dir ?? '') === (clip.from.dir ?? '');
+  // Into itself or below itself: a folder can't be moved or copied inside itself.
+  const inside = here && clip.entries.some((e) => e.kind === 'dir' && here.root === clip.from.root && here.dir != null && (here.dir === e.id || here.dir.startsWith(`${e.id}/`)));
+  const canPaste = here && !inside && !(clip.move && same);
+
+  const paste = async () => {
+    if (!here) return;
+    setBusy(true);
+    try {
+      const moved = await folders.transfer(clip.from, clip.entries, here, clip.move);
+      if (clip.move) await followFiles(moved);
+      onMessage?.(clip.move ? t.movedN(clip.entries.length) : t.copiedN(clip.entries.length));
+      setClip(null);
+    } catch (e) {
+      onError(`${t.opFailed} ${errorText(e)}`);
+    } finally {
+      setBusy(false);
+      changed();
+      onDone();
+    }
+  };
+
+  return (
+    <View testID="paste-bar" style={[styles.bar, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
+      <T v="label" color={p.inkSoft} style={{ flex: 1 }} numberOfLines={2}>
+        {canPaste ? t.selectedCount(clip.entries.length) : t.pickTarget(clip.move)}
+      </T>
+      <Button kind="quiet" label={t.cancel} onPress={() => setClip(null)} />
+      {canPaste && <Button testID="paste" label={busy ? t.loading : t.pasteHere(clip.move, clip.entries.length)} onPress={busy ? undefined : paste} />}
+    </View>
+  );
+}
+
+function ActionBar({ bottom, children }: { bottom: number; children: ReactNode }) {
+  const p = usePalette();
+  return (
+    <View testID="action-bar" style={[styles.bar, styles.actions, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
+      {children}
+    </View>
+  );
+}
+
+function Action({ icon, label, disabled, onPress, testID }: { icon: IconName; label: string; disabled?: boolean; onPress: () => void; testID: string }) {
+  const p = usePalette();
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.action,
+        { opacity: disabled ? 0.35 : pressed ? 0.6 : 1, backgroundColor: hovered && !disabled ? p.hairline : 'transparent' },
+      ]}
+    >
+      <Icon name={icon} size={22} color={p.ink} />
+      <T v="caption" numberOfLines={1} style={{ fontSize: 11 }}>
+        {label}
+      </T>
+    </Pressable>
+  );
+}
+
+function Tile({
+  root,
+  entry,
+  width,
+  where,
+  busy,
+  selected,
+  onPress,
+  onSelect,
+}: {
+  root: string;
+  entry: FolderEntry;
+  width: number;
+  where: boolean;
+  busy: boolean;
+  /** undefined: not selecting. */
+  selected?: boolean;
+  onPress: () => void;
+  onSelect: () => void;
+}) {
   const p = usePalette();
   const [image, setImage] = useState<Thumb | undefined>(undefined);
   const isDir = entry.kind === 'dir';
   const boxH = Math.round(width * 1.32);
+  // The check sits on the picture itself (folders and covers are shorter than the box).
+  const coverW = image ? Math.min(width, Math.round(boxH / image.aspect)) : width;
+  const shownH = isDir ? Math.round(width * 0.8) : image ? Math.round(coverW * Math.min(Math.max(image.aspect, 0.5), 1.8)) : Math.round(width * 1.3);
+  const checkAt = { top: boxH - shownH + 6, right: Math.round((width - (isDir ? width : coverW)) / 2) + 6 };
 
   useEffect(() => {
     if (isDir) return;
     let live = true;
     cachedThumb(root, entry)
-      .then((hit) => hit !== undefined ? hit : thumb(root, entry, () => folders.read(root, entry)))
+      .then((hit) => (hit !== undefined ? hit : thumb(root, entry, () => folders.read(root, entry))))
       .then((th) => live && setImage(th));
     return () => {
       live = false;
@@ -269,9 +487,21 @@ function Tile({ root, entry, width, where, busy, onPress }: { root: string; entr
   return (
     <Pressable
       testID={isDir ? 'folder-dir' : 'folder-doc'}
-      accessibilityRole="button"
+      accessibilityRole={selected === undefined ? 'button' : 'checkbox'}
+      accessibilityState={selected === undefined ? undefined : { checked: selected }}
       accessibilityLabel={entry.name}
       onPress={onPress}
+      onLongPress={onSelect}
+      delayLongPress={350}
+      // Right-click selects on a computer, like a long press on a phone.
+      {...(Platform.OS === 'web'
+        ? {
+            onContextMenu: (ev: { preventDefault(): void }) => {
+              ev.preventDefault();
+              onSelect();
+            },
+          }
+        : {})}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [{ width, opacity: pressed || busy ? 0.6 : hovered ? 0.92 : 1 }]}
     >
       <View style={{ height: boxH, justifyContent: 'flex-end', alignItems: 'center' }}>
@@ -280,7 +510,7 @@ function Tile({ root, entry, width, where, busy, onPress }: { root: string; entr
             <Icon name="folder" size={Math.round(width * 0.36)} color={p.accent} strokeWidth={1.2} />
           </View>
         ) : image ? (
-          <Cover uri={image.uri} aspect={image.aspect} width={Math.min(width, Math.round(boxH / image.aspect))} />
+          <Cover uri={image.uri} aspect={image.aspect} width={coverW} />
         ) : (
           <View testID={image === null ? 'thumb-none' : 'thumb-pending'} style={[styles.plain, { width, height: Math.round(width * 1.3), backgroundColor: p.surface, borderColor: p.hairline }]}>
             <T v="kicker" color={p.muted}>
@@ -289,6 +519,14 @@ function Tile({ root, entry, width, where, busy, onPress }: { root: string; entr
           </View>
         )}
         {busy && <ActivityIndicator style={StyleSheet.absoluteFill} color={p.accent} />}
+        {selected !== undefined && (
+          <View
+            pointerEvents="none"
+            style={[styles.check, checkAt, { backgroundColor: selected ? p.accent : p.surface, borderColor: selected ? p.accent : p.muted }, elevation(p.shadow, 1)]}
+          >
+            {selected && <Icon name="check" size={16} color={p.surface} strokeWidth={2.4} />}
+          </View>
+        )}
       </View>
       <T v="caption" numberOfLines={2} style={{ marginTop: space.sm, fontFamily: fonts.sansMedium, fontSize: 12.5, lineHeight: 16 }}>
         {entry.name}
@@ -311,4 +549,20 @@ const styles = StyleSheet.create({
   searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 120, height: 32, outlineStyle: 'none' } as object,
   dirBox: { borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   plain: { borderRadius: radius.cover, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+  check: { position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  selectBar: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 52, marginBottom: space.lg },
+  bar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    padding: space.sm,
+    paddingLeft: space.lg,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  actions: { justifyContent: 'space-around', paddingLeft: space.sm },
+  action: { alignItems: 'center', gap: 2, paddingVertical: space.xs, paddingHorizontal: space.sm, borderRadius: radius.md, minWidth: 56 },
 });

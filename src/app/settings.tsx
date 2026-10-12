@@ -37,7 +37,7 @@ export default function Settings() {
     refresh();
   };
   const remove = async (id: string) => {
-    await folders.remove(id).catch((e) => setError(errorText(e)));
+    await folders.forget(id).catch((e) => setError(errorText(e)));
     refresh();
   };
   const allOn = allFiles && granted === true;

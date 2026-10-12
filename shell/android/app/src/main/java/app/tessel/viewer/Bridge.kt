@@ -131,6 +131,21 @@ class Bridge(private val activity: MainActivity) {
                         "forgetFolder" -> folders.forget(Uri.parse(a.getString("uri"))).let { null }
                         "list" -> folders.list(a.getString("root"), a.optString("dir").ifEmpty { null })
                         "access" -> JSONObject().put("allFiles", folders.allFilesGranted())
+                        "mkdir" -> folders.mkdir(a.getString("root"), a.optString("dir").ifEmpty { null }, a.getString("name"))
+                        "rename" -> folders.rename(Uri.parse(a.getString("uri")), a.getString("name"))
+                        "delete" -> a.getJSONArray("uris").let { list -> for (i in 0 until list.length()) folders.delete(Uri.parse(list.getString(i))) }.let { null }
+                        "transfer" -> {
+                            val list = a.getJSONArray("items")
+                            val items = (0 until list.length()).map { i -> list.getJSONObject(i).let { Triple(Uri.parse(it.getString("uri")), it.getString("name"), it.optBoolean("dir")) } }
+                            val from = folders.parentOf(a.getString("srcRoot"), a.optString("srcDir").ifEmpty { null })
+                            folders.transfer(items, from, a.getString("root"), a.optString("dir").ifEmpty { null }, a.optBoolean("move"))
+                        }
+                        "share" -> {
+                            val list = a.getJSONArray("uris")
+                            val uris = ArrayList((0 until list.length()).map { folders.shareable(Uri.parse(list.getString(it))) })
+                            activity.runOnUiThread { shareUris(uris) }
+                            null
+                        }
                         "write" -> {
                             val (file, _) = synchronized(this) { outgoing.remove(a.getString("token")) } ?: throw IllegalStateException("Nothing to write")
                             folders.write(Uri.parse(a.getString("uri")), file)
@@ -147,6 +162,16 @@ class Bridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun theme(background: String, dark: Boolean) {
         activity.runOnUiThread { activity.applyTheme(background, dark) }
+    }
+
+    /** Documents from the file browser, to any app (mail, chat, cloud storage). */
+    private fun shareUris(uris: ArrayList<Uri>) {
+        val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+        else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        send.setType(if (uris.all { activity.contentResolver.getType(it) == Folders.EPUB }) Folders.EPUB else if (uris.size == 1) activity.contentResolver.getType(uris[0]) ?: "*/*" else "*/*")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.clipData = android.content.ClipData.newRawUri(null, uris[0]).apply { uris.drop(1).forEach { addItem(android.content.ClipData.Item(it)) } }
+        activity.startActivity(Intent.createChooser(send, activity.getString(R.string.share_title)))
     }
 
     private fun share(file: File, mime: String) {

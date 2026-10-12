@@ -13,6 +13,7 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { AskDialog } from '@/components/AskDialog';
 import { PasswordDialog } from '@/components/PasswordDialog';
 import { shell } from '@/lib/shell';
 import { usePalette } from '@/state/prefs';
@@ -57,6 +58,7 @@ export default function RootLayout() {
         }}
       />
       <PasswordDialog />
+      <AskDialog />
     </GestureHandlerRootView>
   );
 }

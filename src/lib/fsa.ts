@@ -45,7 +45,9 @@ export type DirHandle = {
   kind: 'directory';
   name: string;
   entries(): AsyncIterable<[string, FileHandle | DirHandle]>;
-  getDirectoryHandle(name: string): Promise<DirHandle>;
+  getDirectoryHandle(name: string, o?: { create?: boolean }): Promise<DirHandle>;
+  getFileHandle(name: string, o?: { create?: boolean }): Promise<FileHandle>;
+  removeEntry(name: string, o?: { recursive?: boolean }): Promise<void>;
   queryPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
   requestPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
 };

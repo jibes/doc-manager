@@ -52,6 +52,10 @@ export interface LibraryRepo {
   /** Replaces the document's bytes: the original for linked files, the copy otherwise. */
   writeFile(id: string, bytes: ArrayBuffer): Promise<void>;
   saveCover(id: string, cover: Blob | string): Promise<void>;
+  /** Library documents linked to these files, or to files inside these folders (Android app), by their own URI. */
+  linkedTo(uris: string[]): Promise<Map<string, string[]>>;
+  /** Points documents linked to a file at its new place (renamed or moved in the file browser). */
+  relink(id: string, uri: string): Promise<void>;
   /** Displayable URI (object URL on web, file URI on native) or null. */
   coverUri(id: string): Promise<string | null>;
   /** Text recognized on-device for scanned PDFs, per page; undefined = not recognized yet. */
