@@ -957,6 +957,11 @@ async function foldersShell() {
         }),
       share: ({ uris }) => ((log.shared = uris), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
+      create: ({ dir, name, token }) => {
+        const id = newId();
+        nodes[id] = { name, kind: 'pdf', parent: dir || 'root', key: 'created', data: chunks[token].join(''), modified: Date.now() };
+        return { uri: uriOf(id), name };
+      },
     };
     // Documents that no longer exist (renamed, moved, deleted) are gone, as on the device.
     const realFetch = window.fetch.bind(window);
@@ -964,7 +969,9 @@ async function foldersShell() {
       const url = String(input?.url ?? input);
       if (url.includes('/__shell/doc?u=')) {
         const uri = decodeURIComponent(url.split('u=')[1]);
-        if (!nodes[idOf(uri)]) return Promise.resolve(new Response(null, { status: 404 }));
+        const node = nodes[idOf(uri)];
+        if (!node) return Promise.resolve(new Response(null, { status: 404 }));
+        if (node.data) return Promise.resolve(new Response(Uint8Array.from(node.data, (c) => c.charCodeAt(0)), { headers: { 'Content-Type': 'application/pdf' } }));
       }
       return realFetch(input, init);
     };
@@ -1130,17 +1137,91 @@ async function foldersShell() {
   const all = await vis('folder-doc').allInnerTexts();
   check(all.length === 3 && all[0].startsWith('form.pdf') && all[0].includes('Papers'), `folders-shell: all documents, newest first, with their folder (${all.map((x) => x.split('\n')[0])})`);
   check((await vis('new-folder').count()) === 0, 'folders-shell: no new folder in “All documents”');
+
+  // A scan saved into a folder through the app.
+  await page.goto(BASE);
+  await page.getByTestId('scan').click();
+  await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
+  await vis('scan-tile').first().waitFor({ timeout: 120000 });
+  await vis('scan-title').fill('Receipt');
+  await vis('scan-destination').click();
+  await page.getByRole('radio', { name: 'Docs' }).click();
+  await vis('scan-save').click();
+  await page.waitForURL(/\/read\//, { timeout: 300000 });
+  const created = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'Receipt.pdf'));
+  check(created?.parent === 'root' && created.data.startsWith('%PDF-'), 'folders-shell: a scan is saved into the folder');
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().waitFor();
+  check((await page.getByTestId('recent-row').first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
   await ctx.close();
 }
 
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
+// Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
+async function scanner() {
+  const ctx = await newContext({ viewport: { width: 412, height: 860 }, deviceScaleFactor: 2 }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Scans', { create: true });
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`scanner: ${e.message}`));
+  page.on('console', (m) => m.type() === 'error' && !/favicon|404|getUserMedia|NotFoundError|Requested device/i.test(m.text()) && errors.push(`scanner: ${m.text()}`));
+  await page.goto(BASE);
+  await page.getByTestId('scan').click();
+  await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
+  await vis('scan-tile').first().waitFor({ timeout: 120000 });
+  check((await vis('scan-tile').count()) === 1, 'scanner: imported photo becomes page 1');
+  // The page was found in the photo: the preview is the cropped page, portrait.
+  const ratio = await page.waitForFunction(() => {
+    const c = [...document.querySelectorAll('canvas[data-rendered]')].find((x) => x.offsetParent);
+    return c && c.height / c.width;
+  }, null, { timeout: 60000 }).then((h) => h.jsonValue());
+  check(ratio > 1.2 && ratio < 1.6, `scanner: page found and straightened (aspect ${ratio?.toFixed(2)})`);
+
+  await vis('scan-tile').first().click();
+  await vis('scan-filter-bw').click();
+  check((await vis('scan-filter-bw').getAttribute('aria-checked')) === 'true', 'scanner: filter chosen on the page');
+  await vis('screen-back').click();
+  // Open the app afresh (the static test server has no fallback for deep links): the draft comes back.
+  await page.goto(BASE);
+  await page.getByTestId('scan').click();
+  await vis('scan-done').click({ timeout: 30000 });
+  await vis('scan-tile').first().waitFor({ timeout: 30000 });
+  check((await vis('scan-filter-bw').getAttribute('aria-checked')) === 'true', 'scanner: draft and filter survive a reload');
+
+  await vis('scan-title').fill('Invoice ACME');
+  await vis('scan-destination').click();
+  await page.getByText(/^Other folder/).click();
+  await page.getByText('Scans').first().waitFor();
+  await vis('scan-save').click();
+  await page.waitForURL(/\/read\//, { timeout: 300000 });
+  const saved = await page.evaluate(async () => {
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Scans');
+    const file = await (await dir.getFileHandle('Invoice ACME.pdf')).getFile();
+    return new TextDecoder().decode((await file.slice(0, 5).arrayBuffer()));
+  }).catch(() => null);
+  check(saved === '%PDF-', 'scanner: PDF written into the chosen folder');
+  await page.getByTestId('view-toggle').click();
+  await page.waitForFunction(() => /ACME/.test(document.body.innerText) && /INVOICE/i.test(document.body.innerText), null, { timeout: 30000 }).then(
+    () => check(true, 'scanner: recognised text is in the PDF'),
+    () => check(false, 'scanner: recognised text is in the PDF'),
+  );
+  await page.goto(BASE);
+  await page.getByTestId('scan').click();
+  await page.locator('input[type=file]').waitFor({ state: 'attached' });
+  check((await vis('scan-done').count()) === 0, 'scanner: saving starts a new document');
+  await ctx.close();
+}
+
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
 await step('german', german);
 await step('locked', locked);
 await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
+await step('scanner', scanner);
 await step('regressions', regressions);
 await step('books', books);
 await step('shell', shellBridge);

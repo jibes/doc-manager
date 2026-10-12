@@ -3,7 +3,7 @@ import { createStore, del, entries, set } from 'idb-keyval';
 import { t } from '@/i18n';
 import type { FolderEntry, FolderRoot, FoldersApi } from './folderTypes';
 import { canPickFolders, pickDirectory, type DirHandle, type FileHandle } from './fsa';
-import { shell, shellDocUrl, shellRequest } from './shell';
+import { shell, shellDocUrl, shellRequest, stageForShell } from './shell';
 
 export type { FolderEntry, FolderRoot, Place } from './folderTypes';
 
@@ -37,6 +37,11 @@ const shellFolders: FoldersApi = {
   canEdit: (root) => root !== 'all',
   canShare: true,
   mkdir: (root, dir, name) => shellRequest('mkdir', { root, dir: dir ?? '', name }),
+  async create(at, name, data) {
+    const token = await stageForShell(data, name, data.type || 'application/octet-stream');
+    const made = await shellRequest<{ uri: string; name: string }>('create', { root: at.root, dir: at.dir ?? '', name, mime: data.type || 'application/octet-stream', token });
+    return { id: made.uri, uri: made.uri, name: made.name, kind: kindOf(made.name) ?? 'pdf', size: data.size, modified: Date.now() };
+  },
   rename: (_root, _dir, e, name) => shellRequest<string>('rename', { uri: e.uri, name }),
   delete: (_root, _dir, list) => shellRequest('delete', { uris: list.map((e) => e.uri) }),
   transfer: (from, list, to, move) =>
@@ -160,6 +165,15 @@ const browserFolders: FoldersApi = {
   canShare: typeof navigator !== 'undefined' && typeof navigator.canShare === 'function',
   async mkdir(root, dir, name) {
     await (await writable(root, dir)).getDirectoryHandle(name, { create: true });
+  },
+  async create(at, name, data) {
+    const dir = await writable(at.root, at.dir);
+    const free = await freeName(dir, name, false);
+    const handle = await dir.getFileHandle(free, { create: true });
+    const w = await handle.createWritable();
+    await w.write(data);
+    await w.close();
+    return { id: at.dir ? `${at.dir}/${free}` : free, name: free, kind: kindOf(free) ?? 'pdf', size: data.size, modified: Date.now(), handle };
   },
   async rename(root, dir, e, name) {
     const parent = await writable(root, dir);

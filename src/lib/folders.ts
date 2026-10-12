@@ -12,6 +12,9 @@ export const folders: FoldersApi = {
   canEdit: () => false,
   canShare: false,
   mkdir: async () => {},
+  create: async () => {
+    throw new Error('Unsupported');
+  },
   rename: async () => undefined,
   delete: async () => {},
   transfer: async () => [],
