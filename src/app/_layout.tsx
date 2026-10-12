@@ -16,12 +16,14 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AskDialog } from '@/components/AskDialog';
 import { PasswordDialog } from '@/components/PasswordDialog';
 import { shell } from '@/lib/shell';
-import { usePalette } from '@/state/prefs';
+import { useAmbientLight } from '@/state/ambient';
+import { usePalette, usePrefs } from '@/state/prefs';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const p = usePalette();
+  useAmbientLight(usePrefs((s) => s.theme) === 'ambient');
   const [loaded, error] = useFonts({
     Inter_400Regular,
     Inter_500Medium,

@@ -159,6 +159,16 @@ class Bridge(private val activity: MainActivity) {
         }
     }
 
+    /** Whether the device has an ambient light sensor (for the "light sensor" theme). */
+    @JavascriptInterface
+    fun hasLightSensor(): Boolean = activity.hasLightSensor()
+
+    /** Starts or stops "tessel-light" events with the ambient light in lux. */
+    @JavascriptInterface
+    fun light(on: Boolean) {
+        activity.runOnUiThread { activity.watchLight(on) }
+    }
+
     @JavascriptInterface
     fun theme(background: String, dark: Boolean) {
         activity.runOnUiThread { activity.applyTheme(background, dark) }

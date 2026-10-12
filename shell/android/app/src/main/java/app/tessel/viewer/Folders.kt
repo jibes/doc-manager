@@ -257,7 +257,7 @@ class Folders(private val context: Context) {
         if (uri.scheme == "file") {
             val f = File(uri.path!!)
             val to = File(f.parentFile, name)
-            if (to.exists()) throw IllegalStateException("“$name” already exists")
+            if (to.exists()) throw IllegalStateException("exists:$name")
             if (!f.renameTo(to)) throw IllegalStateException("Can't rename ${f.name}")
             return Uri.fromFile(to).toString()
         }

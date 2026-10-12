@@ -163,7 +163,7 @@ const browserFolders: FoldersApi = {
   },
   async rename(root, dir, e, name) {
     const parent = await writable(root, dir);
-    if (await exists(parent, name)) throw new Error(t.nameTaken(name));
+    if (await exists(parent, name)) throw new Error(`exists:${name}`);
     // Chromium can rename in place; elsewhere (or for folders it can't move) copy, then remove the old one.
     const h = e.kind === 'dir' ? await parent.getDirectoryHandle(e.name) : await parent.getFileHandle(e.name);
     const move = (h as unknown as { move?: (name: string) => Promise<void> }).move;

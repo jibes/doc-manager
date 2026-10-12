@@ -77,12 +77,12 @@ function Roots({ bottom }: { bottom: number }) {
     folders
       .roots(showAll)
       .then(setRoots)
-      .catch((e) => setError(errorText(e)));
+      .catch((e) => setError(opError(e)));
   }, [showAll]);
   useEffect(refresh, [refresh]);
 
   const add = async () => {
-    const r = await folders.add().catch((e) => void setError(errorText(e)));
+    const r = await folders.add().catch((e) => void setError(opError(e)));
     if (r) go(r.id, r.name);
     refresh();
   };
@@ -156,6 +156,14 @@ function Roots({ bottom }: { bottom: number }) {
   );
 }
 
+/** What went wrong with a file operation, in the user's language where we know it. */
+function opError(e: unknown): string {
+  const m = e instanceof Error ? e.message : '';
+  const taken = /^exists:(.*)$/.exec(m);
+  if (taken) return `${t.opFailed} ${t.nameTaken(taken[1])}`;
+  return m === t.writeDenied || m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
+}
+
 type Sort = 'name' | 'date';
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -220,7 +228,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       if (done) setMessage(done);
       setSelected(null);
     } catch (e) {
-      setMessage(`${t.opFailed} ${errorText(e)}`);
+      setMessage(opError(e));
     }
     changed();
   };
@@ -393,7 +401,7 @@ function PasteBar({
       onMessage?.(clip.move ? t.movedN(clip.entries.length) : t.copiedN(clip.entries.length));
       setClip(null);
     } catch (e) {
-      onError(`${t.opFailed} ${errorText(e)}`);
+      onError(opError(e));
     } finally {
       setBusy(false);
       changed();

@@ -4,40 +4,58 @@ import { t } from '@/i18n';
 import { IconButton, T, tick } from '@/components/primitives';
 import { fonts, palettes, radius, space, type Palette, type ThemeName } from '@/design/tokens';
 import { usePalette, usePrefs, type FitMode, type TextFont, type TextLeading, type TextWidth } from '@/state/prefs';
+import { hasLightSensor } from '@/state/ambient';
 import { Panel } from './Panel';
 
 const PAGE_TINT: Record<ThemeName, string> = { paper: '#FFFFFF', sepia: '#F3E6CC', dusk: '#3A3A3C', night: '#1A1A1A' };
 const PAGE_INK: Record<ThemeName, string> = { paper: '#1B1A17', sepia: '#3A2E20', dusk: '#E2DED5', night: '#CFCAC0' };
 
-function Swatch({ name, selected, onPress }: { name: ThemeName | null; selected: boolean; onPress: () => void }) {
+type Choice = ThemeName | 'ambient' | null;
+const LABEL = (c: Choice) => (c === 'ambient' ? t.themeAmbient : c ? t.themes[c] : t.themeAuto);
+
+function Swatch({ name, selected, onPress }: { name: Choice; selected: boolean; onPress: () => void }) {
   const p = usePalette();
-  const halves: ThemeName[] = name ? [name] : ['paper', 'dusk'];
+  // Auto: light | dark; light sensor: the three steps it moves through.
+  const halves: ThemeName[] = name === 'ambient' ? ['paper', 'dusk', 'night'] : name ? [name] : ['paper', 'dusk'];
   return (
     <Pressable
       accessibilityRole="radio"
       aria-checked={selected}
-      accessibilityLabel={name ? t.themes[name] : t.themeAutoA11y}
+      accessibilityLabel={name === 'ambient' ? t.themeAmbientA11y : name ? t.themes[name] : t.themeAutoA11y}
       onPress={() => {
         tick();
         onPress();
       }}
-      style={{ alignItems: 'center', gap: 6 }}
+      style={{ flex: 1, maxWidth: 64, alignItems: 'center', gap: 6 }}
     >
       <View style={[styles.swatch, { borderColor: selected ? p.accent : p.hairline, borderWidth: selected ? 2 : 1 }]}>
         <View style={{ flex: 1, flexDirection: 'row', borderRadius: radius.sm - 2, overflow: 'hidden' }}>
           {halves.map((h) => (
             <View key={h} style={{ flex: 1, backgroundColor: palettes[h].canvas, alignItems: 'center', justifyContent: 'center' }}>
               <View style={[styles.mini, { backgroundColor: PAGE_TINT[h] }]}>
-                <T style={{ fontFamily: fonts.serif, fontSize: 15, color: PAGE_INK[h] }}>Aa</T>
+                {halves.length < 3 && <T style={{ fontFamily: fonts.serif, fontSize: 15, color: PAGE_INK[h] }}>Aa</T>}
               </View>
             </View>
           ))}
         </View>
       </View>
       <T v="caption" color={selected ? p.ink : p.muted} style={{ fontFamily: fonts.sansMedium }}>
-        {name ? t.themes[name] : t.themeAuto}
+        {LABEL(name)}
       </T>
     </Pressable>
+  );
+}
+
+/** Theme choice: Auto (system), the four themes, and the light sensor where there is one. */
+export function ThemePicker() {
+  const { theme, set } = usePrefs();
+  const choices: Choice[] = [null, ...(hasLightSensor ? (['ambient'] as const) : []), 'paper', 'sepia', 'dusk', 'night'];
+  return (
+    <View style={styles.swatches} accessibilityRole="radiogroup">
+      {choices.map((n) => (
+        <Swatch key={n ?? 'auto'} name={n} selected={theme === n} onPress={() => set({ theme: n })} />
+      ))}
+    </View>
   );
 }
 
@@ -144,7 +162,7 @@ export function AppearancePanel({
   onZoom: (z: number) => void;
   onClose: () => void;
 }) {
-  const { theme, fit, set } = usePrefs();
+  const { fit, set } = usePrefs();
   const fits: [FitMode, string][] = [
     ['width', t.fitWidth],
     ['page', t.fitPage],
@@ -152,11 +170,7 @@ export function AppearancePanel({
   return (
     <Panel title={t.appearance} onClose={onClose} compact testID="appearance-panel">
       <View style={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.xl }}>
-        <View style={styles.swatches} accessibilityRole="radiogroup">
-          {([null, 'paper', 'sepia', 'dusk', 'night'] as (ThemeName | null)[]).map((n) => (
-            <Swatch key={n ?? 'auto'} name={n} selected={theme === n} onPress={() => set({ theme: n })} />
-          ))}
-        </View>
+        <ThemePicker />
 
         {view === 'text' ? (
           <TextSettings p={p} />
@@ -199,9 +213,9 @@ export function AppearancePanel({
 }
 
 const styles = StyleSheet.create({
-  swatches: { flexDirection: 'row', justifyContent: 'space-between' },
-  swatch: { width: 58, height: 72, borderRadius: radius.sm, padding: 3 },
-  mini: { width: 24, height: 32, borderRadius: 2, alignItems: 'center', justifyContent: 'center' },
+  swatches: { flexDirection: 'row', justifyContent: 'space-between', gap: space.xs },
+  swatch: { width: '100%', height: 72, borderRadius: radius.sm, padding: 3 },
+  mini: { width: '78%', maxWidth: 24, height: 32, borderRadius: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   segment: { flexDirection: 'row', borderRadius: radius.sm + 2, padding: 3 },
   segBtn: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   zoom: { flexDirection: 'row', alignItems: 'center', gap: space.sm },

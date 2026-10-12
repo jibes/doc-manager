@@ -198,6 +198,10 @@ export const en = {
   // Appearance
   themeAuto: 'Auto',
   themeAutoA11y: 'Automatic',
+  themeAmbient: 'Sensor',
+  themeAmbientA11y: 'Light sensor: follows the light around you',
+  appearanceTitle: 'Appearance',
+  themeNote: 'Sensor uses the light sensor: Light in a bright room, Dark when it’s dim, Black in the dark.',
   themes: { paper: 'Light', sepia: 'Sepia', dusk: 'Dark', night: 'Black' },
   layout: 'Layout',
   fitWidth: 'Fit width',
