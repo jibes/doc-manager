@@ -24,9 +24,9 @@ RULE = HexColor('#ddd8cc')
 CHAPTERS = [
     ('Opening files', 'Every PDF you open lands in Recent, newest first. Nothing leaves your device.', [
         ('Ways to open', [
-            'Use Open PDF on the home screen, drop a file anywhere on the window, or choose Tessel from '
+            'Use Open file on the home screen, drop a file anywhere on the window, or choose Tessel from '
             'your system’s Open with menu once it is installed. Opening the same file twice simply takes '
-            'you back to it.',
+            'you back to it. EPUB books open too, and go straight onto your reading list.',
             'In Chrome and Edge, Tessel opens the file where it is saved, so form entries, highlights and '
             'notes are saved back into it. Other browsers keep a copy in Tessel instead.',
         ]),

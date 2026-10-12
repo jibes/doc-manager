@@ -311,6 +311,7 @@ function Row({
           </T>
           <T v="caption" color={p.muted} numberOfLines={1}>
             {t.docMeta(doc.pageCount, doc.bytes, doc.openedAt)}
+            {doc.format === 'epub' ? ' · EPUB' : ''}
             {doc.linked ? ` · ${t.inPlace}` : ''}
           </T>
         </View>

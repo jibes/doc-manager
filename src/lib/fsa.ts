@@ -21,12 +21,12 @@ export const canOpenInPlace = () => !!picker();
 export const isFileHandle = (v: unknown): v is FileHandle =>
   typeof v === 'object' && v !== null && (v as { kind?: unknown }).kind === 'file' && typeof (v as FileHandle).getFile === 'function';
 
-const PDF = { description: 'PDF', accept: { 'application/pdf': ['.pdf'] } };
+const TYPES = { description: 'PDF, EPUB', accept: { 'application/pdf': ['.pdf'], 'application/epub+zip': ['.epub'] } };
 
-/** Picks PDFs as handles; [] when cancelled. */
+/** Picks documents as handles; [] when cancelled. */
 export async function pickHandles(multiple = true): Promise<FileHandle[]> {
   try {
-    return await picker()!({ multiple, types: [PDF], excludeAcceptAllOption: false, id: 'tessel-open' });
+    return await picker()!({ multiple, types: [TYPES], excludeAcceptAllOption: false, id: 'tessel-open' });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return [];
     throw e;

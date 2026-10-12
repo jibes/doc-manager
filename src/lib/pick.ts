@@ -9,7 +9,7 @@ export async function pickPdfs(): Promise<ImportItem[]> {
   // Chromium: link to the files where they are; elsewhere the library keeps a copy.
   if (canOpenInPlace()) return itemsFromHandles(await pickHandles());
   const res = await DocumentPicker.getDocumentAsync({
-    type: 'application/pdf',
+    type: ['application/pdf', 'application/epub+zip'],
     multiple: true,
     copyToCacheDirectory: true,
   });
@@ -28,13 +28,14 @@ export async function sampleItem(): Promise<ImportItem> {
   return { name, size: 0, uri: asset.localUri ?? asset.uri };
 }
 
-const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+/** What Tessel opens: PDFs and EPUB books. */
+const isSupported = (f: File) => /^application\/(pdf|epub\+zip)$/.test(f.type) || /\.(pdf|epub)$/i.test(f.name);
 
 /** Web: files from drag-and-drop (handles where the browser gives them, for opening in place). */
 export function itemsFromFiles(files: Iterable<File>, handles: (FileHandle | null)[] = []): ImportItem[] {
   return [...files]
     .map((f, i) => ({ name: f.name, size: f.size, file: f, handle: handles[i] ?? undefined }))
-    .filter((it) => isPdf(it.file));
+    .filter((it) => isSupported(it.file));
 }
 
 /** Web: picked handles, or files from the OS "Open with" (File Handling API). */

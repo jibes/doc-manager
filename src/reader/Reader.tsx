@@ -181,9 +181,9 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
 
   // Text view reports the block at the top; it becomes the shared position.
   const onTextPosition = useCallback(
-    (pg: number, y: number) => {
+    (pg: number, y: number, atEnd: boolean) => {
       posRef.current = { page: pg, offset: y };
-      savePosition(doc.id, posRef.current);
+      savePosition(doc.id, posRef.current, atEnd);
       cache.setFocus(pg);
       setPage((old) => (old === pg ? old : pg));
     },
@@ -509,6 +509,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           onPosition={onTextPosition}
           onScrollY={trackDirection}
           onExit={() => switchView('page')}
+          onTap={onPagePress}
           onOpenPage={openPageAt}
           apiRef={textApiRef}
           docId={doc.id}
@@ -626,7 +627,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
                   <T v="numeral" color={p.muted} style={{ fontSize: 13 }}>
                     {'  /  '}
                     {handle.pageCount}
-                    {readingMode ? `  ·  ${t.percentRead(Math.round(((page + 1) / handle.pageCount) * 100))}` : ''}
+                    {readingMode ? `  ·  ${t.percentRead(Math.round((page / Math.max(1, handle.pageCount - 1)) * 100))}` : ''}
                   </T>
                 </T>
               </Pressable>

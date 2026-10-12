@@ -11,8 +11,9 @@ import { Thumb } from './Thumb';
 type Props = {
   page: number;
   pageCount: number;
-  sizes: Size[];
-  cache: RasterCache;
+  /** Page images for the preview (PDFs); books show page number and chapter only. */
+  sizes?: Size[];
+  cache?: RasterCache;
   palette: Palette;
   /** Chapter starts (0-based pages), drawn as notches on the spine. */
   chapters: { page: number; title: string }[];
@@ -108,10 +109,10 @@ export function Scrubber({ page, pageCount, sizes, cache, palette: p, chapters, 
           />
         </View>
       )}
-      {active && sizes[shown] && (
+      {active && (!cache || sizes?.[shown]) && (
         <View pointerEvents="none" style={[styles.preview, { left: previewX, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
-          <Thumb cache={cache} page={shown} size={sizes[shown]} width={PREVIEW_W} palette={p} />
-          <T v="numeral" style={{ marginTop: space.sm, fontFamily: fonts.sansSemi }}>
+          {cache && sizes?.[shown] && <Thumb cache={cache} page={shown} size={sizes[shown]} width={PREVIEW_W} palette={p} />}
+          <T v="numeral" style={{ marginTop: cache ? space.sm : 0, fontFamily: fonts.sansSemi }}>
             {shown + 1} <T v="numeral" color={p.muted}>/ {pageCount}</T>
           </T>
           {chapter ? (

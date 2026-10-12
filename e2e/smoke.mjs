@@ -1,5 +1,6 @@
 // End-to-end smoke test against a running web build (default: expo dev server on :8081).
 // Usage: BASE=http://localhost:8081 node e2e/smoke.mjs
+import { Buffer } from 'node:buffer';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
@@ -404,7 +405,7 @@ async function annotations() {
   };
   await select(/^Every PDF you open lands in Recent/);
   await page.getByTestId('highlight-green').click();
-  await select(/^Use Open PDF on the home screen/);
+  await select(/^Use Open file on the home screen/);
   await page.getByTestId('highlight-note').click();
   await page.getByTestId('note-input').fill('Try dragging a file in');
   await page.getByTestId('note-save').click();
@@ -430,7 +431,7 @@ async function annotations() {
   await page.getByTestId('open-contents').click();
   await page.getByTestId('tab-notes').click();
   await rows.first().waitFor({ timeout: 5000 });
-  const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Use Open PDF/.test(await rows.first().innerText());
+  const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Use Open file/.test(await rows.first().innerText());
   check(kept, 'annotations: edits and deletions saved into the PDF');
   await ctx.close();
 }
@@ -500,6 +501,124 @@ async function regressions() {
   await page.keyboard.press('Escape');
   await page.getByTestId('reading-list').waitFor();
   check(/Finished · 1/i.test(await page.getByTestId('reading-list').innerText()), 'regression: reaching the end finishes a reading-list document');
+  await ctx.close();
+}
+
+// EPUB books: straight onto the reading list; contents, footnotes, inline formatting, figures, search,
+// position, finishing; EPUB 2 contents; a broken file explained.
+async function books() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`books: ${e.message}`));
+  await openFixture(page, 'book.epub');
+  const view = page.getByTestId('text-view');
+  await view.waitFor({ timeout: 10000 });
+  await page.waitForTimeout(800);
+  const label = async () => (await page.getByTestId('page-label').innerText()).replace(/\s+/g, ' ');
+  check(/^1 \/ \d+ · 0%/.test(await label()), `books: opens at the start, on the reading list (${await label()})`);
+  const fmt = await view.evaluate((root) => {
+    const span = (re) => [...root.querySelectorAll('span, div')].find((e) => e.children.length === 0 && re.test(e.textContent));
+    const em = span(/^the tide$/);
+    const strong = span(/^very$/);
+    const para = em?.parentElement;
+    const cs = (e) => e && getComputedStyle(e);
+    return { em: cs(em)?.fontStyle, strong: cs(strong)?.fontWeight, same: cs(em)?.fontFamily === cs(para)?.fontFamily };
+  });
+  check(fmt.em === 'italic' && Number(fmt.strong) >= 600 && fmt.same, `books: inline emphasis keeps the text font (${JSON.stringify(fmt)})`);
+  // Footnote reference → the note.
+  await view.getByRole('link', { name: '1', exact: true }).first().click();
+  await page.waitForTimeout(800);
+  const noteShown = await view.evaluate((root) => [...root.querySelectorAll('div')].some((e) => e.children.length === 0 && /first ferry leaves/.test(e.textContent) && e.getBoundingClientRect().top < innerHeight && e.getBoundingClientRect().bottom > 0));
+  check(noteShown, 'books: a footnote reference jumps to the note');
+  // Reading hides the toolbars; a tap on the text brings them back.
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(500);
+  await page.mouse.move(640, 430);
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 250);
+  await page.waitForTimeout(700);
+  const toolbar = () => page.getByTestId('back').evaluate((e) => { for (let n = e; n; n = n.parentElement) if (getComputedStyle(n).opacity === '0') return false; return true; });
+  const hidden = !(await toolbar());
+  await page.mouse.click(640, 430);
+  await page.waitForTimeout(500);
+  check(hidden && (await toolbar()), `books: a tap on the text shows the hidden toolbar (hidden before: ${hidden})`);
+  // Contents.
+  await page.getByTestId('open-contents').click();
+  await page.getByTestId('contents-panel').getByText('The Harbour', { exact: true }).click();
+  await page.waitForTimeout(800);
+  check(/^1 \//.test(await label()), `books: contents jump to chapter one (${await label()})`);
+  const img = await view.evaluate((root) => { const i = root.querySelector('img'); return i ? i.naturalWidth : -1; });
+  check(img > 0, 'books: images from the book are shown');
+  await page.getByTestId('contents-panel').getByText('At dusk').click();
+  await page.waitForTimeout(800);
+  const dusk = await view.evaluate((root) => [...root.querySelectorAll('div')].some((e) => e.children.length === 0 && e.textContent === 'At dusk' && e.getBoundingClientRect().top > 50 && e.getBoundingClientRect().top < innerHeight));
+  check(dusk, 'books: contents jump to a section');
+  await page.keyboard.press('Escape');
+  // Search.
+  await page.keyboard.press('Control+f');
+  await page.getByTestId('search-input').fill('first ferry');
+  await page.waitForTimeout(500);
+  await page.getByTestId('search-input').press('Enter');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(800);
+  const marked = await view.evaluate((root) => [...root.querySelectorAll('span')].filter((e) => /^first ferry$/i.test(e.textContent) && getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)').length);
+  check(marked > 0, `books: search highlights matches (${marked})`);
+  await page.getByTestId('find-clear').click();
+  // Position is kept; reaching the end finishes the book.
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(500);
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(1000);
+  const before = await label();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('reading-list').waitFor();
+  const card = await page.getByTestId('reading-list').innerText();
+  check(/Harbour Notes/.test(card) && /EPUB/.test(await page.getByTestId('recent-row').first().innerText()), 'books: listed as EPUB on the reading list');
+  await page.reload();
+  await page.getByTestId('continue').click();
+  await view.waitFor();
+  await page.waitForTimeout(1200);
+  check((await label()) === before, `books: reopens where it was left (${before} → ${await label()})`);
+  // Jumping to the end isn't reading it; scrolling there is.
+  await page.keyboard.press('End');
+  await page.waitForTimeout(1200);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('reading-list').waitFor();
+  check(!/Finished/i.test(await page.getByTestId('reading-list').innerText()), 'books: jumping to the end does not finish the book');
+  await page.getByTestId('continue').click();
+  await view.waitFor();
+  await page.waitForTimeout(800);
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('PageUp');
+    await page.waitForTimeout(150);
+  }
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press(' ');
+    await page.waitForTimeout(250);
+  }
+  await page.waitForTimeout(900);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('reading-list').waitFor();
+  check(/Finished · 1/i.test(await page.getByTestId('reading-list').innerText()), 'books: reading to the end finishes the book');
+  // EPUB 2 with an NCX table of contents.
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/book2.epub', import.meta.url).pathname);
+  await view.waitFor({ timeout: 10000 });
+  await page.waitForTimeout(500);
+  await page.getByTestId('open-contents').click();
+  await page.getByTestId('contents-panel').getByText('Departure').waitFor({ timeout: 5000 }).then(
+    () => check(true, 'books: EPUB 2 contents (NCX)'),
+    () => check(false, 'books: EPUB 2 contents (NCX)'),
+  );
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  // Not really an EPUB.
+  await page.getByTestId('recent-row').first().waitFor();
+  const [fc2] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc2.setFiles({ name: 'broken.epub', mimeType: 'application/epub+zip', buffer: Buffer.from('not a zip') });
+  await page.getByText('couldn’t be read as an EPUB book').waitFor({ timeout: 5000 }).then(
+    () => check(true, 'books: a broken EPUB is explained'),
+    () => check(false, 'books: a broken EPUB is explained'),
+  );
   await ctx.close();
 }
 
@@ -594,6 +713,7 @@ await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
 await step('regressions', regressions);
+await step('books', books);
 await step('forms', forms);
 await step('annotations', annotations);
 await step('linked', linked);

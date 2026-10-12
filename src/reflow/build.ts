@@ -8,9 +8,12 @@ import { CAPTION, findFigures, findTables, median, mergeFigures, readingOrder, t
 
 /**
  * 'label': small standalone text such as a chapter kicker ("CHAPTER 2").
- * 'figure': a region shown as a crop of the page (drawing, photo or table); its text is the alt text.
+ * 'figure': a region shown as a crop of the page (drawing, photo or table), or a book's image; its text is the alt text.
+ * 'code': preformatted text (whitespace kept); 'rule': a scene break.
  */
-export type BlockKind = 'h1' | 'h2' | 'h3' | 'label' | 'p' | 'li' | 'quote' | 'caption' | 'figure';
+export type BlockKind = 'h1' | 'h2' | 'h3' | 'label' | 'p' | 'li' | 'quote' | 'caption' | 'figure' | 'code' | 'rule';
+/** Inline formatting (books): pieces of a block's text with emphasis or a link. `Block.text` stays the plain text. */
+export type Run = { text: string; em?: boolean; strong?: boolean; code?: boolean; sup?: boolean; href?: string };
 export type Block = {
   kind: BlockKind;
   text: string;
@@ -19,6 +22,11 @@ export type Block = {
   /** Figures: the page region to show, and whether it is a table. */
   rect?: NormRect;
   table?: boolean;
+  /** Books: inline formatting; figures from an image file (`src`, with its pixel size). */
+  runs?: Run[];
+  src?: string;
+  imgW?: number;
+  imgH?: number;
   /** Source page (0-based) and top of the first line (0..1) — for position sync with page view. */
   page: number;
   y: number;
