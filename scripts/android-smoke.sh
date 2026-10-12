@@ -16,6 +16,8 @@ wait_for() {
   echo "Timed out waiting for: $1"; ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"' | head -60
   return 1
 }
+# Visible texts and descriptions, for the log.
+screen() { ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"'; }
 # Taps the centre of the first node whose text or description matches $1.
 tap() {
   local b
@@ -30,10 +32,18 @@ adb logcat -c
 adb shell am start -W -n app.tessel.viewer/.MainActivity
 wait_for "Every document"
 adb exec-out screencap -p > "$OUT/1-home.png"
+echo "--- screen (home) ---"; screen | head -25
 tap "Open sample"
 wait_for "Welcome to Tessel"
 sleep 4
 adb exec-out screencap -p > "$OUT/2-sample.png"
+# Text view: PDFium's text extraction, running as WebAssembly in a worker inside the WebView.
+tap "Text view"
+wait_for "Every PDF you open lands in Recent"
+adb exec-out screencap -p > "$OUT/2b-text-view.png"
+echo "--- screen (text view) ---"; screen | head -25
+tap "Page view"
+sleep 2
 adb shell input keyevent KEYCODE_BACK
 wait_for "Welcome to Tessel"
 adb exec-out screencap -p > "$OUT/3-library.png"
