@@ -25,6 +25,17 @@ wait_count() {
   echo "Timed out waiting for $2 × $1"; screen | head -40
   return 1
 }
+# Taps $1 until at least $3 nodes match $2 (a first tap on the emulator's WebView is sometimes lost
+# right after the screen changed; the browser e2e opens these dialogs on the first tap).
+tap_until() {
+  for _ in 1 2 3; do
+    tap "$1"
+    sleep 3
+    [ "$(ui | sed 's/></>\n</g' | grep -Ec "(text|content-desc)=\"[^\"]*$2")" -ge "$3" ] && return 0
+  done
+  echo "No response to: $1"; screen | head -40
+  return 1
+}
 # Visible texts and descriptions, for the log.
 screen() { ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"'; }
 # Taps the centre of the first node whose text or description matches $1.
@@ -116,9 +127,8 @@ tap_last "New folder"
 on_device -d /sdcard/Download/Smoke
 tap "Select"
 tap "smoke-columns.pdf"
-tap "Rename"
 # The selection bar has its own "Cancel": the dialog is up once there are two.
-wait_count "Cancel\"" 2
+tap_until "Rename" "Cancel\"" 2
 adb shell input keyevent KEYCODE_MOVE_END
 for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
 adb shell input text smoke-renamed.pdf
@@ -138,8 +148,7 @@ wait_for "smoke-renamed.pdf\""
 adb exec-out screencap -p > "$OUT/6-moved.png"
 tap "Select"
 tap "smoke-renamed.pdf"
-tap "Delete"
-wait_for "Delete this item"
+tap_until "Delete" "Delete this item" 1
 tap_last "Delete"
 sleep 2
 if adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi

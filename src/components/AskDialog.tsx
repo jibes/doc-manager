@@ -8,6 +8,8 @@ import { useAsk } from '@/state/ask';
 import { usePalette } from '@/state/prefs';
 import { Button, T } from './primitives';
 
+let backdropPressed = false;
+
 /** Modal answering ask(); mounted once in the root layout. */
 export function AskDialog() {
   const p = usePalette();
@@ -15,8 +17,19 @@ export function AskDialog() {
   if (!request) return null;
   return (
     <Animated.View entering={FadeIn.duration(160)} style={[StyleSheet.absoluteFill, styles.backdrop, { backgroundColor: p.scrim }]}>
-      {/* On touch screens the tap that opened the dialog can land on the backdrop too: ignore that one. */}
-      <Pressable accessibilityLabel={t.cancel} style={StyleSheet.absoluteFill} onPress={() => Date.now() - request.at > 500 && request.resolve(null)} />
+      {/*
+        On touch screens the click from the tap that opened the dialog can arrive after it has appeared, on the
+        backdrop. Only a press that starts on the backdrop closes it.
+      */}
+      <Pressable
+        accessibilityLabel={t.cancel}
+        style={StyleSheet.absoluteFill}
+        onPressIn={() => (backdropPressed = true)}
+        onPress={() => {
+          if (backdropPressed) request.resolve(null);
+          backdropPressed = false;
+        }}
+      />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.center} pointerEvents="box-none">
         <Card key={request.title} />
       </KeyboardAvoidingView>
