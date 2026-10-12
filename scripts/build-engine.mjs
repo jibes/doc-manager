@@ -1,4 +1,4 @@
-// Bundles the PDFium worker + wasm into public/engine, and copies the on-device OCR
+// Bundles the PDFium worker + wasm and the scanner workers + ONNX Runtime into public/engine, and copies the on-device OCR
 // (Tesseract, LSTM builds + English/German models) into public/ocr. Served as static assets on web.
 import { build } from 'esbuild';
 import { copyFileSync, mkdirSync } from 'node:fs';
@@ -22,6 +22,19 @@ await build({
 
 const wasm = join(dirname(require.resolve('@embedpdf/pdfium/pdfium.wasm')), 'pdfium.wasm');
 copyFileSync(wasm, join(out, 'pdfium.wasm'));
+
+// Scanner: image processing, page detection and OCR (PaddleOCR) workers, with ONNX Runtime's wasm. The models are in public/models.
+await build({
+  entryPoints: ['processor', 'detector', 'ocr'].map((name) => ({ in: `src/scan/engine/worker/${name}.worker.ts`, out: `scan-${name}` })),
+  outdir: out,
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  minify: process.argv.includes('--minify'),
+  conditions: ['browser'],
+  logLevel: 'warning',
+});
+copyFileSync(require.resolve('onnxruntime-web/ort-wasm-simd-threaded.wasm'), join(out, 'ort-wasm-simd-threaded.wasm'));
 console.log('engine → public/engine');
 
 // OCR is loaded only when a reader asks to recognize a scanned PDF; self-hosted so no page image or request leaves the app's origin.
