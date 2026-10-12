@@ -1,0 +1,39 @@
+name: Scan quality
+
+# Scanner engine changes: synthetic phone photos through the real workers and PDF export (e2e/scan).
+on:
+  push:
+    branches: [main, 'ccr-*']
+    paths: ['src/scan/**', 'e2e/scan/**', 'public/models/**', 'scripts/build-engine.mjs', 'package-lock.json']
+  pull_request:
+    paths: ['src/scan/**', 'e2e/scan/**', 'public/models/**', 'scripts/build-engine.mjs', 'package-lock.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run test:scan -- --no-clean-ocr --max-cer 0.1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: scan-report
+          path: |
+            e2e/out/scan/report.md
+            e2e/out/scan/results.json

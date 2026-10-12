@@ -50,6 +50,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.0",
+    "onnxruntime-web": "^1.30.0",
     "playwright-core": "^1.64.0",
     "tesseract.js": "7.0.0",
     "tesseract.js-core": "7.0.0",
@@ -69,7 +70,8 @@
     "lint": "expo lint",
     "test:e2e": "node e2e/smoke.mjs",
     "test": "vitest run",
-    "build:android-web": "npm run engine && expo export -p web --output-dir shell/android/app/src/main/assets/www && OUT_DIR=shell/android/app/src/main/assets/www node scripts/postexport.mjs"
+    "build:android-web": "npm run engine && expo export -p web --output-dir shell/android/app/src/main/assets/www && OUT_DIR=shell/android/app/src/main/assets/www node scripts/postexport.mjs",
+    "test:scan": "node e2e/scan/run.mjs"
   },
   "private": true,
   "license": "AGPL-3.0-or-later"
