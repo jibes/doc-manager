@@ -32,7 +32,7 @@ import java.io.File
  */
 class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
-    private lateinit var assets: AppAssets
+    private lateinit var appAssets: AppAssets
     private val bridge by lazy { Bridge(this) }
     private var pageReady = false
 
@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-        assets = AppAssets(this.assets)
+        appAssets = AppAssets(assets)
 
         web = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
@@ -158,7 +158,7 @@ class MainActivity : ComponentActivity() {
             val url = request.url
             if (url.host != AppAssets.HOST) return null
             val path = url.path ?: "/"
-            return if (path.startsWith("/__shell/file/")) bridge.serve(path) else assets.handle(path)
+            return if (path.startsWith("/__shell/file/")) bridge.serve(path) else appAssets.handle(path)
         }
 
         /** Links to the web open in the browser (or the matching app); the app itself stays in the WebView. */
