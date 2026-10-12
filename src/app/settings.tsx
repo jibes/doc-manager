@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
@@ -40,6 +40,7 @@ export default function Settings() {
     await folders.remove(id).catch((e) => setError(errorText(e)));
     refresh();
   };
+  const allOn = allFiles && granted === true;
   const toggleAll = async (on: boolean) => {
     if (!on) return setPrefs({ allFiles: false });
     const ok = await folders.requestAllFiles().catch(() => false);
@@ -89,20 +90,27 @@ export default function Settings() {
             <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
               {t.allFilesTitle}
             </T>
-            <View style={[styles.card, styles.row, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+            {/* The whole row is the switch: easier to hit than the knob alone. */}
+            <Pressable
+              testID="all-files"
+              accessibilityRole="switch"
+              accessibilityLabel={t.allFilesSwitch}
+              accessibilityState={{ checked: allOn }}
+              aria-checked={allOn}
+              onPress={() => toggleAll(!allOn)}
+              style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+                styles.card,
+                styles.row,
+                { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
+              ]}
+            >
               <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
                 {t.allFilesSwitch}
               </T>
-              <Switch
-                testID="all-files"
-                accessibilityLabel={t.allFilesSwitch}
-                value={allFiles && granted === true}
-                onValueChange={toggleAll}
-                trackColor={{ true: p.accent, false: p.hairline }}
-                thumbColor={p.surface}
-                {...({ activeThumbColor: p.surface } as object)}
-              />
-            </View>
+              <View style={[styles.track, { backgroundColor: allOn ? p.accent : p.hairline }]}>
+                <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: allOn ? 18 : 0 }] }]} />
+              </View>
+            </Pressable>
             <T v="caption" color={p.muted} style={styles.note}>
               {t.allFilesNote}
             </T>
@@ -132,4 +140,6 @@ const styles = StyleSheet.create({
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingLeft: space.lg, paddingRight: space.sm, minHeight: 56 },
   note: { marginTop: space.md, maxWidth: 560 },
+  track: { width: 42, height: 24, borderRadius: 12, padding: 3 },
+  knob: { width: 18, height: 18, borderRadius: 9, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } },
 });
