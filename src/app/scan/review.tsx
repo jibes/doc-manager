@@ -233,7 +233,7 @@ export default function ScanReview() {
 function Choice({ icon, label, note, on, onPress }: { icon: 'pages' | 'folder' | 'folderAdd'; label: string; note?: string; on?: boolean; onPress: () => void }) {
   const p = usePalette();
   return (
-    <Pressable accessibilityRole="radio" accessibilityState={{ checked: !!on }} onPress={onPress} style={({ hovered }: { hovered?: boolean }) => [styles.choice, hovered && { backgroundColor: p.hairline }]}>
+    <Pressable accessibilityRole="radio" accessibilityState={{ checked: !!on }} onPress={onPress} style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.choice, pressed && { opacity: 0.7 }, hovered && { backgroundColor: p.hairline }]}>
       <Icon name={icon} color={on ? p.accent : p.inkSoft} size={20} />
       <View style={{ flex: 1 }}>
         <T color={on ? p.accent : p.ink} numberOfLines={1}>
