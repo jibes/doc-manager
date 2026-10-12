@@ -207,7 +207,7 @@ wait_for "Scan 2"
 sleep 3
 adb exec-out screencap -p > "$OUT/12-saved.png"
 echo "--- screen (saved scan) ---"; screen | head -20
-adb logcat -d -s TesselWeb:* | grep -o 'Scanner: cross-origin isolated [a-z]*' | tail -1 || true
+adb logcat -d -s TesselWeb:* | grep -Eo 'Scanner: (cross-origin isolated [a-z]+|text recognition with [0-9]+ thread)' | sort -u || true
 echo "--- scanner passed ---"
 
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true

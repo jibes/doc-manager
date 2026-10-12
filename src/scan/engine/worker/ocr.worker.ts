@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web/wasm';
-import { OCR_MODELS, workerModels, workerWasm } from '../assets';
+import { OCR_MODELS, workerModels, threadCount, workerWasm } from '../assets';
 import { rotateRGBA, type RGBAImage } from '../imaging/image';
 import { resize } from '../imaging/resample';
 import {
@@ -40,7 +40,9 @@ const DETECT_SIDE = 1280;
 const MIN_CONFIDENCE = 0.5;
 
 ort.env.wasm.wasmPaths = { wasm: workerWasm() };
-ort.env.wasm.numThreads = self.crossOriginIsolated ? 4 : 1;
+ort.env.wasm.numThreads = threadCount();
+// For the record (Android smoke test reads it from the WebView's console).
+if (!self.name?.startsWith('em-pthread')) console.info(`Scanner: text recognition with ${ort.env.wasm.numThreads} thread(s)`);
 
 let models: Promise<{
   det: ort.InferenceSession;
