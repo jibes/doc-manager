@@ -27,6 +27,12 @@ tap() {
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 
+# Waits for a path to exist on the device (file operations finish asynchronously).
+on_device() {
+  for _ in $(seq 1 15); do adb shell ls "$@" >/dev/null 2>&1 && return 0; sleep 1; done
+  echo "Not on the device: $*"; adb shell ls -la /sdcard/Download; return 1
+}
+
 # Taps the last match instead (a dialog's button over the screen's own).
 tap_last() {
   local b
@@ -96,9 +102,8 @@ wait_for "smoke-columns.pdf"
 tap "New folder"
 wait_for "Cancel"
 adb shell input text Smoke
-adb shell input keyevent KEYCODE_ENTER
-wait_for "Smoke\""
-adb shell ls -d /sdcard/Download/Smoke
+tap_last "New folder"
+on_device -d /sdcard/Download/Smoke
 tap "Select"
 tap "smoke-columns.pdf"
 tap "Rename"
@@ -106,17 +111,17 @@ wait_for "Cancel"
 adb shell input keyevent KEYCODE_MOVE_END
 for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
 adb shell input text smoke-renamed.pdf
-adb shell input keyevent KEYCODE_ENTER
-wait_for "smoke-renamed.pdf"
-adb shell ls /sdcard/Download/smoke-renamed.pdf
+tap_last "Rename"
+on_device /sdcard/Download/smoke-renamed.pdf
+wait_for "smoke-renamed.pdf\""
 tap "Select"
 tap "smoke-renamed.pdf"
 tap "Move"
 wait_for "Open the folder to move to"
 tap "Smoke\""
 tap "item here"
-wait_for "smoke-renamed.pdf"
-adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf
+on_device /sdcard/Download/Smoke/smoke-renamed.pdf
+wait_for "smoke-renamed.pdf\""
 adb exec-out screencap -p > "$OUT/6-moved.png"
 tap "Select"
 tap "smoke-renamed.pdf"
