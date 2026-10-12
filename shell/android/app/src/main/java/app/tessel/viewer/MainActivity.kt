@@ -1,5 +1,6 @@
 package app.tessel.viewer
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -7,6 +8,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
@@ -24,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -59,6 +62,18 @@ class MainActivity : ComponentActivity() {
                 .onFailure { Log.w(TAG, "save failed", it) }
         }
     }
+
+    private var folderCallback: ((Uri?) -> Unit)? = null
+    private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) bridge.folders.keep(tree)
+        folderCallback?.invoke(tree)
+        folderCallback = null
+    }
+
+    private var accessCallback: ((Boolean) -> Unit)? = null
+    private val accessDone = { accessCallback?.invoke(bridge.folders.allFilesGranted()); accessCallback = null }
+    private val accessSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { accessDone() }
+    private val accessPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { accessDone() }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -144,6 +159,41 @@ class MainActivity : ComponentActivity() {
         saver.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, file.name))
     }
 
+    /** The system folder picker; access is kept across restarts. */
+    fun pickFolder(done: (Uri?) -> Unit) {
+        folderCallback?.invoke(null)
+        folderCallback = done
+        try {
+            folderPicker.launch(null)
+        } catch (_: ActivityNotFoundException) {
+            folderCallback = null
+            done(null)
+        }
+    }
+
+    /** "All files access": Android's settings screen for it (11+), or the storage permission (8–10). */
+    fun requestAllFiles(done: (Boolean) -> Unit) {
+        if (bridge.folders.allFilesGranted()) return done(true)
+        accessCallback?.invoke(false)
+        accessCallback = done
+        if (Build.VERSION.SDK_INT >= 30) {
+            val app = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
+            try {
+                accessSettings.launch(app)
+            } catch (_: ActivityNotFoundException) {
+                runCatching { accessSettings.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }.onFailure { accessDone() }
+            }
+        } else {
+            accessPermission.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
+        }
+    }
+
+    /** Answers a bridge request (see Bridge.request). */
+    fun reply(id: String, ok: Boolean, value: Any?) {
+        val detail = JSONObject().put("id", id).put("ok", ok).put(if (ok) "value" else "error", value ?: JSONObject.NULL)
+        web.post { web.evaluateJavascript("window.dispatchEvent(new CustomEvent('tessel-shell-reply', { detail: $detail }))", null) }
+    }
+
     /** System bars follow the app's palette (the web app reports it on every theme change). */
     fun applyTheme(background: String, dark: Boolean) {
         runCatching { window.decorView.setBackgroundColor(Color.parseColor(background)) }
@@ -158,7 +208,11 @@ class MainActivity : ComponentActivity() {
             val url = request.url
             if (url.host != AppAssets.HOST) return null
             val path = url.path ?: "/"
-            return if (path.startsWith("/__shell/file/")) bridge.serve(path) else appAssets.handle(path)
+            return when {
+                path.startsWith("/__shell/file/") -> bridge.serve(path)
+                path == "/__shell/doc" -> bridge.folders.serve(url.getQueryParameter("u"))
+                else -> appAssets.handle(path)
+            }
         }
 
         /** Links to the web open in the browser (or the matching app); the app itself stays in the WebView. */

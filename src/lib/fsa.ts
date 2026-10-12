@@ -39,3 +39,30 @@ export async function ensurePermission(h: FileHandle, write = false): Promise<bo
   if ((await h.queryPermission({ mode })) === 'granted') return true;
   return (await h.requestPermission({ mode })) === 'granted';
 }
+
+/** A folder the user picked (Chromium). */
+export type DirHandle = {
+  kind: 'directory';
+  name: string;
+  entries(): AsyncIterable<[string, FileHandle | DirHandle]>;
+  getDirectoryHandle(name: string): Promise<DirHandle>;
+  queryPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
+  requestPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
+};
+
+type DirPicker = (o: object) => Promise<DirHandle>;
+const dirPicker = (): DirPicker | undefined =>
+  typeof window !== 'undefined' ? (window as unknown as { showDirectoryPicker?: DirPicker }).showDirectoryPicker : undefined;
+
+/** Whether folders can be browsed here (desktop Chromium). */
+export const canPickFolders = () => !!dirPicker();
+
+/** Picks a folder; null when cancelled. */
+export async function pickDirectory(): Promise<DirHandle | null> {
+  try {
+    return await dirPicker()!({ id: 'tessel-folder', mode: 'read' });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return null;
+    throw e;
+  }
+}

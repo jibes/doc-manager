@@ -19,12 +19,15 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.Executors
 
 /**
  * window.TesselShell: what the web app can't do inside a WebView on its own.
  * - Files opened or shared from other apps are served at /__shell/file/<id> and listed by pending().
  * - Outgoing files (share, save, print) arrive in base64 chunks: begin → append… → finish.
  * - theme() matches the system bars to the app's palette.
+ * - request(id, method, args) runs slower or interactive work (folders, permissions, writing back) and
+ *   answers with a "tessel-shell-reply" event carrying {id, ok, value | error}.
  * JavaScript calls arrive on a background thread; anything touching UI hops to the main thread.
  */
 class Bridge(private val activity: MainActivity) {
@@ -33,6 +36,8 @@ class Bridge(private val activity: MainActivity) {
     private val incoming = LinkedHashMap<String, Incoming>()
     private val unclaimed = ArrayList<String>()
     private val outgoing = HashMap<String, Pair<File, String>>()
+    val folders = Folders(activity)
+    private val worker = Executors.newSingleThreadExecutor()
 
     /** Registers files from a VIEW/SEND intent; returns how many were usable. */
     fun accept(uris: List<Uri>): Int {
@@ -107,6 +112,34 @@ class Bridge(private val activity: MainActivity) {
                 "share" -> share(file, mime)
                 "save" -> activity.saveAs(file, mime)
                 "print" -> print(file)
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun request(id: String, method: String, args: String) {
+        val a = runCatching { JSONObject(args) }.getOrElse { JSONObject() }
+        val done = { value: Any? -> activity.reply(id, true, value) }
+        when (method) {
+            // Interactive: answered when the user comes back from the system screen.
+            "pickFolder" -> activity.runOnUiThread { activity.pickFolder { tree -> done(tree?.let { JSONObject().put("uri", it.toString()).put("name", folders.treeName(it)) }) } }
+            "requestAllFiles" -> activity.runOnUiThread { activity.requestAllFiles { done(it) } }
+            else -> worker.execute {
+                runCatching<Any?> {
+                    when (method) {
+                        "folders" -> folders.folders()
+                        "forgetFolder" -> folders.forget(Uri.parse(a.getString("uri"))).let { null }
+                        "list" -> folders.list(a.getString("root"), a.optString("dir").ifEmpty { null })
+                        "access" -> JSONObject().put("allFiles", folders.allFilesGranted())
+                        "write" -> {
+                            val (file, _) = synchronized(this) { outgoing.remove(a.getString("token")) } ?: throw IllegalStateException("Nothing to write")
+                            folders.write(Uri.parse(a.getString("uri")), file)
+                            file.delete()
+                            null
+                        }
+                        else -> throw IllegalArgumentException("Unknown request: $method")
+                    }
+                }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) }
             }
         }
     }

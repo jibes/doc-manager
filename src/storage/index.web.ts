@@ -2,7 +2,8 @@ import { createStore, del, delMany, get, getMany, keys, set, values } from 'idb-
 
 import type { TextLine } from '@/engine/types';
 import { ensurePermission, isFileHandle } from '@/lib/fsa';
-import { FILE_ACCESS, FILE_MOVED, type DocRecord, type LibraryRepo } from './types';
+import { shellDocUrl, writeToShell } from '@/lib/shell';
+import { FILE_ACCESS, FILE_MOVED, isShellLink, type DocRecord, type LibraryRepo } from './types';
 
 export * from './types';
 
@@ -32,6 +33,11 @@ export const repo: LibraryRepo = {
   },
   async source(id) {
     const stored = await get<unknown>(id, files);
+    if (isShellLink(stored)) {
+      const res = await fetch(shellDocUrl(stored.uri)).catch(() => null);
+      if (!res?.ok) throw new Error(FILE_MOVED);
+      return { kind: 'bytes', bytes: await res.arrayBuffer() };
+    }
     if (isFileHandle(stored)) {
       if ((await stored.queryPermission({ mode: 'read' })) !== 'granted') throw new Error(FILE_ACCESS);
       const file = await stored.getFile().catch(() => {
@@ -48,6 +54,7 @@ export const repo: LibraryRepo = {
   },
   async writeFile(id, bytes) {
     const stored = await get<unknown>(id, files);
+    if (isShellLink(stored)) return writeToShell(bytes, stored.uri);
     if (!isFileHandle(stored)) return set(id, new Blob([bytes], { type: 'application/pdf' }), files);
     if (!(await ensurePermission(stored, true))) throw new Error(FILE_ACCESS);
     const w = await stored.createWritable();

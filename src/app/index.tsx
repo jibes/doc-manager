@@ -12,6 +12,7 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
+import { folders } from '@/lib/folders';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
 import { useLibrary, type ImportItem } from '@/state/library';
@@ -97,6 +98,12 @@ export default function Home() {
               )}
             </View>
             <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
+              {folders.supported &&
+                (wide ? (
+                  <Button testID="files" kind="quiet" icon="folder" label={t.files} onPress={() => router.push('/files')} />
+                ) : (
+                  <IconButton testID="files" icon="folder" label={t.files} onPress={() => router.push('/files')} />
+                ))}
               {installKind && (
                 <Button
                   testID="install"
