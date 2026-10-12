@@ -200,7 +200,7 @@ wait_for "Done, review"
 tap "Done, review"
 wait_for "Recognise text"
 adb exec-out screencap -p > "$OUT/11-review.png"
-tap "Save"
+tap_last "Save"  # not "Save to" above it
 for _ in $(seq 1 60); do ui | grep -q 'Reading text\|Preparing page' || break; sleep 3; done
 wait_for "Scan 2"
 sleep 3
