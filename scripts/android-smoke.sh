@@ -27,6 +27,16 @@ tap() {
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 
+# On failure: what was on screen, and why the app went away (crash, WebView renderer, system).
+on_fail() {
+  adb exec-out screencap -p > "$OUT/failure.png" 2>/dev/null || true
+  adb logcat -d > "$OUT/logcat.txt" 2>/dev/null || true
+  echo "--- crashes ---"; adb logcat -d -b crash 2>/dev/null | tail -40 || true
+  echo "--- app, WebView and system ---"
+  grep -E "tessel|AndroidRuntime|chromium|cr_|Renderer|ActivityManager: (Process|Killing)|lowmemorykiller" "$OUT/logcat.txt" | tail -60 || true
+}
+trap 'on_fail' ERR
+
 adb install -r "$APK"
 adb logcat -c
 adb shell am start -W -n app.tessel.viewer/.MainActivity
