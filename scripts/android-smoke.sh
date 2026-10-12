@@ -154,25 +154,28 @@ sleep 2
 if adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi
 echo "--- file operations passed ---"
 
-# Light sensor theme: dark room → Black, bright room → Light (the emulator's light sensor drives it).
-# Brightness of a background pixel, from a raw screenshot (16-byte header, then RGBA).
-px() { adb exec-out screencap | python3 -c "import sys; d = sys.stdin.buffer.read(); w = int.from_bytes(d[0:4], 'little'); o = 16 + (300 * w + 6) * 4; print(sum(d[o:o + 3]) // 3)"; }
+# Light sensor theme: choosing it makes the app listen to the light sensor (the switching itself is covered
+# by the web e2e with a simulated sensor); screenshots in a dark and a bright room for the record.
 for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
 adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
 wait_for "Settings"
 tap "Settings"
 wait_for "Light sensor"
 tap "Light sensor"
+sleep 2
+adb shell dumpsys sensorservice > "$OUT/sensors.txt"
+# The app uses no other sensor, so any registration of ours is the light sensor.
+if ! grep -q "app.tessel.viewer" "$OUT/sensors.txt"; then
+  grep -iE "light|tessel" "$OUT/sensors.txt" | head -20
+  echo "The light sensor theme didn't start the light sensor"; exit 1
+fi
 adb emu sensor set light 1
 sleep 5
-dark=$(px)
 adb exec-out screencap -p > "$OUT/7-sensor-dark.png"
 adb emu sensor set light 3000
 sleep 5
-bright=$(px)
 adb exec-out screencap -p > "$OUT/8-sensor-bright.png"
-echo "light sensor theme: background $dark in the dark, $bright in bright light"
-if [ "$dark" -ge 60 ] || [ "$bright" -le 150 ]; then echo "The light sensor theme didn't follow the light"; exit 1; fi
+echo "--- light sensor theme: listening ---"
 
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true
 echo "--- web console ---"; cat "$OUT/web-console.txt"
