@@ -207,7 +207,7 @@ class Folders(private val context: Context) {
         val stream = runCatching { if (uri == null || !allowed(uri)) null else open(uri) }.getOrNull()
             ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), null)
         val mime = if (uri!!.toString().endsWith(".epub", true)) EPUB else resolver.getType(uri) ?: AppAssets.mimeOf(uri.lastPathSegment ?: "")
-        return WebResourceResponse(mime, null, stream)
+        return WebResourceResponse(mime, null, stream).apply { responseHeaders = AppAssets.ISOLATION }
     }
 
     /** Replaces a document's bytes with `source` (the reader saved form fields or annotations). */

@@ -17,7 +17,7 @@ class AppAssets(private val assets: AssetManager) {
         return try {
             WebResourceResponse(mimeOf(file), if (isText(file)) "utf-8" else null, assets.open(file)).apply {
                 // Assets ship with the APK: a new version means a new APK, so caching within a run is safe.
-                responseHeaders = mapOf("Cache-Control" to "no-cache")
+                responseHeaders = mapOf("Cache-Control" to "no-cache") + ISOLATION
             }
         } catch (e: IOException) {
             WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), null)
@@ -29,6 +29,12 @@ class AppAssets(private val assets: AssetManager) {
     companion object {
         const val HOST = "appassets.androidplatform.net"
         const val ORIGIN = "https://$HOST"
+
+        /**
+         * Cross-origin isolation: lets the scanner's text recognition (ONNX Runtime) use several threads. Everything
+         * the app loads comes from this origin, so nothing is blocked by it.
+         */
+        val ISOLATION = mapOf("Cross-Origin-Opener-Policy" to "same-origin", "Cross-Origin-Embedder-Policy" to "require-corp")
 
         fun mimeOf(file: String): String = when (file.substringAfterLast('.').lowercase()) {
             "html" -> "text/html"

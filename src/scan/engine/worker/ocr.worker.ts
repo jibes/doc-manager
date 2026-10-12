@@ -30,6 +30,7 @@ declare const self: {
   onmessage: ((event: MessageEvent<OcrRequest>) => void) | null;
   postMessage: (message: OcrResponse, transfer?: Transferable[]) => void;
   crossOriginIsolated?: boolean;
+  name?: string;
 };
 
 const BASE = workerModels();
@@ -199,6 +200,12 @@ async function handle(request: OcrRequest): Promise<void> {
 }
 
 let queue: Promise<void> = Promise.resolve();
-self.onmessage = (event) => {
+/**
+ * ONNX Runtime runs its threads (when the page is cross-origin isolated) as copies of this script named
+ * "em-pthread": those answer the runtime, not the app.
+ */
+const pthread = self.name?.startsWith('em-pthread');
+
+if (!pthread) self.onmessage = (event) => {
   queue = queue.then(() => handle(event.data));
 };

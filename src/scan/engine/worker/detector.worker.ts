@@ -21,6 +21,7 @@ declare const self: {
   onmessage: ((event: MessageEvent<DetectorRequest>) => void) | null;
   postMessage: (message: DetectorResponse, transfer?: Transferable[]) => void;
   crossOriginIsolated?: boolean;
+  name?: string;
 };
 
 const MODEL_URL = workerModels() + DETECT_MODEL;
@@ -304,6 +305,12 @@ async function handle(request: DetectorRequest): Promise<void> {
 }
 
 let queue: Promise<void> = Promise.resolve();
-self.onmessage = (event) => {
+/**
+ * ONNX Runtime runs its threads (when the page is cross-origin isolated) as copies of this script named
+ * "em-pthread": those answer the runtime, not the app.
+ */
+const pthread = self.name?.startsWith('em-pthread');
+
+if (!pthread) self.onmessage = (event) => {
   queue = queue.then(() => handle(event.data));
 };

@@ -177,6 +177,37 @@ sleep 5
 adb exec-out screencap -p > "$OUT/8-sensor-bright.png"
 echo "--- light sensor theme: listening ---"
 
+# Scanner: Android's camera permission, the live camera with the page detector (ONNX Runtime) loaded in the
+# WebView, a photo taken by hand (the emulated camera shows no page: cropped by hand), and a searchable PDF
+# saved to the library and opened.
+for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
+adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
+wait_for "Every document"
+tap "Scan"
+wait_for "While using the app|Only this time|Allow"
+tap "While using the app" || tap "Allow"
+wait_for "Point at a page|Move closer|Hold steady|Too dark"
+sleep 2
+adb exec-out screencap -p > "$OUT/9-camera.png"
+echo "--- screen (camera) ---"; screen | head -20
+tap "Take photo"
+wait_for "Corners cross over|Full photo|Page 1 added"
+sleep 2
+adb exec-out screencap -p > "$OUT/10-crop.png"
+if ui | grep -q "Full photo"; then tap "Cancel"; sleep 2; fi
+wait_for "Done, review 1 page"
+tap "Done, review 1 page"
+wait_for "Recognise text"
+adb exec-out screencap -p > "$OUT/11-review.png"
+tap "Save"
+for _ in $(seq 1 60); do ui | grep -q 'Reading text\|Preparing page' || break; sleep 3; done
+wait_for "Scan 2"
+sleep 3
+adb exec-out screencap -p > "$OUT/12-saved.png"
+echo "--- screen (saved scan) ---"; screen | head -20
+adb logcat -d -s TesselWeb:* | grep -o 'Scanner: cross-origin isolated [a-z]*' | tail -1 || true
+echo "--- scanner passed ---"
+
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true
 echo "--- web console ---"; cat "$OUT/web-console.txt"
 if grep -q '^E/TesselWeb\|^E TesselWeb\| E TesselWeb' "$OUT/web-console.txt"; then echo "The web app logged errors"; exit 1; fi
