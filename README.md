@@ -31,7 +31,7 @@ The app is the web app bundled in a native shell (`shell/android`): every featur
 F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6:A6:F5:8E:E3:94
 ```
 
-Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release for each `v*` tag (signing key from the `ANDROID_*` repository secrets).
+Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release for each `v*` tag or manual run of the Android workflow with a version (signing key from the `ANDROID_*` repository secrets).
 
 ## Architecture
 
