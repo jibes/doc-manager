@@ -1,19 +1,24 @@
 name: Android
 
 # The Android app: the web app bundled in a WebView shell (shell/android). Every push builds and
-# smoke-tests an APK on an emulator; a version tag (v1.2.3) publishes a signed release on GitHub,
-# which Obtainium (or any browser) installs and updates from.
+# smoke-tests an APK on an emulator; a version tag (v1.2.3), or a manual run with a version, publishes
+# a signed release on GitHub, which Obtainium (or any browser) installs and updates from.
 on:
   push:
     branches: [main, 'ccr-*']
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a signed release with this version (e.g. 1.2.3; creates tag v1.2.3)
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-${{ github.ref }}-${{ inputs.release }}
   cancel-in-progress: true
 
 jobs:
@@ -21,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.name }}
+      release: ${{ steps.version.outputs.release }}
       signed: ${{ steps.key.outputs.signed }}
     steps:
       - uses: actions/checkout@v7
@@ -34,9 +40,14 @@ jobs:
 
       - id: version
         name: Version
+        env:
+          INPUT_RELEASE: ${{ inputs.release }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            NAME="${GITHUB_REF#refs/tags/v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then REQUESTED="${GITHUB_REF#refs/tags/v}"; else REQUESTED="$INPUT_RELEASE"; fi
+          if [ -n "$REQUESTED" ]; then
+            if ! [[ "$REQUESTED" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Version must look like 1.2.3"; exit 1; fi
+            NAME="$REQUESTED"
+            echo "release=true" >> "$GITHUB_OUTPUT"
             IFS=. read -r MA MI PA <<< "${NAME%%-*}"
             CODE=$(( MA * 1000000 + MI * 1000 + PA ))
           else
@@ -59,7 +70,7 @@ jobs:
           else
             echo "::warning::ANDROID_KEYSTORE_BASE64 is not set: this APK is signed with a throwaway debug key (testing only)."
             echo "signed=false" >> "$GITHUB_OUTPUT"
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "::error::Releases need the signing secrets."; exit 1; fi
+            if [ "${{ steps.version.outputs.release }}" = true ]; then echo "::error::Releases need the signing secrets."; exit 1; fi
           fi
 
       - name: Build APK
@@ -108,7 +119,7 @@ jobs:
           path: android-smoke
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v') && needs.apk.outputs.signed == 'true'
+    if: needs.apk.outputs.release == 'true' && needs.apk.outputs.signed == 'true'
     needs: [apk, smoke]
     runs-on: ubuntu-latest
     permissions:
@@ -120,6 +131,8 @@ jobs:
           path: out
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.apk.outputs.version }}
+          target_commitish: ${{ github.sha }}
           files: out/*.apk
           generate_release_notes: true
           body: |
