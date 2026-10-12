@@ -1,12 +1,8 @@
 name: Scan quality
 
-# Scanner engine changes: synthetic phone photos through the real workers and PDF export (e2e/scan).
+# Scanner quality (e2e/scan): synthetic photos through the real workers and PDF export. ~45 min, so manual only:
+# Actions → Scan quality → Run workflow (or run `npm run test:scan` locally).
 on:
-  push:
-    branches: [main, 'ccr-*']
-    paths: ['src/scan/**', 'e2e/scan/**', 'public/models/**', 'scripts/build-engine.mjs', 'package-lock.json']
-  pull_request:
-    paths: ['src/scan/**', 'e2e/scan/**', 'public/models/**', 'scripts/build-engine.mjs', 'package-lock.json']
   workflow_dispatch:
 
 permissions:
