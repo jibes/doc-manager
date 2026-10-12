@@ -1,7 +1,7 @@
 {
   "name": "Tessel \u2014 PDF Viewer",
   "short_name": "Tessel",
-  "description": "Every document, in its place. A calm PDF viewer with no ads and no account.",
+  "description": "Every document, in its place. A calm PDF viewer and book reader with no ads and no account.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ECE8DF",
@@ -30,6 +30,9 @@
       "accept": {
         "application/pdf": [
           ".pdf"
+        ],
+        "application/epub+zip": [
+          ".epub"
         ]
       }
     }

@@ -9,7 +9,7 @@ async function asFile(doc: DocRecord, current?: Current): Promise<File> {
   const live = current?.();
   const src = live ? null : await repo.source(doc.id);
   const bytes = live ? await live : src!.kind === 'bytes' ? src!.bytes : await (await fetch(src!.uri)).arrayBuffer();
-  return new File([bytes], doc.fileName, { type: 'application/pdf' });
+  return new File([bytes], doc.fileName, { type: doc.format === 'epub' ? 'application/epub+zip' : 'application/pdf' });
 }
 
 function save(file: File) {

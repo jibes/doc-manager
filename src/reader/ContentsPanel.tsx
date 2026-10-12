@@ -20,15 +20,19 @@ export function flattenOutline(items: OutlineItem[], depth = 0, out: FlatOutline
   return out;
 }
 
-type Tab = 'contents' | 'pages' | 'bookmarks' | 'notes';
+export type ContentsTab = 'contents' | 'pages' | 'bookmarks' | 'notes';
+type Tab = ContentsTab;
 
 type Props = {
   palette: Palette;
   outline: FlatOutline | null;
   page: number;
-  sizes: Size[];
-  cache: RasterCache;
+  /** Page thumbnails (PDFs); without them there is no Pages tab. */
+  sizes?: Size[];
+  cache?: RasterCache;
   bookmarks: number[];
+  /** Tabs to offer (default: all that have data). */
+  tabs?: ContentsTab[];
   /** Highlights and notes in the PDF (null while loading); editable when the callbacks are given. */
   annotations: Annotation[] | null;
   onEditNote?: (a: Annotation) => void;
@@ -37,10 +41,11 @@ type Props = {
   onClose: () => void;
 };
 
-export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmarks, annotations, onEditNote, onDeleteNote, onGo, onClose }: Props) {
+export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmarks, tabs: only, annotations, onEditNote, onDeleteNote, onGo, onClose }: Props) {
   const [picked, setTab] = useState<Tab>('contents');
   // No outline → open on Pages instead of an empty Contents tab.
-  const tab = picked === 'contents' && outline?.length === 0 ? 'pages' : picked;
+  const offered = only ?? (['contents', 'pages', 'bookmarks', 'notes'] as Tab[]).filter((k) => k !== 'pages' || (cache && sizes));
+  const tab = picked === 'contents' && outline?.length === 0 && offered.includes('pages') ? 'pages' : picked;
 
   const currentIdx = useMemo(() => {
     if (!outline) return -1;
@@ -49,13 +54,14 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
     return idx;
   }, [outline, page]);
 
-  const tabs: [Tab, string][] = [
+  const allTabs: [Tab, string][] = [
     ['contents', t.contents],
     ['pages', t.pagesTab],
     // Four tabs leave no room for counts (German labels are long); each list shows its own items.
     ['bookmarks', t.bookmarks],
     ['notes', t.notesTab],
   ];
+  const tabs = allTabs.filter(([k]) => offered.includes(k));
 
   return (
     <Panel title={t.navigate} onClose={onClose} testID="contents-panel">
@@ -119,7 +125,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
           />
         ))}
 
-      {tab === 'pages' && (
+      {tab === 'pages' && cache && sizes && (
         <PagesGrid p={p} sizes={sizes} cache={cache} page={page} onGo={onGo} bookmarks={bookmarks} />
       )}
 
@@ -138,7 +144,11 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
                   onPress={() => onGo(item)}
                   style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.bmRow, { backgroundColor: hovered ? p.hairline : 'transparent' }]}
                 >
-                  <Thumb cache={cache} page={item} size={sizes[item]} width={44} palette={p} />
+                  {cache && sizes?.[item] ? (
+                    <Thumb cache={cache} page={item} size={sizes[item]} width={44} palette={p} />
+                  ) : (
+                    <Icon name="bookmark" size={18} color={p.muted} />
+                  )}
                   <View style={{ flex: 1, gap: 2 }}>
                     <T v="headline">{t.pageN(item + 1)}</T>
                     {chapter && (

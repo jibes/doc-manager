@@ -21,7 +21,7 @@ async function namedCopy(doc: DocRecord): Promise<string> {
 }
 
 export async function shareDoc(doc: DocRecord, _current?: Current) {
-  await Sharing.shareAsync(await namedCopy(doc), { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: doc.title });
+  await Sharing.shareAsync(await namedCopy(doc), { ...(doc.format === 'epub' ? { mimeType: 'application/epub+zip', UTI: 'org.idpf.epub-container' } : { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' }), dialogTitle: doc.title });
 }
 
 export async function downloadDoc(doc: DocRecord, _current?: Current) {

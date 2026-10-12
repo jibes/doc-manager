@@ -1,9 +1,13 @@
 import { create } from 'zustand';
 
 import { errorText, t } from '@/i18n';
+import { openBook } from '@/book';
+import { coverData, readBytes } from '@/book/platform';
 import { asPasswordError, engine } from '@/engine';
 import { askPassword, rememberPassword } from '@/state/password';
 import type { FileHandle } from '@/lib/fsa';
+import { imageSize } from '@/book/image';
+import type { DocSource } from '@/engine/types';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
 
 /** `handle`: the file in place (web, Chromium); the library then links to it instead of copying. */
@@ -66,6 +70,42 @@ export async function openWithPassword<T>(
   }
 }
 
+/** EPUB by name, or by its signature: a ZIP whose first entry is "mimetype" = application/epub+zip. */
+function isEpub(name: string, source: DocSource): boolean {
+  if (/\.epub$/i.test(name)) return true;
+  if (source.kind !== 'bytes') return false;
+  const head = new TextDecoder('latin1').decode(new Uint8Array(source.bytes, 0, Math.min(64, source.bytes.byteLength)));
+  return head.startsWith('PK') && head.includes('mimetypeapplication/epub+zip');
+}
+
+/** Books are for reading: they go straight onto the reading list. */
+async function importBook(item: ImportItem, source: DocSource, set: (fn: (s: LibraryState) => Partial<LibraryState>) => void): Promise<DocRecord> {
+  const book = openBook(await readBytes(source));
+  const id = newId();
+  const cover = book.cover ? book.images[book.cover] : undefined;
+  const size = cover ? imageSize(cover.bytes) : null;
+  const rec: DocRecord = {
+    id,
+    title: book.title?.trim() || cleanTitle(undefined, item.name.replace(/\.epub$/i, '')),
+    author: book.author,
+    fileName: item.name,
+    bytes: item.size,
+    pageCount: book.pageCount,
+    coverAspect: size ? size.h / size.w : 1.5,
+    addedAt: Date.now(),
+    bookmarks: [],
+    reading: { since: Date.now() },
+    format: 'epub',
+    linked: item.handle ? true : undefined,
+  };
+  await repo.saveFile(id, item.handle ?? item.file ?? item.uri!);
+  if (cover) await repo.saveCover(id, coverData(cover.bytes, cover.type));
+  await repo.put(rec);
+  const coverUri = await repo.coverUri(id);
+  set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: coverUri } }));
+  return rec;
+}
+
 const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.openedAt ?? a.addedAt);
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -114,6 +154,10 @@ export const useLibrary = create<LibraryState>((set, get) => {
           const source = item.file
             ? ({ kind: 'bytes', bytes: await item.file.arrayBuffer() } as const)
             : ({ kind: 'uri', uri: item.uri! } as const);
+          if (isEpub(item.name, source)) {
+            added.push(await importBook(item, source, set));
+            continue;
+          }
           const opened = await openWithPassword(item.name, (pw) => engine.renderCover(source, COVER_WIDTH, pw));
           if (!opened) continue; // password prompt dismissed
           const { cover, handle } = opened.value;

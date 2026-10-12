@@ -27,6 +27,8 @@ export type DocRecord = {
   view?: 'page' | 'text';
   /** Opened in place: the library points at the user's file instead of keeping a copy (web, Chromium). */
   linked?: boolean;
+  /** Absent for PDFs. Books have virtual pages (`pageCount`), about a printed page each. */
+  format?: 'epub';
 };
 
 /** Thrown by source() for linked files: the browser needs the user's OK again, or the file is gone. */
