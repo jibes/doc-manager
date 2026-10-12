@@ -116,13 +116,8 @@ tap_last "New folder"
 on_device -d /sdcard/Download/Smoke
 tap "Select"
 tap "smoke-columns.pdf"
-# The selection bar has its own "Cancel": the dialog is up once there are two. (On the emulator the first
-# tap after the keyboard closes is sometimes lost, so tap again if the dialog doesn't come.)
-for _ in 1 2 3; do
-  tap "Rename"
-  sleep 3
-  [ "$(ui | sed 's/></>\n</g' | grep -Ec '(text|content-desc)="Cancel"')" -ge 2 ] && break
-done
+tap "Rename"
+# The selection bar has its own "Cancel": the dialog is up once there are two.
 wait_count "Cancel\"" 2
 adb shell input keyevent KEYCODE_MOVE_END
 for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
