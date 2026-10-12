@@ -1,11 +1,11 @@
 name: Android
 
-# The Android app: the web app bundled in a WebView shell (shell/android). Every push builds and
+# The Android app: the web app bundled in a WebView shell (shell/android). Every push to main builds and
 # smoke-tests an APK on an emulator; a new version in package.json on main, a version tag (v1.2.3) or a
 # manual run with a version publishes a signed release on GitHub, which Obtainium (or any browser) installs and updates from.
 on:
   push:
-    branches: [main, 'ccr-*']
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
