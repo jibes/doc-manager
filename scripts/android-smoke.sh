@@ -191,12 +191,13 @@ sleep 2
 adb exec-out screencap -p > "$OUT/9-camera.png"
 echo "--- screen (camera) ---"; screen | head -20
 tap "Take photo"
-wait_for "Corners cross over|Full photo|Page 1 added"
+# Auto-capture may take pages by itself too (the emulated picture can look like a page): any page will do.
+wait_for "Done, review|Full photo"
 sleep 2
-adb exec-out screencap -p > "$OUT/10-crop.png"
+adb exec-out screencap -p > "$OUT/10-captured.png"
 if ui | grep -q "Full photo"; then tap "Cancel"; sleep 2; fi
-wait_for "Done, review 1 page"
-tap "Done, review 1 page"
+wait_for "Done, review"
+tap "Done, review"
 wait_for "Recognise text"
 adb exec-out screencap -p > "$OUT/11-review.png"
 tap "Save"
