@@ -51,6 +51,8 @@ export type FoldersApi = {
   /** Can send documents to other apps. */
   canShare: boolean;
   mkdir(root: string, dir: string | undefined, name: string): Promise<void>;
+  /** Writes a new file; a taken name gets " (2)" (or the system's own suffix). Returns the file as listed. */
+  create(at: Place, name: string, data: Blob): Promise<FolderEntry>;
   /** Returns the item's new URI where it has one (Android app), for documents in the library. */
   rename(root: string, dir: string | undefined, e: FolderEntry, name: string): Promise<string | undefined>;
   delete(root: string, dir: string | undefined, entries: FolderEntry[]): Promise<void>;

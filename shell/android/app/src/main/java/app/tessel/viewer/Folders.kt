@@ -251,6 +251,18 @@ class Folders(private val context: Context) {
         is PathPlace -> freeName(at.dir, name).also { if (!it.mkdir()) throw IllegalStateException("Can't create $name") }.let { Uri.fromFile(it).toString() }
     }
 
+    /** A new file with these contents; a taken name gets " (2)" or the provider's own suffix. Returns its URI and name. */
+    fun create(root: String, dir: String?, name: String, mime: String, source: File): JSONObject {
+        val uri = when (val at = place(root, dir)) {
+            is TreePlace -> DocumentsContract.createDocument(resolver, at.dir, mime, name) ?: throw IllegalStateException("Can't create $name")
+            is PathPlace -> Uri.fromFile(freeName(at.dir, name).also { if (!it.createNewFile()) throw IllegalStateException("Can't create $name") })
+        }
+        write(uri, source)
+        val created = if (uri.scheme == "file") File(uri.path!!).name
+        else resolver.query(uri, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } ?: name
+        return JSONObject().put("uri", uri.toString()).put("name", created)
+    }
+
     /** Returns the renamed item's URI (providers may give it a new one). */
     fun rename(uri: Uri, name: String): String {
         check(uri)

@@ -146,6 +146,10 @@ class Bridge(private val activity: MainActivity) {
                             activity.runOnUiThread { shareUris(uris) }
                             null
                         }
+                        "create" -> {
+                            val (file, _) = synchronized(this) { outgoing.remove(a.getString("token")) } ?: throw IllegalStateException("Nothing to write")
+                            folders.create(a.getString("root"), a.optString("dir").ifEmpty { null }, a.getString("name"), a.getString("mime"), file).also { file.delete() }
+                        }
                         "write" -> {
                             val (file, _) = synchronized(this) { outgoing.remove(a.getString("token")) } ?: throw IllegalStateException("Nothing to write")
                             folders.write(Uri.parse(a.getString("uri")), file)

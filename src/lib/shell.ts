@@ -42,7 +42,7 @@ export async function sendToShell(file: Blob, name: string, action: 'share' | 's
 }
 
 /** Copies bytes into a file on the shell's side; returns its token. */
-async function stageForShell(file: Blob, name: string, mime: string): Promise<string> {
+export async function stageForShell(file: Blob, name: string, mime: string): Promise<string> {
   if (!shell) throw new Error('No shell');
   const bytes = new Uint8Array(await file.arrayBuffer());
   const token = shell.begin(name, mime);

@@ -29,7 +29,7 @@ jobs:
       - run: npm ci
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npx playwright-core install --with-deps chromium
-      - run: npm run test:scan -- --no-clean-ocr --max-cer 0.1
+      - run: npm run test:scan -- --no-clean-ocr --max-cer 0.07
       - uses: actions/upload-artifact@v7
         if: always()
         with:

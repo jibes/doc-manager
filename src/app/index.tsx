@@ -99,6 +99,12 @@ export default function Home() {
             </View>
             <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
               <IconButton testID="home-settings" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />
+              {Platform.OS === 'web' &&
+                (wide ? (
+                  <Button testID="scan" kind="quiet" icon="camera" label={t.scan} onPress={() => router.push('/scan')} />
+                ) : (
+                  <IconButton testID="scan" icon="camera" label={t.scan} onPress={() => router.push('/scan')} />
+                ))}
               {folders.supported &&
                 (wide ? (
                   <Button testID="files" kind="quiet" icon="folder" label={t.files} onPress={() => router.push('/files')} />
