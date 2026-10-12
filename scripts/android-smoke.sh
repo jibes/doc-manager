@@ -16,6 +16,15 @@ wait_for() {
   echo "Timed out waiting for: $1"; ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"' | head -60
   return 1
 }
+# Waits until the screen shows at least $2 nodes matching $1.
+wait_count() {
+  for _ in $(seq 1 30); do
+    [ "$(ui | sed 's/></>\n</g' | grep -Ec "(text|content-desc)=\"[^\"]*$1")" -ge "$2" ] && return 0
+    sleep 2
+  done
+  echo "Timed out waiting for $2 × $1"; screen | head -40
+  return 1
+}
 # Visible texts and descriptions, for the log.
 screen() { ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"'; }
 # Taps the centre of the first node whose text or description matches $1.
@@ -108,7 +117,8 @@ on_device -d /sdcard/Download/Smoke
 tap "Select"
 tap "smoke-columns.pdf"
 tap "Rename"
-wait_for "Cancel"
+# The selection bar has its own "Cancel": wait for the dialog's as well.
+wait_count "Cancel\"" 2
 adb shell input keyevent KEYCODE_MOVE_END
 for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
 adb shell input text smoke-renamed.pdf
