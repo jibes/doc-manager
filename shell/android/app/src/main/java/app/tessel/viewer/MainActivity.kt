@@ -16,7 +16,9 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.ViewGroup
+import android.content.pm.PackageManager
 import android.webkit.ConsoleMessage
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -73,6 +75,13 @@ class MainActivity : ComponentActivity() {
         if (tree != null) bridge.folders.keep(tree)
         folderCallback?.invoke(tree)
         folderCallback = null
+    }
+
+    /** The web app asked for the camera (getUserMedia); answered once Android's permission is settled. */
+    private var cameraRequest: PermissionRequest? = null
+    private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        cameraRequest?.let { if (granted) it.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) else it.deny() }
+        cameraRequest = null
     }
 
     private var accessCallback: ((Boolean) -> Unit)? = null
@@ -299,6 +308,22 @@ class MainActivity : ComponentActivity() {
                 chooserCallback = null
                 false
             }
+        }
+
+        /** The scanner's camera. Only the app's own pages ask, and only for video. */
+        override fun onPermissionRequest(request: PermissionRequest) {
+            runOnUiThread {
+                val video = PermissionRequest.RESOURCE_VIDEO_CAPTURE
+                if (request.origin.host != AppAssets.HOST || !request.resources.contains(video)) return@runOnUiThread request.deny()
+                if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) return@runOnUiThread request.grant(arrayOf(video))
+                cameraRequest?.deny()
+                cameraRequest = request
+                cameraPermission.launch(Manifest.permission.CAMERA)
+            }
+        }
+
+        override fun onPermissionRequestCanceled(request: PermissionRequest) {
+            if (cameraRequest == request) cameraRequest = null
         }
 
         override fun onConsoleMessage(message: ConsoleMessage): Boolean {

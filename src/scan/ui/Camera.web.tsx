@@ -210,6 +210,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
       }
     };
 
+    // For the record (Android smoke test): text recognition runs multi-threaded only when isolated.
+    console.info(`Scanner: cross-origin isolated ${self.crossOriginIsolated}`);
     l.hidden = document.visibilityState === 'hidden';
     if (!l.hidden) void start();
     document.addEventListener('visibilitychange', visibility);

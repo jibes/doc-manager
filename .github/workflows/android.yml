@@ -116,6 +116,8 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          # The scanner needs a camera: the emulated one (a generated picture, no GPU needed).
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
           script: ./scripts/android-smoke.sh "$(ls out/*.apk | head -1)" android-smoke
       - uses: actions/upload-artifact@v7
         if: always()

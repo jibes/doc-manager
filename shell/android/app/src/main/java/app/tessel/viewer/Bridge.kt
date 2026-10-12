@@ -72,7 +72,7 @@ class Bridge(private val activity: MainActivity) {
         val file = synchronized(this) { incoming[id] } ?: return null
         val stream = runCatching { activity.contentResolver.openInputStream(file.uri) }.getOrNull()
             ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), null)
-        return WebResourceResponse(file.type, null, stream)
+        return WebResourceResponse(file.type, null, stream).apply { responseHeaders = AppAssets.ISOLATION }
     }
 
     @JavascriptInterface

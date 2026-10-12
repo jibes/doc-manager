@@ -11,6 +11,7 @@
  *   --only a,b        only these cases (e2e/scan/scene.ts CASES)
  *   --no-ocr          no text layer or OCR metrics
  *   --no-clean-ocr    skip the OCR baseline on the clean printed page
+ *   --isolated        serve with cross-origin isolation (COOP/COEP), as the Android app does: OCR runs multi-threaded
  *   --max-cer N       fail when the mean character error rate over the cases with text exceeds N (e.g. 0.1)
  *   --out DIR         artifacts and report.md (default e2e/out/scan)
  *   --baseline DIR    add a before/after table against DIR/results.json
@@ -44,6 +45,7 @@ const ONLY = value('--only', '').split(',').filter(Boolean);
 const OCR = !flag('--no-ocr');
 const CLEAN_OCR = OCR && !flag('--no-clean-ocr');
 const MAX_CER = Number(value('--max-cer', 'NaN'));
+const ISOLATED = flag('--isolated');
 const BASELINE = value('--baseline', '');
 const loadBaseline = () => (BASELINE ? JSON.parse(readFileSync(join(BASELINE, 'results.json'), 'utf8')) : null);
 
@@ -87,7 +89,8 @@ function serve() {
       res.writeHead(404).end();
       return;
     }
-    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream' });
+    const isolation = ISOLATED ? { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' } : {};
+    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream', ...isolation });
     createReadStream(file).pipe(res);
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => ok(server)));
