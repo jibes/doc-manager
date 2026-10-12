@@ -10,8 +10,15 @@ import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
 
-/** `handle`: the file in place (web, Chromium); the library then links to it instead of copying. */
-export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle };
+/**
+ * `handle` (Chromium) or `link` (a document in a folder, through the Android app): the file in place;
+ * the library then links to it instead of keeping a copy.
+ */
+export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle; link?: string };
+
+/** What the library stores for an imported item: the file in place where possible, else a copy. */
+const fileData = (item: ImportItem) => item.handle ?? (item.link ? ({ kind: 'shell', uri: item.link } as const) : undefined) ?? item.file ?? item.uri!;
+const isLinked = (item: ImportItem) => (item.handle || item.link ? true : undefined);
 
 type LibraryState = {
   docs: DocRecord[];
@@ -96,9 +103,9 @@ async function importBook(item: ImportItem, source: DocSource, set: (fn: (s: Lib
     bookmarks: [],
     reading: { since: Date.now() },
     format: 'epub',
-    linked: item.handle ? true : undefined,
+    linked: isLinked(item),
   };
-  await repo.saveFile(id, item.handle ?? item.file ?? item.uri!);
+  await repo.saveFile(id, fileData(item));
   if (cover) await repo.saveCover(id, coverData(cover.bytes, cover.type));
   await repo.put(rec);
   const coverUri = await repo.coverUri(id);
@@ -173,11 +180,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
             coverAspect: first.height / first.width,
             addedAt: Date.now(),
             bookmarks: [],
-            linked: item.handle ? true : undefined,
+            linked: isLinked(item),
           };
           handle.close();
           if (opened.password) rememberPassword(id, opened.password);
-          await repo.saveFile(id, item.handle ?? item.file ?? item.uri!);
+          await repo.saveFile(id, fileData(item));
           await repo.saveCover(id, cover);
           await repo.put(rec);
           const coverUri = await repo.coverUri(id);

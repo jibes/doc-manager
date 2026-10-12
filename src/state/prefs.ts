@@ -18,21 +18,23 @@ type Prefs = {
   textScale: number;
   textLeading: TextLeading;
   textWidth: TextWidth;
+  /** Android app: browse the whole device (needs all files access). */
+  allFiles: boolean;
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { theme: null, fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium' };
+const defaults: Prefs = { theme: null, fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
   ...loadPrefs<Prefs>(),
   set(patch) {
     set(patch);
-    const { theme, fit, textFont, textScale, textLeading, textWidth } = get();
-    savePrefs<Prefs>({ theme, fit, textFont, textScale, textLeading, textWidth });
+    const { theme, fit, textFont, textScale, textLeading, textWidth, allFiles } = get();
+    savePrefs<Prefs>({ theme, fit, textFont, textScale, textLeading, textWidth, allFiles });
   },
 }));
 

@@ -741,6 +741,183 @@ async function german() {
   await ctx.close();
 }
 
+// Files (desktop Chromium): a picked folder, browsed as a grid with thumbnails. The folder lives in the
+// origin-private file system, standing in for the picker (Playwright can't answer it).
+async function foldersDesktop() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Library');
+  });
+  const page = await ctx.newPage();
+  // Screens below the top of the stack stay mounted (hidden): look at the visible one only.
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`folders: ${e.message}`));
+  page.on('console', (m) => m.type() === 'error' && !/favicon|404/.test(m.text()) && errors.push(`folders: ${m.text()}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  await page.evaluate(
+    async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Library', { create: true });
+      for (const [path, b64] of files) {
+        const parts = path.split('/');
+        let dir = root;
+        for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d, { create: true });
+        const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    },
+    [['columns.pdf', fixture('columns.pdf')], ['notes.txt', btoa('not a document')], ['Books/book.epub', fixture('book.epub')], ['form.pdf', fixture('form.pdf')]],
+  );
+  await page.getByTestId('files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  const docs = vis('folder-doc');
+  check((await docs.count()) === 2 && (await vis('folder-dir').count()) === 1, 'folders: a picked folder lists its PDFs and subfolders, nothing else');
+  const thumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.src.startsWith('blob:') && i.naturalWidth > 0).length);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
+  check((await thumbs()) === 2, `folders: PDFs show their first page as a thumbnail (${await thumbs()})`);
+  const names = async () => (await docs.allInnerTexts()).map((x) => x.split('\n')[0]);
+  const byName = await names();
+  await vis('sort').click();
+  const byDate = await names();
+  check(byName[0] === 'columns.pdf' && byDate[0] === 'form.pdf', `folders: sorts by name and by date (${byName} / ${byDate})`);
+  await page.screenshot({ path: `${OUT}folders-grid.png` });
+  await vis('folder-dir').click();
+  await page.getByText('book.epub').waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).some((i) => i.naturalWidth > 0), null, { timeout: 10000 }).catch(() => {});
+  check((await thumbs()) === 1, 'folders: books show their cover');
+  await vis('screen-back').click();
+  await page.getByText('columns.pdf').locator('visible=true').first().click();
+  await page.getByTestId('reader').waitFor();
+  check((await page.getByTestId('page-label').innerText()).includes('2'), 'folders: a document opens from the grid');
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().waitFor();
+  check((await page.getByTestId('recent-row').first().innerText()).includes('In place'), 'folders: opened documents stay where they are (in place)');
+  // Thumbnails are kept: on return they come from the cache, without reading the files again.
+  await page.getByTestId('files').click();
+  await vis('folder-root').click();
+  await vis('folder-grid').waitFor();
+  await page.waitForTimeout(400);
+  check((await thumbs()) === 2 && (await vis('thumb-pending').count()) === 0, 'folders: thumbnails are cached');
+  await vis('screen-back').click();
+  await vis('open-settings').click();
+  check((await vis('all-files').count()) === 0, 'folders: no all-files switch outside the Android app');
+  await vis('remove-folder').click();
+  await page.waitForTimeout(300);
+  check((await vis('settings-folders').count()) === 0, 'folders: a folder can be removed in settings');
+  await ctx.close();
+}
+
+// Files in the Android app: folders and all files access come from the app (faked here as window.TesselShell),
+// documents are served by it and edits are written back through it.
+async function foldersShell() {
+  const fx = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url));
+  const files = { columns: fx('columns.pdf'), book: fx('book.epub'), form: fx('form.pdf') };
+  const sizes = Object.fromEntries(Object.entries(files).map(([k, v]) => [k, v.length]));
+  const ctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) TesselShell/1.0' });
+  await ctx.addInitScript((sizes) => {
+    const tree = 'content://fake/tree/Docs';
+    const doc = (id, name, kind, key, modified) => ({ id, name, kind, size: sizes[key], modified, uri: `content://fake/doc/${key}` });
+    const docs = [doc('f1', 'columns.pdf', 'pdf', 'columns', 1.7e12), doc('f2', 'Harbour Notes.epub', 'epub', 'book', 1.71e12)];
+    const papers = [doc('f3', 'form.pdf', 'pdf', 'form', 1.72e12)];
+    const state = JSON.parse(sessionStorage.getItem('fake') ?? '{"trees":[],"all":false}');
+    const save = () => sessionStorage.setItem('fake', JSON.stringify(state));
+    const log = (window.__shell = { calls: [], written: {} });
+    const chunks = {};
+    const handlers = {
+      folders: () => state.trees.map((uri) => ({ uri, name: 'Docs' })),
+      pickFolder: () => (state.trees = [tree], save(), { uri: tree, name: 'Docs' }),
+      forgetFolder: ({ uri }) => ((state.trees = state.trees.filter((u) => u !== uri)), save(), null),
+      access: () => ({ allFiles: state.all }),
+      requestAllFiles: () => ((state.all = true), save(), true),
+      list: ({ root, dir }) =>
+        root === 'all'
+          ? [...docs, ...papers].map((d) => ({ ...d, where: d.id === 'f3' ? 'Documents/Papers' : 'Documents' }))
+          : root === 'device'
+            ? [{ id: '/storage/emulated/0/Documents', name: 'Documents', kind: 'dir', size: 0, modified: 0 }]
+            : dir === 'd1'
+              ? papers
+              : [{ id: 'd1', name: 'Papers', kind: 'dir', size: 0, modified: 0 }, ...docs],
+      write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
+    };
+    window.TesselShell = {
+      pending: () => '[]',
+      begin: () => {
+        const t = `t${Object.keys(chunks).length}`;
+        chunks[t] = [];
+        return t;
+      },
+      append: (t, b64) => void chunks[t].push(atob(b64)),
+      finish: () => {},
+      theme: () => {},
+      request: (id, method, args) => {
+        log.calls.push(method);
+        setTimeout(() => {
+          let detail;
+          try {
+            detail = { id, ok: true, value: handlers[method](JSON.parse(args)) };
+          } catch (e) {
+            detail = { id, ok: false, error: String(e) };
+          }
+          window.dispatchEvent(new CustomEvent('tessel-shell-reply', { detail }));
+        }, 10);
+      },
+    };
+  }, sizes);
+  const served = {};
+  await ctx.route('**/__shell/doc?u=*', (r) => {
+    const key = decodeURIComponent(new URL(r.request().url()).searchParams.get('u')).split('/').pop();
+    served[key] = (served[key] ?? 0) + 1;
+    return files[key] ? r.fulfill({ body: files[key], contentType: key === 'book' ? 'application/epub+zip' : 'application/pdf' }) : r.fulfill({ status: 404 });
+  });
+  const page = await ctx.newPage();
+  // Screens below the top of the stack stay mounted (hidden): look at the visible one only.
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`folders-shell: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  await page.getByTestId('files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
+  const shown = await page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.naturalWidth > 0).length);
+  check(shown === 2, `folders-shell: the app's folder is listed with a thumbnail for the PDF and the book (${shown})`);
+  await page.screenshot({ path: `${OUT}folders-shell-grid.png` });
+  // Edits to a document opened from a folder are written back to it.
+  await vis('folder-dir').click();
+  await page.getByText('form.pdf').locator('visible=true').click();
+  await page.getByTestId('field-name').click();
+  await page.keyboard.type('Grace Hopper');
+  await page.keyboard.press('Enter');
+  await page.getByTestId('save').click();
+  await page.getByText('Saved to “form.pdf”').waitFor({ timeout: 5000 }).catch(() => {});
+  const written = await page.evaluate(() => window.__shell.written['content://fake/doc/form'] ?? '');
+  check(written.includes('Grace Hopper'), 'folders-shell: saving writes the filled form back to the file in its folder');
+  // Reopened from the library: read from the folder again, not from a copy.
+  const before = served.form;
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(300);
+  check(served.form > before, 'folders-shell: library documents reopen from their folder');
+  // All files access (Settings): every document on the device, and internal storage.
+  await page.goto(new URL('settings', `${BASE.replace(/\/$/, '')}/`).href);
+  await vis('all-files').click();
+  await page.waitForTimeout(300);
+  await page.goto(new URL('files', `${BASE.replace(/\/$/, '')}/`).href);
+  await page.getByText('All documents').waitFor({ timeout: 5000 }).catch(() => {});
+  const roots = await vis('folder-root').allInnerTexts();
+  check(roots.join('|').includes('All documents') && roots.join('|').includes('Internal storage'), `folders-shell: all files access adds every document and internal storage (${roots.join(', ')})`);
+  await page.getByText('All documents').locator('visible=true').click();
+  await vis('folder-grid').waitFor();
+  const all = await vis('folder-doc').allInnerTexts();
+  check(all.length === 3 && all[0].startsWith('form.pdf') && all[0].includes('Documents/Papers'), `folders-shell: all documents, newest first, with their folder (${all.map((x) => x.split('\n')[0])})`);
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
@@ -755,6 +932,8 @@ await step('shell', shellBridge);
 await step('forms', forms);
 await step('annotations', annotations);
 await step('linked', linked);
+await step('folders', foldersDesktop);
+await step('folders-shell', foldersShell);
 await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
 await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));
 await browser.close();

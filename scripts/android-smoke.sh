@@ -58,6 +58,29 @@ adb shell input keyevent KEYCODE_BACK
 wait_for "Welcome to Tessel"
 adb exec-out screencap -p > "$OUT/3-library.png"
 
+# Files with all files access (granted here the way the system settings switch does): internal storage is
+# browsed by the app, documents are served to the WebView, and thumbnails are made from them.
+adb shell appops set --uid app.tessel.viewer MANAGE_EXTERNAL_STORAGE allow
+adb push e2e/fixtures/columns.pdf /sdcard/Download/smoke-columns.pdf >/dev/null
+tap "Files"
+wait_for "Browse your folders"
+tap "Settings"
+wait_for "Show every document on this device"
+tap "Show every document on this device"
+sleep 2
+adb shell input keyevent KEYCODE_BACK
+wait_for "Internal storage"
+tap "Internal storage"
+wait_for "Download"
+tap "Download"
+wait_for "smoke-columns.pdf"
+sleep 5
+adb exec-out screencap -p > "$OUT/4-files.png"
+echo "--- screen (files) ---"; screen | head -25
+tap "smoke-columns.pdf"
+wait_for "Text view"
+adb exec-out screencap -p > "$OUT/5-from-folder.png"
+
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true
 echo "--- web console ---"; cat "$OUT/web-console.txt"
 if grep -q '^E/TesselWeb\|^E TesselWeb\| E TesselWeb' "$OUT/web-console.txt"; then echo "The web app logged errors"; exit 1; fi

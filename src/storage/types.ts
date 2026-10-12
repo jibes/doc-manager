@@ -25,11 +25,15 @@ export type DocRecord = {
   reading?: { since: number; finishedAt?: number };
   /** Last view used for this document: original pages or reflowed text. */
   view?: 'page' | 'text';
-  /** Opened in place: the library points at the user's file instead of keeping a copy (web, Chromium). */
+  /** Opened in place: the library points at the user's file instead of keeping a copy (Chromium, Android app folders). */
   linked?: boolean;
   /** Absent for PDFs. Books have virtual pages (`pageCount`), about a printed page each. */
   format?: 'epub';
 };
+
+/** A document in one of the user's folders, reached through the Android app (content:// or file:// URI). */
+export type ShellLink = { kind: 'shell'; uri: string };
+export const isShellLink = (v: unknown): v is ShellLink => typeof v === 'object' && v !== null && (v as ShellLink).kind === 'shell';
 
 /** Thrown by source() for linked files: the browser needs the user's OK again, or the file is gone. */
 export const FILE_ACCESS = 'file-access-needed';
@@ -40,8 +44,8 @@ export interface LibraryRepo {
   list(): Promise<DocRecord[]>;
   put(rec: DocRecord): Promise<void>;
   remove(id: string): Promise<void>;
-  /** A copy (Blob, native file URI) or, on web, a handle to the file in place. */
-  saveFile(id: string, data: Blob | string | FileHandle): Promise<void>;
+  /** A copy (Blob, native file URI) or, on web, a handle or shell link to the file in place. */
+  saveFile(id: string, data: Blob | string | FileHandle | ShellLink): Promise<void>;
   source(id: string): Promise<DocSource>;
   /** Asks to read (or write) a linked file again; true for copies. Needs a user gesture to prompt. */
   requestAccess(id: string, write?: boolean): Promise<boolean>;
