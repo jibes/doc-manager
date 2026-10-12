@@ -103,7 +103,7 @@ export const en = {
   deleteTitle: (n: number) => (n === 1 ? 'Delete this item?' : `Delete ${n} items?`),
   deleteBody: (n: number, name: string) =>
     n === 1 ? `“${name}” will be deleted from this device. This can’t be undone.` : `These ${n} items will be deleted from this device. This can’t be undone.`,
-  pasteHere: (move: boolean, n: number) => `${move ? 'Move' : 'Copy'} ${plural(n, 'item', 'items')} here`,
+  pasteHere: (move: boolean): string => (move ? 'Move here' : 'Copy here'),
   pickTarget: (move: boolean) => `Open the folder to ${move ? 'move' : 'copy'} to.`,
   copiedN: (n: number) => `Copied ${plural(n, 'item', 'items')}.`,
   movedN: (n: number) => `Moved ${plural(n, 'item', 'items')}.`,

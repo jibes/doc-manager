@@ -142,7 +142,7 @@ tap "smoke-renamed.pdf"
 tap "Move"
 wait_for "Open the folder to move to"
 tap "Smoke\""
-tap "item here"
+tap "Move here"
 on_device /sdcard/Download/Smoke/smoke-renamed.pdf
 wait_for "smoke-renamed.pdf\""
 adb exec-out screencap -p > "$OUT/6-moved.png"

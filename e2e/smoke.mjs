@@ -1015,6 +1015,20 @@ async function foldersShell() {
   await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
   check((await shownThumbs()) === 2, `folders-shell: the folder is listed with a thumbnail for the PDF and the book (${await shownThumbs()})`);
   await page.screenshot({ path: `${OUT}folders-shell-grid.png` });
+  // A long press on a phone also fires a context menu, and its release a tap: the item stays selected.
+  await text('columns.pdf').click({ button: 'right' });
+  await text('columns.pdf').dispatchEvent('contextmenu');
+  await text('columns.pdf').click();
+  await page.waitForTimeout(200);
+  check((await page.getByText('1 selected').locator('visible=true').count()) === 1, 'folders-shell: a long press selects the item and it stays selected');
+  // The bars fit on a phone: nothing sticks out past the screen.
+  const fits = (id) =>
+    page.evaluate((id) => {
+      const bar = [...document.querySelectorAll(`[data-testid="${id}"]`)].find((e) => e.checkVisibility());
+      return !!bar && [...bar.querySelectorAll('*')].every((e) => e.getBoundingClientRect().right <= innerWidth + 0.5);
+    }, id);
+  check(await fits('action-bar'), 'folders-shell: the selection actions fit on a phone');
+  await vis('select-cancel').click();
 
   // Edits to a document opened from a folder are written back to it.
   await text('Papers').click();
@@ -1043,6 +1057,7 @@ async function foldersShell() {
   await page.screenshot({ path: `${OUT}folders-shell-select.png` });
   await vis('act-move').click();
   await page.screenshot({ path: `${OUT}folders-shell-paste.png` });
+  check(await fits('paste-bar'), 'folders-shell: the paste bar fits on a phone');
   await text('Archive').click();
   await vis('paste').click();
   await text('columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});

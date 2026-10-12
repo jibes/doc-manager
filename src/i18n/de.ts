@@ -85,7 +85,7 @@ export const de: Strings = {
     n === 1
       ? `„${name}“ wird von diesem Gerät gelöscht. Das lässt sich nicht rückgängig machen.`
       : `Diese ${n} Elemente werden von diesem Gerät gelöscht. Das lässt sich nicht rückgängig machen.`,
-  pasteHere: (move, n) => `${plural(n, 'Element', 'Elemente')} hierher ${move ? 'verschieben' : 'kopieren'}`,
+  pasteHere: (move) => (move ? 'Hierher verschieben' : 'Hierher kopieren'),
   pickTarget: (move) => `Öffne den Ordner, in den ${move ? 'verschoben' : 'kopiert'} werden soll.`,
   copiedN: (n) => `${plural(n, 'Element', 'Elemente')} kopiert.`,
   movedN: (n) => `${plural(n, 'Element', 'Elemente')} verschoben.`,
