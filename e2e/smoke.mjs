@@ -471,9 +471,11 @@ async function regressions() {
   await page.keyboard.press('v');
   await page.getByTestId('text-view').waitFor();
   await page.keyboard.press('Home');
-  await page.waitForTimeout(500);
+  // Wait for the jump to land: → from wherever the view still was proves nothing (it once read page 7).
+  for (let i = 0; i < 25 && (await pageNo()) !== 1; i++) await page.waitForTimeout(200);
   await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(800);
+  for (let i = 0; i < 25 && (await pageNo()) === 1; i++) await page.waitForTimeout(200);
+  await page.waitForTimeout(300);
   check((await pageNo()) === 2, `regression: → in text view goes to the next page (${await pageNo()})`);
   await page.keyboard.press('End');
   await page.waitForTimeout(800);

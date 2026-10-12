@@ -98,7 +98,7 @@ adb exec-out screencap -p > "$OUT/3-library.png"
 adb shell appops set --uid app.tessel.viewer MANAGE_EXTERNAL_STORAGE allow
 adb push e2e/fixtures/columns.pdf /sdcard/Download/smoke-columns.pdf >/dev/null
 tap "Files"
-wait_for "Browse your folders"
+wait_for "Add folder"
 tap "Settings"
 wait_for "Show every document on this device"
 tap "Show every document on this device"
