@@ -48,3 +48,11 @@ public/ocr/
 
 # e2e output
 e2e/out/
+
+# Android shell: build output and the bundled web app (npm run build:android-web)
+shell/android/.gradle/
+shell/android/build/
+shell/android/app/build/
+shell/android/local.properties
+shell/android/app/src/main/assets/www/
+*.keystore

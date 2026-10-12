@@ -68,7 +68,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "test:e2e": "node e2e/smoke.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:android-web": "npm run engine && expo export -p web --output-dir shell/android/app/src/main/assets/www && OUT_DIR=shell/android/app/src/main/assets/www node scripts/postexport.mjs"
   },
   "private": true,
   "license": "AGPL-3.0-or-later"

@@ -38,7 +38,8 @@
         window.__installPrompt = null;
         dispatchEvent(new Event('tessel:installable'));
       });
-      if ('serviceWorker' in navigator && location.port !== '8081') {
+      // Not in dev, and not in the Android app (its files are in the APK already).
+      if ('serviceWorker' in navigator && location.port !== '8081' && !/TesselShell/.test(navigator.userAgent)) {
         addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
       }
     </script>
