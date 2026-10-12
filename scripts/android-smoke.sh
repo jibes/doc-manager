@@ -30,7 +30,7 @@ tap() {
 # Waits for a path to exist on the device (file operations finish asynchronously).
 on_device() {
   for _ in $(seq 1 15); do adb shell ls "$@" >/dev/null 2>&1 && return 0; sleep 1; done
-  echo "Not on the device: $*"; adb shell ls -la /sdcard/Download; return 1
+  echo "Not on the device: $*"; adb shell ls -la /sdcard/Download; echo "--- screen ---"; screen | head -40; return 1
 }
 
 # Taps the last match instead (a dialog's button over the screen's own).
@@ -48,7 +48,7 @@ on_fail() {
   adb logcat -d > "$OUT/logcat.txt" 2>/dev/null || true
   echo "--- crashes ---"; adb logcat -d -b crash 2>/dev/null | tail -40 || true
   echo "--- app, WebView and system ---"
-  grep -E "tessel|AndroidRuntime|chromium|cr_|Renderer|ActivityManager: (Process|Killing)|lowmemorykiller" "$OUT/logcat.txt" | tail -60 || true
+  grep -iE "tessel|AndroidRuntime|chromium|cr_|Renderer|ActivityManager: (Process|Killing)|lowmemorykiller" "$OUT/logcat.txt" | tail -60 || true
 }
 trap 'on_fail' ERR
 
@@ -102,6 +102,7 @@ wait_for "smoke-columns.pdf"
 tap "New folder"
 wait_for "Cancel"
 adb shell input text Smoke
+sleep 1
 tap_last "New folder"
 on_device -d /sdcard/Download/Smoke
 tap "Select"
@@ -111,6 +112,8 @@ wait_for "Cancel"
 adb shell input keyevent KEYCODE_MOVE_END
 for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
 adb shell input text smoke-renamed.pdf
+sleep 1
+echo "--- screen (rename) ---"; screen | head -30
 tap_last "Rename"
 on_device /sdcard/Download/smoke-renamed.pdf
 wait_for "smoke-renamed.pdf\""
