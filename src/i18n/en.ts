@@ -62,6 +62,7 @@ export const en = {
   inPlace: 'In place',
   // Files and settings
   files: 'Files',
+  otherLocation: 'Other location…',
   back: 'Back',
   settings: 'Settings',
   addFolder: 'Add folder',

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
@@ -11,6 +12,7 @@ import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
+import { pickPdfs } from '@/lib/pick';
 import { cachedThumb, cancelThumbs, thumb, type Thumb } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
 import { useClipboard } from '@/state/clipboard';
@@ -47,6 +49,7 @@ export default function Files() {
   const gutter = width < 600 ? space.xl - 4 : space.xxxl;
   const contentW = Math.min(width, MAX_W) - gutter * 2;
   const load = useLibrary((s) => s.load);
+  const tabBar = useTabBar();
   useEffect(() => {
     load();
   }, [load]);
@@ -57,9 +60,10 @@ export default function Files() {
         {root ? (
           <FolderView root={root} rootName={unpack(params.rn) ?? ''} dir={unpack(params.d)} name={unpack(params.dn)} width={contentW} bottom={insets.bottom} />
         ) : (
-          <Roots bottom={insets.bottom} />
+          <Roots bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} />
         )}
       </View>
+      {!root && tabBar && <TabBar current="files" />}
     </View>
   );
 }
@@ -70,6 +74,7 @@ const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', devic
 function Roots({ bottom }: { bottom: number }) {
   const p = usePalette();
   const showAll = usePrefs((s) => s.allFiles);
+  const tabBar = useTabBar();
   const [roots, setRoots] = useState<FolderRoot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +91,12 @@ function Roots({ bottom }: { bottom: number }) {
     if (r) go(r.id, r.name);
     refresh();
   };
+  // A single file from anywhere the system picker reaches (cloud drives, mail attachments…).
+  const importFiles = useLibrary((s) => s.importFiles);
+  const openOther = async () => {
+    const [doc] = await importFiles(await pickPdfs());
+    if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id } });
+  };
   const unlockAndOpen = async (r: FolderRoot) => {
     if (r.locked && !(await folders.unlock(r.id).catch(() => false))) return;
     go(r.id, r.name);
@@ -93,9 +104,7 @@ function Roots({ bottom }: { bottom: number }) {
 
   return (
     <>
-      <ScreenHeader title={t.files}>
-        {folders.supported && <IconButton testID="open-settings" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />}
-      </ScreenHeader>
+      <AppHeader tab="files" />
       {!folders.supported ? (
         <T color={p.muted}>{t.foldersUnsupported}</T>
       ) : roots == null ? (
@@ -110,6 +119,7 @@ function Roots({ bottom }: { bottom: number }) {
             {t.foldersEmptyBody}
           </T>
           <Button testID="add-folder" icon="folderAdd" label={t.addFolder} onPress={add} style={{ marginTop: space.md }} />
+          <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />
         </View>
       ) : (
         <View style={{ gap: space.lg, paddingBottom: bottom + space.xl }}>
@@ -142,6 +152,7 @@ function Roots({ bottom }: { bottom: number }) {
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
             <Button testID="add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
+            <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />
           </View>
           <Pressable accessibilityRole="link" onPress={() => router.push('/settings')} style={{ alignSelf: 'flex-start' }}>
             <T v="caption" color={p.muted} style={{ textDecorationLine: 'underline' }}>
@@ -151,7 +162,7 @@ function Roots({ bottom }: { bottom: number }) {
         </View>
       )}
       <PasteBar here={null} bottom={bottom} onDone={refresh} onError={setError} />
-      <Toast message={error} onDismiss={() => setError(null)} />
+      <Toast message={error} onDismiss={() => setError(null)} above={tabBar ? TAB_BAR_H : 0} />
     </>
   );
 }

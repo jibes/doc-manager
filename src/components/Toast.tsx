@@ -7,7 +7,8 @@ import { elevation, radius, space } from '@/design/tokens';
 import { usePalette } from '@/state/prefs';
 import { T } from './primitives';
 
-export function Toast({ message, onDismiss }: { message: string | null; onDismiss: () => void }) {
+/** `above`: room to leave at the bottom (a tab bar). */
+export function Toast({ message, onDismiss, above = 0 }: { message: string | null; onDismiss: () => void; above?: number }) {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   useEffect(() => {
@@ -17,7 +18,7 @@ export function Toast({ message, onDismiss }: { message: string | null; onDismis
   }, [message, onDismiss]);
   if (!message) return null;
   return (
-    <Animated.View entering={FadeInDown.duration(220)} exiting={FadeOutDown.duration(160)} style={[styles.wrap, { bottom: insets.bottom + space.xl }]}>
+    <Animated.View entering={FadeInDown.duration(220)} exiting={FadeOutDown.duration(160)} style={[styles.wrap, { bottom: insets.bottom + space.xl + above }]}>
       <Pressable accessibilityRole="alert" onPress={onDismiss} style={[styles.toast, { backgroundColor: p.ink }, elevation(p.shadow, 3)]}>
         <T v="label" color={p.canvas}>{message}</T>
       </Pressable>

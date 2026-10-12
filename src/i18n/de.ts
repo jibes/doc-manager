@@ -42,6 +42,7 @@ export const de: Strings = {
   cantOpen: 'Dokument kann nicht geöffnet werden',
   missing: 'Dieses Dokument ist nicht mehr in deiner Bibliothek.',
   files: 'Dateien',
+  otherLocation: 'Anderer Ort …',
   back: 'Zurück',
   settings: 'Einstellungen',
   addFolder: 'Ordner hinzufügen',
