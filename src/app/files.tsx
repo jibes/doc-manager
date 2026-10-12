@@ -164,6 +164,10 @@ function opError(e: unknown): string {
   return m === t.writeDenied || m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
 }
 
+/** The item a long press selected, and when: its follow-up events (context menu, release) don't toggle it back. */
+let holdAt = { id: '', at: 0 };
+const justSelected = (id: string) => holdAt.id === id && Date.now() - holdAt.at < 800;
+
 type Sort = 'name' | 'date';
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -234,7 +238,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   };
 
   const open = async (e: FolderEntry) => {
-    if (selected) return toggle(e);
+    if (selected) return justSelected(e.id) ? undefined : toggle(e);
     if (e.kind === 'dir') return go(root, rootName, e.id, e.name);
     if (opening) return;
     setOpening(e.id);
@@ -345,7 +349,13 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
               busy={opening === item.id}
               selected={selected ? selected.has(item.id) : undefined}
               onPress={() => open(item)}
-              onSelect={() => (selected ? toggle(item) : setSelected(new Set([item.id])))}
+              onSelect={() => {
+                // A long press on a phone also fires a context menu (and the release a tap): one gesture, one change.
+                if (justSelected(item.id)) return;
+                holdAt = { id: item.id, at: Date.now() };
+                if (selected) toggle(item);
+                else setSelected(new Set([item.id]));
+              }}
             />
           )}
         />
@@ -410,12 +420,14 @@ function PasteBar({
   };
 
   return (
-    <View testID="paste-bar" style={[styles.bar, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
-      <T v="label" color={p.inkSoft} style={{ flex: 1 }} numberOfLines={2}>
+    <View testID="paste-bar" style={[styles.bar, styles.pasteBar, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
+      <T v="label" color={p.inkSoft} numberOfLines={2} style={{ paddingHorizontal: space.sm }}>
         {canPaste ? t.selectedCount(clip.entries.length) : t.pickTarget(clip.move)}
       </T>
-      <Button kind="quiet" label={t.cancel} onPress={() => setClip(null)} />
-      {canPaste && <Button testID="paste" label={busy ? t.loading : t.pasteHere(clip.move, clip.entries.length)} onPress={busy ? undefined : paste} />}
+      <View style={styles.pasteButtons}>
+        <Button kind="quiet" label={t.cancel} onPress={() => setClip(null)} />
+        {canPaste && <Button testID="paste" label={busy ? t.loading : t.pasteHere(clip.move)} onPress={busy ? undefined : paste} style={{ flexShrink: 1 }} />}
+      </View>
     </View>
   );
 }
@@ -571,6 +583,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  actions: { justifyContent: 'space-around', paddingLeft: space.sm },
-  action: { alignItems: 'center', gap: 2, paddingVertical: space.xs, paddingHorizontal: space.sm, borderRadius: radius.md, minWidth: 56 },
+  actions: { gap: 0, paddingHorizontal: space.xs, paddingLeft: space.xs },
+  action: { flex: 1, minWidth: 0, alignItems: 'center', gap: 2, paddingVertical: space.xs, paddingHorizontal: 2, borderRadius: radius.md },
+  pasteBar: { flexDirection: 'column', alignItems: 'stretch', gap: space.sm, paddingLeft: space.sm },
+  pasteButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
 });
