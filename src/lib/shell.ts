@@ -10,6 +10,8 @@ type ShellApi = {
   finish(token: string, action: 'share' | 'save' | 'print'): void;
   theme(background: string, dark: boolean): void;
   request(id: string, method: string, args: string): void;
+  hasLightSensor?(): boolean;
+  light?(on: boolean): void;
 };
 
 export const shell: ShellApi | undefined = typeof window !== 'undefined' ? (window as unknown as { TesselShell?: ShellApi }).TesselShell : undefined;

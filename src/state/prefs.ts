@@ -3,6 +3,7 @@ import { create } from 'zustand';
 
 import { palettes, type Palette, type ThemeName } from '@/design/tokens';
 import { loadPrefs, savePrefs } from '@/storage/prefs';
+import { useAmbient } from './ambient';
 
 export type FitMode = 'width' | 'page';
 export type TextFont = 'serif' | 'sans';
@@ -10,8 +11,8 @@ export type TextLeading = 'compact' | 'normal' | 'relaxed';
 export type TextWidth = 'narrow' | 'medium' | 'wide';
 
 type Prefs = {
-  /** null = follow system (Paper / Dusk). */
-  theme: ThemeName | null;
+  /** null = follow system (Paper / Dusk); 'ambient' = follow the light sensor. */
+  theme: ThemeName | 'ambient' | null;
   fit: FitMode;
   /** Text view typography. */
   textFont: TextFont;
@@ -40,6 +41,9 @@ export const usePrefs = create<PrefsState>((set, get) => ({
 
 export function usePalette(): Palette {
   const theme = usePrefs((s) => s.theme);
+  const ambient = useAmbient((s) => s.theme);
   const scheme = useColorScheme();
-  return palettes[theme ?? (scheme === 'dark' ? 'dusk' : 'paper')];
+  const system = scheme === 'dark' ? 'dusk' : 'paper';
+  // Until the sensor's first reading, the light sensor theme follows the system.
+  return palettes[theme === 'ambient' ? (ambient ?? system) : (theme ?? system)];
 }

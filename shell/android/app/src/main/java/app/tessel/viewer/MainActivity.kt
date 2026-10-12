@@ -5,9 +5,14 @@ import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.ViewGroup
@@ -157,6 +162,51 @@ class MainActivity : ComponentActivity() {
     fun saveAs(file: File, mime: String) {
         pendingSave = file
         saver.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, file.name))
+    }
+
+    // ---------- ambient light (the "light sensor" theme) ----------
+
+    private val sensors by lazy { getSystemService(SensorManager::class.java) }
+    private val lightSensor by lazy { sensors?.getDefaultSensor(Sensor.TYPE_LIGHT) }
+    private var lightWanted = false
+    private var lastLight = 0L
+    private val lightListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            // A few readings a second are plenty: the web app waits for the light to settle anyway.
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastLight < 400) return
+            lastLight = now
+            val lux = event.values.firstOrNull() ?: return
+            web.evaluateJavascript("window.dispatchEvent(new CustomEvent('tessel-light', { detail: $lux }))", null)
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    fun hasLightSensor() = lightSensor != null
+
+    fun watchLight(on: Boolean) {
+        lightWanted = on
+        if (on && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) startLight() else stopLight()
+    }
+
+    private fun startLight() {
+        val s = lightSensor ?: return
+        sensors?.registerListener(lightListener, s, SensorManager.SENSOR_DELAY_NORMAL)
+    }
+
+    private fun stopLight() {
+        sensors?.unregisterListener(lightListener)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (lightWanted) startLight()
+    }
+
+    override fun onPause() {
+        stopLight()
+        super.onPause()
     }
 
     /** The system folder picker; access is kept across restarts. */

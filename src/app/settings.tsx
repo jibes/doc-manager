@@ -7,8 +7,10 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import { errorText, t } from '@/i18n';
+import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
+import { ThemePicker } from '@/reader/AppearancePanel';
+import { hasLightSensor } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 720;
@@ -27,17 +29,17 @@ export default function Settings() {
     folders
       .roots(false)
       .then(setPicked)
-      .catch((e) => setError(errorText(e)));
+      .catch(() => setError(t.opFailed));
     if (folders.allFilesSupported) folders.allFiles().then(setGranted, () => setGranted(false));
   }, []);
   useEffect(refresh, [refresh]);
 
   const add = async () => {
-    await folders.add().catch((e) => setError(errorText(e)));
+    await folders.add().catch(() => setError(t.opFailed));
     refresh();
   };
   const remove = async (id: string) => {
-    await folders.forget(id).catch((e) => setError(errorText(e)));
+    await folders.forget(id).catch(() => setError(t.opFailed));
     refresh();
   };
   const allOn = allFiles && granted === true;
@@ -55,6 +57,20 @@ export default function Settings() {
     >
       <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
         <ScreenHeader title={t.settings} />
+
+        <T v="kicker" color={p.muted} style={styles.kicker}>
+          {t.appearanceTitle}
+        </T>
+        <View testID="settings-theme" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline, padding: space.lg }]}>
+          <ThemePicker />
+        </View>
+        {hasLightSensor && (
+          <T v="caption" color={p.muted} style={styles.note}>
+            {t.themeNote}
+          </T>
+        )}
+
+        <View style={{ height: space.xxl }} />
 
         <T v="kicker" color={p.muted} style={styles.kicker}>
           {t.foldersTitle}

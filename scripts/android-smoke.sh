@@ -94,7 +94,7 @@ adb exec-out screencap -p > "$OUT/5-from-folder.png"
 adb shell input keyevent KEYCODE_BACK
 wait_for "smoke-columns.pdf"
 tap "New folder"
-wait_for "Folder name"
+wait_for "Cancel"
 adb shell input text Smoke
 adb shell input keyevent KEYCODE_ENTER
 wait_for "Smoke\""
@@ -102,7 +102,7 @@ adb shell ls -d /sdcard/Download/Smoke
 tap "Select"
 tap "smoke-columns.pdf"
 tap "Rename"
-wait_for "New name"
+wait_for "Cancel"
 adb shell input keyevent KEYCODE_MOVE_END
 for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
 adb shell input text smoke-renamed.pdf
@@ -126,6 +126,26 @@ tap_last "Delete"
 sleep 2
 if adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi
 echo "--- file operations passed ---"
+
+# Light sensor theme: dark room → Black, bright room → Light (the emulator's light sensor drives it).
+# Brightness of a background pixel, from a raw screenshot (16-byte header, then RGBA).
+px() { adb exec-out screencap | python3 -c "import sys; d = sys.stdin.buffer.read(); w = int.from_bytes(d[0:4], 'little'); o = 16 + (300 * w + 6) * 4; print(sum(d[o:o + 3]) // 3)"; }
+for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
+adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
+wait_for "Settings"
+tap "Settings"
+wait_for "Light sensor"
+tap "Light sensor"
+adb emu sensor set light 1
+sleep 5
+dark=$(px)
+adb exec-out screencap -p > "$OUT/7-sensor-dark.png"
+adb emu sensor set light 3000
+sleep 5
+bright=$(px)
+adb exec-out screencap -p > "$OUT/8-sensor-bright.png"
+echo "light sensor theme: background $dark in the dark, $bright in bright light"
+if [ "$dark" -ge 60 ] || [ "$bright" -le 150 ]; then echo "The light sensor theme didn't follow the light"; exit 1; fi
 
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true
 echo "--- web console ---"; cat "$OUT/web-console.txt"

@@ -636,6 +636,10 @@ async function shellBridge() {
       append: (_t, b64) => void (log.bytes += atob(b64).length),
       finish: (_t, action) => void log.calls.push(['finish', action]),
       theme: (bg, dark) => void log.calls.push(['theme', bg, dark]),
+      hasLightSensor: () => true,
+      light: (on) => void log.calls.push(['light', on]),
+      request: (id, method) =>
+        setTimeout(() => window.dispatchEvent(new CustomEvent('tessel-shell-reply', { detail: { id, ok: true, value: method === 'folders' ? [] : { allFiles: false } } })), 10),
     };
   });
   const pdf = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url));
@@ -656,6 +660,28 @@ async function shellBridge() {
   check(shared && log.bytes === pdf.length, `shell: share hands the exact file to the app (${log.bytes} of ${pdf.length} bytes)`);
   check(log.calls.some((c) => c[0] === 'theme' && /^#/.test(c[1])), 'shell: system bars follow the theme');
   check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
+  // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
+  await page.keyboard.press('Escape');
+  await page.getByTestId('home-settings').locator('visible=true').click();
+  await page.getByRole('radio', { name: /Light sensor/ }).click();
+  const bg = () => page.evaluate(() => document.documentElement.style.backgroundColor);
+  const lux = (v) => page.evaluate((v) => window.dispatchEvent(new CustomEvent('tessel-light', { detail: v })), v);
+  await lux(800);
+  await page.waitForTimeout(200);
+  const bright = await bg();
+  for (let i = 0; i < 8; i++) {
+    await lux(1);
+    await page.waitForTimeout(400);
+  }
+  const dark = await bg();
+  await page.screenshot({ path: `${OUT}shell-settings-sensor.png` });
+  const calls = (await page.evaluate(() => window.__shell.calls)).filter((c) => c[0] === 'light');
+  check(calls.some((c) => c[1] === true) && bright !== dark && /rgb\((\d{1,2}), \1, \1\)|rgb\(\d{1,2}, \d{1,2}, \d{1,2}\)/.test(dark), `shell: the light sensor theme follows the light (${bright} → ${dark})`);
+  await lux(1);
+  await page.getByRole('radio', { name: 'Light', exact: true }).click();
+  await page.waitForTimeout(200);
+  const off = (await page.evaluate(() => window.__shell.calls)).filter((c) => c[0] === 'light').at(-1);
+  check(off?.[1] === false, 'shell: the sensor stops when another theme is chosen');
   await ctx.close();
 }
 
