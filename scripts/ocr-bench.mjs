@@ -34,12 +34,12 @@ for (const id of readdirSync(OUT).sort()) {
   let text = '';
   for (const p of pages) text += (await worker.recognize(join(img, p))).data.text + '\n';
   const ms = Date.now() - t0;
-  rows.push({ id, paddle: res.text?.cer, tess: cer(truth, text), tessMs: ms, paddleMs: res.timings?.ocr ?? res.ocrMs });
+  rows.push({ id, paddle: res.text?.cer, tess: cer(truth, text), tessMs: ms, paddleMs: res.pdf?.ms });
 }
 await worker.terminate();
 const pct = (x) => (x == null ? '–' : `${(x * 100).toFixed(1)}%`);
-console.log('| case | PaddleOCR CER | Tesseract CER | Tesseract ms |');
-for (const r of rows) console.log(`| ${r.id} | ${pct(r.paddle)} | ${pct(r.tess)} | ${r.tessMs} |`);
+console.log('| case | PaddleOCR CER | Tesseract CER | PaddleOCR ms (PDF incl. OCR) | Tesseract ms |');
+for (const r of rows) console.log(`| ${r.id} | ${pct(r.paddle)} | ${pct(r.tess)} | ${r.paddleMs ?? '–'} | ${r.tessMs} |`);
 const mean = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0) / rows.length;
 const median = (k) => { const v = rows.map((r) => r[k] ?? 0).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
 console.log(`| mean | ${pct(mean('paddle'))} | ${pct(mean('tess'))} | |`);
