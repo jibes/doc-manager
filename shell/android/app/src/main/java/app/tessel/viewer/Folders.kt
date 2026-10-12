@@ -83,6 +83,25 @@ class Folders(private val context: Context) {
 
     private val storageRoot: File get() = Environment.getExternalStorageDirectory()
 
+    /**
+     * Tessel's own folder, Documents/Tessel: where scans and documents opened from other apps are kept, so they
+     * are real files (other apps see them; uninstalling keeps them). Android 11+ lets an app keep its own files
+     * there without any permission; Android 8–10 need the storage permission.
+     */
+    private val appDir: File get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Tessel")
+
+    fun appFolderUsable(): Boolean = Build.VERSION.SDK_INT >= 30 || allFilesGranted()
+
+    private fun inAppFolder(path: String): File {
+        if (!appFolderUsable()) throw SecurityException("No storage permission")
+        val base = appDir.apply { mkdirs() }.canonicalFile
+        val f = File(path).canonicalFile
+        if (f != base && !f.path.startsWith(base.path + File.separator)) throw SecurityException("Outside the Tessel folder")
+        return f
+    }
+
+    private fun isInAppFolder(f: File): Boolean = appDir.canonicalPath.let { f.canonicalPath == it || f.canonicalPath.startsWith(it + File.separator) }
+
     private fun onDevice(path: String): File {
         if (!allFilesGranted()) throw SecurityException("All files access is off")
         val f = File(path).canonicalFile
@@ -98,7 +117,8 @@ class Folders(private val context: Context) {
      */
     fun list(root: String, dir: String?): JSONArray = when (root) {
         "all" -> allDocuments()
-        "device" -> listPath(dir ?: storageRoot.absolutePath)
+        "device" -> listPath(onDevice(dir ?: storageRoot.absolutePath))
+        "app" -> listPath(inAppFolder(dir ?: appDir.absolutePath))
         else -> listTree(Uri.parse(root), dir)
     }
 
@@ -133,8 +153,7 @@ class Folders(private val context: Context) {
         return out
     }
 
-    private fun listPath(path: String): JSONArray {
-        val dir = onDevice(path)
+    private fun listPath(dir: File): JSONArray {
         val out = JSONArray()
         for (f in dir.listFiles().orEmpty()) {
             if (f.name.startsWith('.')) continue
@@ -190,7 +209,9 @@ class Folders(private val context: Context) {
     /** A file the user can reach through a granted folder, or anywhere with all files access. */
     private fun allowed(uri: Uri): Boolean = when (uri.scheme) {
         "content" -> allFilesGranted() || grantedTree(uri) != null
-        "file" -> allFilesGranted() && File(uri.path ?: "").canonicalPath.startsWith(storageRoot.canonicalPath)
+        "file" -> File(uri.path ?: "").let { f ->
+            (allFilesGranted() && f.canonicalPath.startsWith(storageRoot.canonicalPath)) || (appFolderUsable() && isInAppFolder(f))
+        }
         else -> false
     }
 
@@ -233,6 +254,7 @@ class Folders(private val context: Context) {
     private fun place(root: String, dir: String?): Place = when (root) {
         "all" -> throw IllegalArgumentException("Not a folder")
         "device" -> PathPlace(onDevice(dir ?: storageRoot.absolutePath))
+        "app" -> PathPlace(inAppFolder(dir ?: appDir.absolutePath))
         else -> TreePlace(treeDir(root, dir))
     }
 
@@ -343,7 +365,7 @@ class Folders(private val context: Context) {
     }
 
     /** The folder an item is in, for moves within a provider. */
-    fun parentOf(root: String, dir: String?): Uri? = if (root == "all" || root == "device") null else treeDir(root, dir)
+    fun parentOf(root: String, dir: String?): Uri? = if (root == "all" || root == "device" || root == "app") null else treeDir(root, dir)
 
     companion object {
         const val PDF = "application/pdf"

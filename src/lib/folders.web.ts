@@ -9,6 +9,9 @@ export type { FolderEntry, FolderRoot, Place } from './folderTypes';
 
 const kindOf = (name: string): FolderEntry['kind'] | null => (/\.pdf$/i.test(name) ? 'pdf' : /\.epub$/i.test(name) ? 'epub' : null);
 
+const shellAccess = () => shellRequest<{ allFiles: boolean; app?: boolean }>('access').then((a) => ({ allFiles: a.allFiles, app: a.app ?? false }));
+const APP_ROOT: FolderRoot = { id: 'app', name: 'Tessel', kind: 'app' };
+
 /**
  * Android app: folders granted through the system folder picker (and, with all files access, the whole
  * device), listed, served and changed by the app (see shell/android Folders.kt).
@@ -17,17 +20,20 @@ const shellFolders: FoldersApi = {
   supported: true,
   allFilesSupported: true,
   async roots(showAll) {
-    const picked = await shellRequest<{ uri: string; name: string }[]>('folders');
+    const [picked, access] = await Promise.all([shellRequest<{ uri: string; name: string }[]>('folders'), shellAccess()]);
     const roots: FolderRoot[] = picked.map((f) => ({ id: f.uri, name: f.name, kind: 'folder' }));
-    if (showAll && (await this.allFiles())) roots.unshift({ id: 'all', name: t.allDocuments, kind: 'all' }, { id: 'device', name: t.internalStorage, kind: 'device' });
+    if (showAll && access.allFiles) roots.unshift({ id: 'all', name: t.allDocuments, kind: 'all' }, { id: 'device', name: t.internalStorage, kind: 'device' });
+    // Android 8–10 need the storage permission for it: shown locked until then.
+    roots.unshift({ ...APP_ROOT, locked: !access.app });
     return roots;
   },
+  appFolder: async () => ((await shellAccess()).app ? APP_ROOT : null),
   async add() {
     const f = await shellRequest<{ uri: string; name: string } | null>('pickFolder');
     return f && { id: f.uri, name: f.name, kind: 'folder' };
   },
   forget: (id) => shellRequest('forgetFolder', { uri: id }),
-  unlock: async () => true,
+  unlock: async (id) => (id === 'app' ? shellRequest<boolean>('requestAllFiles').then(async () => (await shellAccess()).app) : true),
   list: (root, dir) => shellRequest<FolderEntry[]>('list', { root, dir: dir ?? '' }),
   async read(_root, e) {
     const res = await fetch(shellDocUrl(e.uri!));
@@ -54,7 +60,7 @@ const shellFolders: FoldersApi = {
       move,
     }),
   share: (_root, list) => shellRequest('share', { uris: list.map((e) => e.uri) }),
-  allFiles: async () => (await shellRequest<{ allFiles: boolean }>('access')).allFiles,
+  allFiles: async () => (await shellAccess()).allFiles,
   requestAllFiles: () => shellRequest<boolean>('requestAllFiles'),
 };
 
@@ -122,6 +128,7 @@ async function copyEntry(from: DirHandle, name: string, isDir: boolean, into: Di
 const browserFolders: FoldersApi = {
   supported: true,
   allFilesSupported: false,
+  appFolder: async () => null,
   async roots() {
     return Promise.all(
       (await savedFolders()).map(async ([id, f]) => ({

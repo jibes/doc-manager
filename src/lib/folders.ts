@@ -7,6 +7,7 @@ export const folders: FoldersApi = {
   supported: false,
   allFilesSupported: false,
   roots: async () => [],
+  appFolder: async () => null,
   add: async () => null,
   forget: async () => {},
   canEdit: () => false,

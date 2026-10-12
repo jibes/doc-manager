@@ -35,6 +35,8 @@ F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6
 
 **Navigation.** Library and Files are tabs: along the bottom on phones (with Scan in the middle), in the header on wider windows (Scan on the right). Files also has “Other location…”, the system picker, for single files from anywhere.
 
+**Where documents live.** In the Android app every document is a real file: scans and files opened from other apps go to **Documents/Tessel** (first in Files), and the library links to them. Browsers without folder access keep a copy in browser storage instead (“This browser only”).
+
 **Files.** The Files tab browses your folders as a grid of first-page and cover thumbnails (made on the device, cached until a file changes). By default Tessel sees only folders you add through Android's folder picker. In Settings you can optionally turn on **all files access**, which adds “All documents” (every PDF and EPUB on the device, newest first) and “Internal storage”. Documents open where they are, and saving edits writes back to them. Long-press (right-click on a computer) or the select button picks items to share, copy, move, rename or delete; new folders are one tap. Renamed and moved documents stay in the library, deleted ones leave it. On a computer, Chrome and Edge browse folders the same way.
 
 Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release when `package.json`'s version on main is new (or for a `v*` tag, or a manual run of the Android workflow with a version) (signing key from the `ANDROID_*` repository secrets).

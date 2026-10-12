@@ -896,6 +896,7 @@ async function foldersShell() {
       next: 10,
       nodes: {
         root: { name: 'Docs', kind: 'dir' },
+        app: { name: 'Tessel', kind: 'dir' },
         d1: { name: 'Papers', kind: 'dir', parent: 'root' },
         f1: { name: 'columns.pdf', kind: 'pdf', parent: 'root', key: 'columns', modified: 1.7e12 },
         f2: { name: 'Harbour Notes.epub', kind: 'epub', parent: 'root', key: 'book', modified: 1.71e12 },
@@ -934,11 +935,12 @@ async function foldersShell() {
       folders: () => state.trees.map((uri) => ({ uri, name: 'Docs' })),
       pickFolder: () => ((state.trees = [tree]), { uri: tree, name: 'Docs' }),
       forgetFolder: ({ uri }) => ((state.trees = state.trees.filter((u) => u !== uri)), null),
-      access: () => ({ allFiles: state.all }),
+      access: () => ({ allFiles: state.all, app: true }),
       requestAllFiles: () => ((state.all = true), true),
       list: ({ root, dir }) => {
         if (root === 'all') return Object.keys(nodes).filter((id) => nodes[id].kind !== 'dir').map((id) => ({ ...entry(id), where: nodes[nodes[id].parent].name }));
         if (root === 'device') return [{ id: '/storage/emulated/0/Documents', name: 'Documents', kind: 'dir', size: 0, modified: 0 }];
+        if (root === 'app') return kids(dir || 'app').map(entry);
         if (root !== tree) throw new Error(`No access to ${root}`);
         return kids(dir || 'root').map(entry);
       },
@@ -957,9 +959,9 @@ async function foldersShell() {
         }),
       share: ({ uris }) => ((log.shared = uris), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
-      create: ({ dir, name, token }) => {
+      create: ({ root, dir, name, token }) => {
         const id = newId();
-        nodes[id] = { name, kind: 'pdf', parent: dir || 'root', key: 'created', data: chunks[token].join(''), modified: Date.now() };
+        nodes[id] = { name, kind: 'pdf', parent: dir || (root === 'app' ? 'app' : 'root'), key: 'created', data: chunks[token].join(''), modified: Date.now() };
         return { uri: uriOf(id), name };
       },
     };
@@ -1097,7 +1099,7 @@ async function foldersShell() {
   // Copy back to the top folder, share, then delete the copy (and its library entry with it).
   await page.goto(BASE);
   await vis('tab-files').click();
-  await vis('folder-root').click();
+  await vis('folder-root').filter({ hasText: 'Docs' }).click();
   await text('Archive').click();
   await vis('select').click();
   await text('two columns.pdf').click();
@@ -1153,6 +1155,17 @@ async function foldersShell() {
   await page.goto(BASE);
   await page.getByTestId('recent-row').first().waitFor();
   check((await page.getByTestId('recent-row').first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
+
+  // A file opened from elsewhere (system picker) becomes a real file in Documents/Tessel, not a hidden copy.
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await chooser.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
+  await page.waitForURL(/\/read\//, { timeout: 30000 });
+  const kept = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'tagged.pdf'));
+  check(kept?.parent === 'app', 'folders-shell: a file opened from elsewhere is kept in the Tessel folder');
+  await page.goto(BASE);
+  await vis('tab-files').click();
+  const first = await vis('folder-root').first().innerText();
+  check(first.startsWith('Tessel'), `folders-shell: the Tessel folder is the first place in Files (${first.split('\n')[0]})`);
   await ctx.close();
 }
 

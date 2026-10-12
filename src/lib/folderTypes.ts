@@ -7,7 +7,7 @@ import type { FileHandle } from './fsa';
 export type FolderRoot = {
   id: string;
   name: string;
-  kind: 'folder' | 'device' | 'all';
+  kind: 'folder' | 'device' | 'all' | 'app';
   /** The browser needs the user's OK again before it can be read (Chromium, after a restart). */
   locked?: boolean;
 };
@@ -41,6 +41,11 @@ export type FoldersApi = {
   add(): Promise<FolderRoot | null>;
   /** Stops browsing a folder (the folder itself stays). */
   forget(id: string): Promise<void>;
+  /**
+   * Android app: Documents/Tessel, where documents that would otherwise be hidden copies inside the app (scans,
+   * files opened from other apps) are kept as real files. Null where there is no such folder (browsers).
+   */
+  appFolder(): Promise<FolderRoot | null>;
   /** Asks for access to a locked folder again (needs a user gesture). */
   unlock(id: string): Promise<boolean>;
   list(root: string, dir?: string): Promise<FolderEntry[]>;

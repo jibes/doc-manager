@@ -68,7 +68,7 @@ export default function Files() {
   );
 }
 
-const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', device: 'device', all: 'documents' };
+const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', device: 'device', all: 'documents', app: 'pages' };
 
 /** The places to browse; adding a folder opens it. */
 function Roots({ bottom }: { bottom: number }) {

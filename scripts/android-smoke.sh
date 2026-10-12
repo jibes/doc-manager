@@ -207,6 +207,9 @@ wait_for "Scan 2"
 sleep 3
 adb exec-out screencap -p > "$OUT/12-saved.png"
 echo "--- screen (saved scan) ---"; screen | head -20
+# Saved as a real file in Documents/Tessel (visible to other apps, kept after uninstall), not a hidden copy.
+adb shell ls -la /sdcard/Documents/Tessel/
+adb shell ls /sdcard/Documents/Tessel/ | grep -q '^Scan .*\.pdf' || { echo "The scan is not in Documents/Tessel"; exit 1; }
 adb logcat -d -s TesselWeb:* | grep -Eo 'Scanner: (cross-origin isolated [a-z]+|text recognition with [0-9]+ thread)' | sort -u || true
 echo "--- scanner passed ---"
 
