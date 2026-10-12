@@ -21,6 +21,18 @@ Live web app: https://jibes.github.io/doc-reader/
 | Personalisation | Light, Sepia, Dark, Black, Auto; English and German (follows OS) | More languages |
 | Platform | Offline PWA, install button, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds |
 
+## Install on Android
+
+Tessel for Android is on the [Releases](https://github.com/jibes/doc-reader/releases) page: download `tessel-x.y.z.apk` on the phone and open it (allow installs from the browser or file manager when Android asks). For automatic updates, add `https://github.com/jibes/doc-reader` in [Obtainium](https://github.com/ImranR98/Obtainium).
+
+The app is the web app bundled in a native shell (`shell/android`): every feature works offline, and it appears under **Open with** and **Share** for PDFs and EPUB books. Releases are signed with this certificate (SHA-256), which Obtainium or AppVerifier can check:
+
+```
+F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6:A6:F5:8E:E3:94
+```
+
+Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release for each `v*` tag (signing key from the `ANDROID_*` repository secrets).
+
 ## Architecture
 
 ```

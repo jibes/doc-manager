@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tessel</string>
+    <string name="share_title">Share</string>
+    <string name="print_job">Tessel document</string>
+</resources>

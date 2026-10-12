@@ -1,3 +1,4 @@
+import { sendToShell, shell } from '@/lib/shell';
 import { repo, type DocRecord } from '@/storage';
 
 export const canDownload = true;
@@ -24,12 +25,16 @@ function save(file: File) {
 }
 
 export async function downloadDoc(doc: DocRecord, current?: Current) {
-  save(await asFile(doc, current));
+  const file = await asFile(doc, current);
+  // Android app: the system save dialog (any folder, or a cloud drive).
+  if (shell) return sendToShell(file, file.name, 'save');
+  save(file);
 }
 
 /** System share sheet where the browser can share files (mostly mobile); otherwise a download. */
 export async function shareDoc(doc: DocRecord, current?: Current) {
   const file = await asFile(doc, current);
+  if (shell) return sendToShell(file, file.name, 'share');
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: doc.title });
@@ -46,6 +51,11 @@ export async function shareDoc(doc: DocRecord, current?: Current) {
  * where PDFs can't load in frames (mobile), it opens in the browser's own viewer instead.
  */
 export async function printDoc(doc: DocRecord, current?: Current) {
+  // Android app: the system print service, with the PDF itself.
+  if (shell) {
+    const file = await asFile(doc, current);
+    return sendToShell(file, file.name, 'print');
+  }
   const coarse = matchMedia('(pointer: coarse)').matches;
   // Open synchronously within the click so popup blockers allow it.
   const popup = coarse ? window.open('', '_blank') : null;

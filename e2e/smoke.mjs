@@ -622,6 +622,41 @@ async function books() {
   await ctx.close();
 }
 
+// Android app glue (window.TesselShell), faked here: files from "Open with" are added and opened,
+// Save/Share go through the bridge with the exact bytes, and the system bars follow the theme.
+async function shellBridge() {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) TesselShell/1.0' });
+  await ctx.addInitScript(() => {
+    const log = (window.__shell = { pending: [{ url: '/__shell/file/one', name: 'columns.pdf', type: 'application/pdf' }], calls: [], bytes: 0 });
+    window.TesselShell = {
+      pending: () => JSON.stringify(log.pending.splice(0)),
+      begin: (name, mime) => (log.calls.push(['begin', name, mime]), 't1'),
+      append: (_t, b64) => void (log.bytes += atob(b64).length),
+      finish: (_t, action) => void log.calls.push(['finish', action]),
+      theme: (bg, dark) => void log.calls.push(['theme', bg, dark]),
+    };
+  });
+  const pdf = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url));
+  await ctx.route('**/__shell/file/one', (r) => r.fulfill({ body: pdf, contentType: 'application/pdf' }));
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`shell: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByTestId('reader').waitFor({ timeout: 10000 }).then(
+    () => check(true, 'shell: a file opened from another app is added and opened'),
+    () => check(false, 'shell: a file opened from another app is added and opened'),
+  );
+  await page.waitForTimeout(500);
+  await page.getByTestId('open-more').click();
+  await page.getByText('Share', { exact: true }).click();
+  await page.waitForTimeout(800);
+  const log = await page.evaluate(() => window.__shell);
+  const shared = log.calls.some((c) => c[0] === 'finish' && c[1] === 'share') && log.calls.some((c) => c[0] === 'begin' && c[1] === 'columns.pdf' && c[2] === 'application/pdf');
+  check(shared && log.bytes === pdf.length, `shell: share hands the exact file to the app (${log.bytes} of ${pdf.length} bytes)`);
+  check(log.calls.some((c) => c[0] === 'theme' && /^#/.test(c[1])), 'shell: system bars follow the theme');
+  check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
+  await ctx.close();
+}
+
 // Open in place (Chromium): the library links to the user's file. Handles come from the origin-private
 // file system, standing in for the picker; they behave like real ones (read, write, vanish).
 async function linked() {
@@ -714,6 +749,7 @@ await step('columns', columns);
 await step('scan', scan);
 await step('regressions', regressions);
 await step('books', books);
+await step('shell', shellBridge);
 await step('forms', forms);
 await step('annotations', annotations);
 await step('linked', linked);

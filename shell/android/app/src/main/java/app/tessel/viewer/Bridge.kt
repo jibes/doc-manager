@@ -1,0 +1,140 @@
+package app.tessel.viewer
+
+import android.content.Intent
+import android.net.Uri
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
+import android.provider.OpenableColumns
+import android.util.Base64
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceResponse
+import androidx.core.content.FileProvider
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+
+/**
+ * window.TesselShell: what the web app can't do inside a WebView on its own.
+ * - Files opened or shared from other apps are served at /__shell/file/<id> and listed by pending().
+ * - Outgoing files (share, save, print) arrive in base64 chunks: begin → append… → finish.
+ * - theme() matches the system bars to the app's palette.
+ * JavaScript calls arrive on a background thread; anything touching UI hops to the main thread.
+ */
+class Bridge(private val activity: MainActivity) {
+    private data class Incoming(val uri: Uri, val name: String, val size: Long, val type: String)
+
+    private val incoming = LinkedHashMap<String, Incoming>()
+    private val unclaimed = ArrayList<String>()
+    private val outgoing = HashMap<String, Pair<File, String>>()
+
+    /** Registers files from a VIEW/SEND intent; returns how many were usable. */
+    fun accept(uris: List<Uri>): Int {
+        var n = 0
+        for (uri in uris) {
+            var name = uri.lastPathSegment?.substringAfterLast('/') ?: "document"
+            var size = -1L
+            runCatching {
+                activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        c.getString(0)?.let { name = it }
+                        if (!c.isNull(1)) size = c.getLong(1)
+                    }
+                }
+            }
+            val type = activity.contentResolver.getType(uri) ?: AppAssets.mimeOf(name)
+            // Name the file by its type when a provider gives none, so the web app recognises it.
+            if (!name.contains('.')) name += if (type == "application/epub+zip") ".epub" else ".pdf"
+            val id = UUID.randomUUID().toString()
+            synchronized(this) {
+                incoming[id] = Incoming(uri, name, size, type)
+                unclaimed += id
+            }
+            n++
+        }
+        return n
+    }
+
+    /** Streams an incoming file to the web app (fetch from /__shell/file/<id>). */
+    fun serve(path: String): WebResourceResponse? {
+        val id = path.removePrefix("/__shell/file/")
+        val file = synchronized(this) { incoming[id] } ?: return null
+        val stream = runCatching { activity.contentResolver.openInputStream(file.uri) }.getOrNull()
+            ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), null)
+        return WebResourceResponse(file.type, null, stream)
+    }
+
+    @JavascriptInterface
+    fun pending(): String = synchronized(this) {
+        val list = JSONArray()
+        for (id in unclaimed) {
+            val f = incoming[id] ?: continue
+            list.put(JSONObject().put("url", "${AppAssets.ORIGIN}/__shell/file/$id").put("name", f.name).put("size", f.size).put("type", f.type))
+        }
+        unclaimed.clear()
+        list.toString()
+    }
+
+    @JavascriptInterface
+    fun begin(name: String, mime: String): String {
+        val dir = File(activity.cacheDir, "outgoing").apply { mkdirs() }
+        val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "document" }
+        val token = UUID.randomUUID().toString()
+        val file = File(File(dir, token).apply { mkdirs() }, safe)
+        file.delete()
+        synchronized(this) { outgoing[token] = file to mime }
+        return token
+    }
+
+    @JavascriptInterface
+    fun append(token: String, base64: String) {
+        val (file, _) = synchronized(this) { outgoing[token] } ?: return
+        FileOutputStream(file, true).use { it.write(Base64.decode(base64, Base64.DEFAULT)) }
+    }
+
+    /** action: "share" | "save" | "print". */
+    @JavascriptInterface
+    fun finish(token: String, action: String) {
+        val (file, mime) = synchronized(this) { outgoing.remove(token) } ?: return
+        activity.runOnUiThread {
+            when (action) {
+                "share" -> share(file, mime)
+                "save" -> activity.saveAs(file, mime)
+                "print" -> print(file)
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun theme(background: String, dark: Boolean) {
+        activity.runOnUiThread { activity.applyTheme(background, dark) }
+    }
+
+    private fun share(file: File, mime: String) {
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.files", file)
+        val send = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        activity.startActivity(Intent.createChooser(send, activity.getString(R.string.share_title)))
+    }
+
+    private fun print(file: File) {
+        val manager = activity.getSystemService(PrintManager::class.java) ?: return
+        manager.print(file.name, object : PrintDocumentAdapter() {
+            override fun onLayout(old: PrintAttributes?, new: PrintAttributes?, cancel: CancellationSignal?, cb: LayoutResultCallback, extras: android.os.Bundle?) {
+                if (cancel?.isCanceled == true) return cb.onLayoutCancelled()
+                cb.onLayoutFinished(PrintDocumentInfo.Builder(file.name).setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).build(), true)
+            }
+
+            override fun onWrite(pages: Array<out PageRange>?, dest: ParcelFileDescriptor, cancel: CancellationSignal?, cb: WriteResultCallback) {
+                runCatching {
+                    file.inputStream().use { input -> FileOutputStream(dest.fileDescriptor).use { input.copyTo(it) } }
+                }.onSuccess { cb.onWriteFinished(arrayOf(PageRange.ALL_PAGES)) }.onFailure { cb.onWriteFailed(it.message) }
+            }
+        }, PrintAttributes.Builder().build())
+    }
+}

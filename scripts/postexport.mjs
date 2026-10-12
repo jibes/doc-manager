@@ -3,12 +3,14 @@
 import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 const base = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
-const file = 'dist/index.html';
+// dist for the website; the Android app bundles its own export (OUT_DIR, base "").
+const out = process.env.OUT_DIR ?? 'dist';
+const file = `${out}/index.html`;
 const html = readFileSync(file, 'utf8')
   .replaceAll('href="/manifest.webmanifest"', `href="${base}/manifest.webmanifest"`)
   .replaceAll('href="/icons/', `href="${base}/icons/`)
   .replaceAll("register('/sw.js')", `register('${base}/sw.js')`);
 writeFileSync(file, html);
-copyFileSync(file, 'dist/404.html');
-writeFileSync('dist/.nojekyll', '');
+copyFileSync(file, `${out}/404.html`);
+writeFileSync(`${out}/.nojekyll`, '');
 console.log(`postexport: base="${base || '/'}"`);

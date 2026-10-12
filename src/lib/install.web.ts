@@ -12,7 +12,8 @@ const standalone = () =>
 const ios = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 function snapshot(): Kind {
-  if (standalone()) return null;
+  // Already an installed app (PWA, or the Android app).
+  if (standalone() || /TesselShell/.test(navigator.userAgent)) return null;
   if (w().__installPrompt) return 'prompt';
   return ios() ? 'ios' : null;
 }

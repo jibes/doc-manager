@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's canvas: Paper (light) and Dusk (dark); shown before the web app paints and behind the system bars. -->
+    <color name="canvas">#ECE8DF</color>
+    <color name="icon_background">#ECE8DF</color>
+</resources>

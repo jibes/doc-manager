@@ -5,6 +5,7 @@ import { t } from '@/i18n';
 import { fonts, radius } from '@/design/tokens';
 import { isFileHandle, type FileHandle } from '@/lib/fsa';
 import { itemsFromFiles, itemsFromHandles } from '@/lib/pick';
+import { SHELL_OPEN_EVENT, shell, takeShellFiles } from '@/lib/shell';
 import type { ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { T } from './primitives';
@@ -56,7 +57,18 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
       const items = await itemsFromHandles(files);
       if (items.length) cb.current(items);
     });
+    // Android app: files opened or shared from other apps.
+    const fromShell = () =>
+      void takeShellFiles().then((files) => {
+        const items = itemsFromFiles(files);
+        if (items.length) cb.current(items);
+      });
+    if (shell) {
+      window.addEventListener(SHELL_OPEN_EVENT, fromShell);
+      fromShell();
+    }
     return () => {
+      window.removeEventListener(SHELL_OPEN_EVENT, fromShell);
       window.removeEventListener('dragenter', enter);
       window.removeEventListener('dragleave', leave);
       window.removeEventListener('dragover', overFn);

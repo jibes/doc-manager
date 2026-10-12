@@ -1,0 +1,129 @@
+name: Android
+
+# The Android app: the web app bundled in a WebView shell (shell/android). Every push builds and
+# smoke-tests an APK on an emulator; a version tag (v1.2.3) publishes a signed release on GitHub,
+# which Obtainium (or any browser) installs and updates from.
+on:
+  push:
+    branches: [main, 'ccr-*']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.name }}
+      signed: ${{ steps.key.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Bundle the web app
+        run: npm run build:android-web
+
+      - id: version
+        name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            NAME="${GITHUB_REF#refs/tags/v}"
+            IFS=. read -r MA MI PA <<< "${NAME%%-*}"
+            CODE=$(( MA * 1000000 + MI * 1000 + PA ))
+          else
+            NAME="$(node -p "require('./package.json').version")-dev.${GITHUB_RUN_NUMBER}"
+            CODE=1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      # Updates install only over an APK signed with the same key: releases must use the secrets.
+      - id: key
+        name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/tessel.keystore"
+            echo "TESSEL_KEYSTORE_FILE=$RUNNER_TEMP/tessel.keystore" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set: this APK is signed with a throwaway debug key (testing only)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "::error::Releases need the signing secrets."; exit 1; fi
+          fi
+
+      - name: Build APK
+        working-directory: shell/android
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
+          TESSEL_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TESSEL_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TESSEL_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleRelease -Ptessel.versionName="${{ steps.version.outputs.name }}" -Ptessel.versionCode="${{ steps.version.outputs.code }}"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/out/tessel-${{ steps.version.outputs.name }}.apk"
+          ls -la "$GITHUB_WORKSPACE/out"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tessel-apk
+          path: out/*.apk
+
+  smoke:
+    needs: apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: tessel-apk
+          path: out
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: ./scripts/android-smoke.sh "$(ls out/*.apk | head -1)" android-smoke
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-smoke
+          path: android-smoke
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && needs.apk.outputs.signed == 'true'
+    needs: [apk, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: tessel-apk
+          path: out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
+          generate_release_notes: true
+          body: |
+            **Tessel ${{ needs.apk.outputs.version }} for Android.** Download the APK below and open it to install
+            (allow installs from your browser or file manager when asked). To get updates automatically,
+            add this repository in [Obtainium](https://github.com/ImranR98/Obtainium).

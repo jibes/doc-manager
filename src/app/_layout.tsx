@@ -14,6 +14,7 @@ import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { PasswordDialog } from '@/components/PasswordDialog';
+import { shell } from '@/lib/shell';
 import { usePalette } from '@/state/prefs';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -39,6 +40,8 @@ export default function RootLayout() {
     document.documentElement.style.backgroundColor = p.canvas;
     document.documentElement.style.colorScheme = p.dark ? 'dark' : 'light';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', p.canvas);
+    // Android app: system bars take the same colour.
+    shell?.theme(p.canvas, p.dark);
   }, [p]);
 
   if (!loaded && !error) return null;
