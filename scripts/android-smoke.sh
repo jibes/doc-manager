@@ -27,6 +27,15 @@ tap() {
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 
+# Taps the last match instead (a dialog's button over the screen's own).
+tap_last() {
+  local b
+  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | tail -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ')
+  [ -n "$b" ] || { echo "Nothing to tap for: $1"; return 1; }
+  set -- $b
+  adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+}
+
 # On failure: what was on screen, and why the app went away (crash, WebView renderer, system).
 on_fail() {
   adb exec-out screencap -p > "$OUT/failure.png" 2>/dev/null || true
@@ -80,6 +89,43 @@ echo "--- screen (files) ---"; screen | head -25
 tap "smoke-columns.pdf"
 wait_for "Text view"
 adb exec-out screencap -p > "$OUT/5-from-folder.png"
+
+# File operations on real storage: new folder, rename, move, delete.
+adb shell input keyevent KEYCODE_BACK
+wait_for "smoke-columns.pdf"
+tap "New folder"
+wait_for "Folder name"
+adb shell input text Smoke
+adb shell input keyevent KEYCODE_ENTER
+wait_for "Smoke\""
+adb shell ls -d /sdcard/Download/Smoke
+tap "Select"
+tap "smoke-columns.pdf"
+tap "Rename"
+wait_for "New name"
+adb shell input keyevent KEYCODE_MOVE_END
+for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
+adb shell input text smoke-renamed.pdf
+adb shell input keyevent KEYCODE_ENTER
+wait_for "smoke-renamed.pdf"
+adb shell ls /sdcard/Download/smoke-renamed.pdf
+tap "Select"
+tap "smoke-renamed.pdf"
+tap "Move"
+wait_for "Open the folder to move to"
+tap "Smoke\""
+tap "item here"
+wait_for "smoke-renamed.pdf"
+adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf
+adb exec-out screencap -p > "$OUT/6-moved.png"
+tap "Select"
+tap "smoke-renamed.pdf"
+tap "Delete"
+wait_for "Delete this item"
+tap_last "Delete"
+sleep 2
+if adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi
+echo "--- file operations passed ---"
 
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true
 echo "--- web console ---"; cat "$OUT/web-console.txt"

@@ -802,6 +802,49 @@ async function foldersDesktop() {
   await vis('folder-grid').waitFor();
   await page.waitForTimeout(400);
   check((await thumbs()) === 2 && (await vis('thumb-pending').count()) === 0, 'folders: thumbnails are cached');
+  // File operations on the folder itself.
+  const text = (x) => page.getByText(x, { exact: true }).locator('visible=true');
+  const inOpfs = (path) =>
+    page.evaluate(async (path) => {
+      let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Library');
+      const parts = path.split('/');
+      try {
+        for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d);
+        await dir.getFileHandle(parts.at(-1)).catch(() => dir.getDirectoryHandle(parts.at(-1)));
+        return true;
+      } catch {
+        return false;
+      }
+    }, path);
+  await vis('new-folder').click();
+  await page.getByTestId('ask-input').fill('Archive');
+  await page.getByTestId('ask-confirm').click();
+  await text('Archive').waitFor({ timeout: 5000 }).catch(() => {});
+  check(await inOpfs('Archive'), 'folders: a new folder is made in the folder');
+  await text('form.pdf').click({ button: 'right' });
+  await vis('act-rename').click();
+  await page.getByTestId('ask-input').fill('visit.pdf');
+  await page.getByTestId('ask-confirm').click();
+  await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await inOpfs('visit.pdf')) && !(await inOpfs('form.pdf')), 'folders: right-click selects; a document can be renamed');
+  await text('visit.pdf').click({ button: 'right' });
+  await vis('act-move').click();
+  await text('Archive').click();
+  await vis('paste').click();
+  await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await inOpfs('Archive/visit.pdf')) && !(await inOpfs('visit.pdf')), 'folders: a document moves into another folder');
+  await vis('select').click();
+  await text('visit.pdf').click();
+  await vis('act-copy').click();
+  await vis('screen-back').click();
+  await vis('paste').click();
+  await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await inOpfs('visit.pdf')) && (await inOpfs('Archive/visit.pdf')), 'folders: a document can be copied');
+  await text('Archive').click({ button: 'right' });
+  await vis('act-delete').click();
+  await page.getByTestId('ask-confirm').click();
+  await page.waitForTimeout(500);
+  check(!(await inOpfs('Archive')) && (await text('Archive').count()) === 0, 'folders: a folder can be deleted with what is in it');
   await vis('screen-back').click();
   await vis('open-settings').click();
   check((await vis('all-files').count()) === 0, 'folders: no all-files switch outside the Android app');
@@ -811,37 +854,93 @@ async function foldersDesktop() {
   await ctx.close();
 }
 
-// Files in the Android app: folders and all files access come from the app (faked here as window.TesselShell),
-// documents are served by it and edits are written back through it.
+// Files in the Android app: folders, all files access and file operations come from the app (faked here as
+// window.TesselShell over a small in-memory file tree), documents are served by it and edits written back.
 async function foldersShell() {
   const fx = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url));
   const files = { columns: fx('columns.pdf'), book: fx('book.epub'), form: fx('form.pdf') };
   const sizes = Object.fromEntries(Object.entries(files).map(([k, v]) => [k, v.length]));
   const ctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) TesselShell/1.0' });
   await ctx.addInitScript((sizes) => {
-    const tree = 'content://fake/tree/Docs';
-    const doc = (id, name, kind, key, modified) => ({ id, name, kind, size: sizes[key], modified, uri: `content://fake/doc/${key}` });
-    const docs = [doc('f1', 'columns.pdf', 'pdf', 'columns', 1.7e12), doc('f2', 'Harbour Notes.epub', 'epub', 'book', 1.71e12)];
-    const papers = [doc('f3', 'form.pdf', 'pdf', 'form', 1.72e12)];
-    const state = JSON.parse(sessionStorage.getItem('fake') ?? '{"trees":[],"all":false}');
+    // A real tree URI: its folder ID is percent-encoded, as Android gives it.
+    const tree = 'content://com.android.externalstorage.documents/tree/primary%3ADocs';
+    const fresh = {
+      trees: [],
+      all: false,
+      next: 10,
+      nodes: {
+        root: { name: 'Docs', kind: 'dir' },
+        d1: { name: 'Papers', kind: 'dir', parent: 'root' },
+        f1: { name: 'columns.pdf', kind: 'pdf', parent: 'root', key: 'columns', modified: 1.7e12 },
+        f2: { name: 'Harbour Notes.epub', kind: 'epub', parent: 'root', key: 'book', modified: 1.71e12 },
+        f3: { name: 'form.pdf', kind: 'pdf', parent: 'd1', key: 'form', modified: 1.72e12 },
+      },
+    };
+    const state = JSON.parse(sessionStorage.getItem('fake') ?? JSON.stringify(fresh));
     const save = () => sessionStorage.setItem('fake', JSON.stringify(state));
-    const log = (window.__shell = { calls: [], written: {} });
+    const nodes = state.nodes;
+    // Document URIs carry the fixture to serve and the node ID (which changes on rename and move, as on Android).
+    const uriOf = (id) => `content://fake/doc/${nodes[id].key ?? 'dir'}/${id}`;
+    const idOf = (uri) => uri.split('/').pop();
+    const entry = (id) => ({ id, name: nodes[id].name, kind: nodes[id].kind, size: sizes[nodes[id].key] ?? 0, modified: nodes[id].modified ?? 0, uri: uriOf(id) });
+    const kids = (parent) => Object.keys(nodes).filter((id) => nodes[id].parent === parent);
+    const newId = () => `n${state.next++}`;
+    const reId = (id) => {
+      const n = newId();
+      nodes[n] = nodes[id];
+      delete nodes[id];
+      for (const k of kids(id)) nodes[k].parent = n;
+      return n;
+    };
+    const copy = (id, parent) => {
+      const n = newId();
+      nodes[n] = { ...nodes[id], parent };
+      for (const k of kids(id)) copy(k, n);
+      return n;
+    };
+    const drop = (id) => {
+      for (const k of kids(id)) drop(k);
+      delete nodes[id];
+    };
+    const log = (window.__shell = { calls: [], written: {}, shared: [] });
     const chunks = {};
     const handlers = {
       folders: () => state.trees.map((uri) => ({ uri, name: 'Docs' })),
-      pickFolder: () => (state.trees = [tree], save(), { uri: tree, name: 'Docs' }),
-      forgetFolder: ({ uri }) => ((state.trees = state.trees.filter((u) => u !== uri)), save(), null),
+      pickFolder: () => ((state.trees = [tree]), { uri: tree, name: 'Docs' }),
+      forgetFolder: ({ uri }) => ((state.trees = state.trees.filter((u) => u !== uri)), null),
       access: () => ({ allFiles: state.all }),
-      requestAllFiles: () => ((state.all = true), save(), true),
-      list: ({ root, dir }) =>
-        root === 'all'
-          ? [...docs, ...papers].map((d) => ({ ...d, where: d.id === 'f3' ? 'Documents/Papers' : 'Documents' }))
-          : root === 'device'
-            ? [{ id: '/storage/emulated/0/Documents', name: 'Documents', kind: 'dir', size: 0, modified: 0 }]
-            : dir === 'd1'
-              ? papers
-              : [{ id: 'd1', name: 'Papers', kind: 'dir', size: 0, modified: 0 }, ...docs],
+      requestAllFiles: () => ((state.all = true), true),
+      list: ({ root, dir }) => {
+        if (root === 'all') return Object.keys(nodes).filter((id) => nodes[id].kind !== 'dir').map((id) => ({ ...entry(id), where: nodes[nodes[id].parent].name }));
+        if (root === 'device') return [{ id: '/storage/emulated/0/Documents', name: 'Documents', kind: 'dir', size: 0, modified: 0 }];
+        if (root !== tree) throw new Error(`No access to ${root}`);
+        return kids(dir || 'root').map(entry);
+      },
+      mkdir: ({ dir, name }) => ((nodes[newId()] = { name, kind: 'dir', parent: dir || 'root' }), null),
+      rename: ({ uri, name }) => {
+        nodes[idOf(uri)].name = name;
+        return uriOf(reId(idOf(uri)));
+      },
+      delete: ({ uris }) => (uris.forEach((u) => drop(idOf(u))), null),
+      transfer: ({ items, dir, move }) =>
+        items.map(({ uri }) => {
+          const id = idOf(uri);
+          if (!move) return { from: uri, to: uriOf(copy(id, dir || 'root')) };
+          nodes[id].parent = dir || 'root';
+          return { from: uri, to: uriOf(reId(id)) };
+        }),
+      share: ({ uris }) => ((log.shared = uris), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
+    };
+    // Documents that no longer exist (renamed, moved, deleted) are gone, as on the device.
+    const realFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = String(input?.url ?? input);
+      if (url.includes('/__shell/doc?u=')) {
+        const uri = decodeURIComponent(url.split('u=')[1]);
+        if (!nodes[idOf(uri)]) return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      return realFetch(input, init);
     };
     window.TesselShell = {
       pending: () => '[]',
@@ -859,6 +958,7 @@ async function foldersShell() {
           let detail;
           try {
             detail = { id, ok: true, value: handlers[method](JSON.parse(args)) };
+            save();
           } catch (e) {
             detail = { id, ok: false, error: String(e) };
           }
@@ -869,54 +969,126 @@ async function foldersShell() {
   }, sizes);
   const served = {};
   await ctx.route('**/__shell/doc?u=*', (r) => {
-    const key = decodeURIComponent(new URL(r.request().url()).searchParams.get('u')).split('/').pop();
+    const key = decodeURIComponent(new URL(r.request().url()).searchParams.get('u')).split('/')[4];
     served[key] = (served[key] ?? 0) + 1;
     return files[key] ? r.fulfill({ body: files[key], contentType: key === 'book' ? 'application/epub+zip' : 'application/pdf' }) : r.fulfill({ status: 404 });
   });
   const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`folders-shell: ${e.message}`));
   // Screens below the top of the stack stay mounted (hidden): look at the visible one only.
   const vis = (id) => page.getByTestId(id).locator('visible=true');
-  page.on('pageerror', (e) => errors.push(`folders-shell: ${e.message}`));
+  const text = (s) => page.getByText(s, { exact: true }).locator('visible=true');
+  const names = async () => (await vis('folder-grid').innerText()).split('\n');
+  const shownThumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length);
   await page.goto(BASE);
   await page.getByText('Every document').waitFor();
-  await page.getByTestId('files').click();
+  await vis('files').click();
   await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
-  const shown = await page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.naturalWidth > 0).length);
-  check(shown === 2, `folders-shell: the app's folder is listed with a thumbnail for the PDF and the book (${shown})`);
+  await vis('folder-grid').waitFor({ timeout: 10000 }).catch(() => {});
+  check((await vis('folder-grid').count()) === 1, 'folders-shell: a picked folder opens (its ID survives the route)');
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
+  check((await shownThumbs()) === 2, `folders-shell: the folder is listed with a thumbnail for the PDF and the book (${await shownThumbs()})`);
   await page.screenshot({ path: `${OUT}folders-shell-grid.png` });
+
   // Edits to a document opened from a folder are written back to it.
-  await vis('folder-dir').click();
-  await page.getByText('form.pdf').locator('visible=true').click();
+  await text('Papers').click();
+  await text('form.pdf').click();
   await page.getByTestId('field-name').click();
   await page.keyboard.type('Grace Hopper');
   await page.keyboard.press('Enter');
   await page.getByTestId('save').click();
   await page.getByText('Saved to “form.pdf”').waitFor({ timeout: 5000 }).catch(() => {});
-  const written = await page.evaluate(() => window.__shell.written['content://fake/doc/form'] ?? '');
+  const written = await page.evaluate(() => Object.entries(window.__shell.written).find(([u]) => u.includes('/form/'))?.[1] ?? '');
   check(written.includes('Grace Hopper'), 'folders-shell: saving writes the filled form back to the file in its folder');
-  // Reopened from the library: read from the folder again, not from a copy.
-  const before = served.form;
-  await page.goto(BASE);
-  await page.getByTestId('recent-row').first().click();
-  await page.getByTestId('reader').waitFor();
-  await page.waitForTimeout(300);
-  check(served.form > before, 'folders-shell: library documents reopen from their folder');
-  // All files access (Settings): every document on the device, and internal storage.
   await vis('back').click();
+  await vis('screen-back').click();
+
+  // New folder, then move a document into it (via select → Move → open the folder → paste).
+  await vis('new-folder').click();
+  await page.getByTestId('ask-input').fill('Archive');
+  await page.getByTestId('ask-confirm').click();
+  await text('Archive').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await names()).includes('Archive'), 'folders-shell: a new folder can be made');
+  await text('columns.pdf').click();
+  await page.getByTestId('reader').waitFor();
+  await vis('back').click();
+  await vis('select').click();
+  await text('columns.pdf').click();
+  await page.screenshot({ path: `${OUT}folders-shell-select.png` });
+  await vis('act-move').click();
+  await page.screenshot({ path: `${OUT}folders-shell-paste.png` });
+  await text('Archive').click();
+  await vis('paste').click();
+  await text('columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await names()).includes('columns.pdf'), 'folders-shell: a document moves into another folder');
+  await vis('screen-back').click();
+  await page.waitForTimeout(300);
+  check(!(await names()).includes('columns.pdf'), 'folders-shell: …and is gone from where it was');
+  // Rename it there; the library follows the file through the move and the rename.
+  await text('Archive').click();
+  await page.locator('[data-testid="folder-doc"]:visible').first().click({ button: 'right' }).catch(() => {});
+  if (!(await vis('action-bar').count())) {
+    await vis('select').click();
+    await text('columns.pdf').click();
+  }
+  await vis('act-rename').click();
+  await page.getByTestId('ask-input').fill('two columns.pdf');
+  await page.getByTestId('ask-confirm').click();
+  await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await names()).includes('two columns.pdf'), 'folders-shell: a document can be renamed');
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().waitFor();
+  const rows = await page.getByTestId('recent-row').allInnerTexts();
+  const row = page.getByTestId('recent-row').filter({ hasText: 'Orderly Notes' });
+  check(rows.some((r) => r.includes('Orderly Notes')), 'folders-shell: the library keeps a moved and renamed document');
+  await row.first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(500);
+  check((await page.getByTestId('open-error').count()) === 0 && (await page.getByTestId('page-label').innerText()).includes('2'), 'folders-shell: …and opens it from its new place');
+
+  // Copy back to the top folder, share, then delete the copy (and its library entry with it).
+  await page.goto(BASE);
+  await vis('files').click();
+  await vis('folder-root').click();
+  await text('Archive').click();
+  await vis('select').click();
+  await text('two columns.pdf').click();
+  await vis('act-share').click();
+  await page.waitForTimeout(200);
+  check((await page.evaluate(() => window.__shell.shared.length)) === 1, 'folders-shell: documents can be shared to other apps');
+  await vis('select').click();
+  await text('two columns.pdf').click();
+  await vis('act-copy').click();
+  await vis('screen-back').click();
+  await vis('paste').click();
+  await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await names()).includes('two columns.pdf'), 'folders-shell: a document can be copied to another folder');
+  await text('Archive').click();
+  await vis('select').click();
+  await text('two columns.pdf').click();
+  await vis('act-delete').click();
+  await page.getByTestId('ask-confirm').click();
+  await page.waitForTimeout(500);
+  check(!(await names()).includes('two columns.pdf'), 'folders-shell: a document can be deleted');
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().waitFor();
+  const left = await page.getByTestId('recent-row').allInnerTexts();
+  check(!left.some((r) => r.includes('Orderly Notes')), `folders-shell: a deleted document leaves the library (${left.length} left)`);
+
+  // All files access (Settings): every document on the device, and internal storage.
   await vis('files').click();
   await vis('open-settings').click();
   await vis('all-files').click();
   await page.waitForTimeout(300);
   await vis('screen-back').click();
-  await page.getByText('All documents').locator('visible=true').waitFor({ timeout: 5000 }).catch(() => {});
+  await text('All documents').waitFor({ timeout: 5000 }).catch(() => {});
   const roots = await vis('folder-root').allInnerTexts();
   check(roots.join('|').includes('All documents') && roots.join('|').includes('Internal storage'), `folders-shell: all files access adds every document and internal storage (${roots.join(', ')})`);
-  await page.getByText('All documents').locator('visible=true').click();
+  await text('All documents').click();
   await vis('folder-grid').waitFor();
   const all = await vis('folder-doc').allInnerTexts();
-  check(all.length === 3 && all[0].startsWith('form.pdf') && all[0].includes('Documents/Papers'), `folders-shell: all documents, newest first, with their folder (${all.map((x) => x.split('\n')[0])})`);
+  check(all.length === 3 && all[0].startsWith('form.pdf') && all[0].includes('Papers'), `folders-shell: all documents, newest first, with their folder (${all.map((x) => x.split('\n')[0])})`);
+  check((await vis('new-folder').count()) === 0, 'folders-shell: no new folder in “All documents”');
   await ctx.close();
 }
 

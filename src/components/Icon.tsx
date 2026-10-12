@@ -35,6 +35,9 @@ const paths = {
   device: 'M8 3.5h8A1.5 1.5 0 0 1 17.5 5v14a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5ZM11 17.5h2',
   documents: 'M8.5 3.5h6L18 7v11H8.5zM14.5 3.5V7H18M5.5 7v13.5H15',
   chevronRight: 'M9.5 6.5 15 12l-5.5 5.5',
+  copy: 'M9 9h10.5v10.5H9zM15 9V4.5H4.5V15H9',
+  move: 'M3.5 7A1.5 1.5 0 0 1 5 5.5h4.25l2 2.25H19a1.5 1.5 0 0 1 1.5 1.5v8.25A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5ZM9.5 13.5h6M13 11l2.5 2.5L13 16',
+  select: 'M5 5h14v14H5zM8.5 12l2.5 2.5 4.5-5',
 } as const;
 
 export type IconName = keyof typeof paths;

@@ -28,6 +28,9 @@ export type FolderEntry = {
   handle?: FileHandle;
 };
 
+/** A folder: a root, and a folder inside it (undefined for the root itself). */
+export type Place = { root: string; dir?: string };
+
 export type FoldersApi = {
   /** Folders can be browsed on this platform. */
   supported: boolean;
@@ -36,12 +39,24 @@ export type FoldersApi = {
   roots(showAll: boolean): Promise<FolderRoot[]>;
   /** Asks the user for a folder; null when cancelled. */
   add(): Promise<FolderRoot | null>;
-  remove(id: string): Promise<void>;
+  /** Stops browsing a folder (the folder itself stays). */
+  forget(id: string): Promise<void>;
   /** Asks for access to a locked folder again (needs a user gesture). */
   unlock(id: string): Promise<boolean>;
   list(root: string, dir?: string): Promise<FolderEntry[]>;
   /** The file's bytes. */
   read(root: string, e: FolderEntry): Promise<Blob>;
+  /** File operations: available for picked folders and internal storage, not in "All documents" (no folder to work in). */
+  canEdit(root: string): boolean;
+  /** Can send documents to other apps. */
+  canShare: boolean;
+  mkdir(root: string, dir: string | undefined, name: string): Promise<void>;
+  /** Returns the item's new URI where it has one (Android app), for documents in the library. */
+  rename(root: string, dir: string | undefined, e: FolderEntry, name: string): Promise<string | undefined>;
+  delete(root: string, dir: string | undefined, entries: FolderEntry[]): Promise<void>;
+  /** Copies or moves items into a folder; returns old → new URIs (Android app). */
+  transfer(from: Place, entries: FolderEntry[], to: Place, move: boolean): Promise<{ from: string; to: string }[]>;
+  share(root: string, entries: FolderEntry[]): Promise<void>;
   /** Whether all files access is granted. */
   allFiles(): Promise<boolean>;
   /** Shows Android's screen for it; resolves with the outcome. */

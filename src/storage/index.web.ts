@@ -1,4 +1,4 @@
-import { createStore, del, delMany, get, getMany, keys, set, values } from 'idb-keyval';
+import { createStore, del, delMany, entries, get, getMany, keys, set, values } from 'idb-keyval';
 
 import type { TextLine } from '@/engine/types';
 import { ensurePermission, isFileHandle } from '@/lib/fsa';
@@ -60,6 +60,17 @@ export const repo: LibraryRepo = {
     const w = await stored.createWritable();
     await w.write(bytes);
     await w.close();
+  },
+  async linkedTo(uris) {
+    const out = new Map<string, string[]>();
+    const inside = (uri: string, base: string) => uri === base || uri.startsWith(`${base}/`) || uri.startsWith(`${base}%2F`);
+    for (const [id, data] of await entries<string, unknown>(files)) {
+      if (isShellLink(data) && uris.some((u) => inside(data.uri, u))) out.set(data.uri, [...(out.get(data.uri) ?? []), id]);
+    }
+    return out;
+  },
+  async relink(id, uri) {
+    await set(id, { kind: 'shell', uri }, files);
   },
   async saveCover(id, cover) {
     await set(id, cover, covers);
