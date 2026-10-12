@@ -15,7 +15,8 @@ export function AskDialog() {
   if (!request) return null;
   return (
     <Animated.View entering={FadeIn.duration(160)} style={[StyleSheet.absoluteFill, styles.backdrop, { backgroundColor: p.scrim }]}>
-      <Pressable accessibilityLabel={t.cancel} style={StyleSheet.absoluteFill} onPress={() => request.resolve(null)} />
+      {/* On touch screens the tap that opened the dialog can land on the backdrop too: ignore that one. */}
+      <Pressable accessibilityLabel={t.cancel} style={StyleSheet.absoluteFill} onPress={() => Date.now() - request.at > 500 && request.resolve(null)} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.center} pointerEvents="box-none">
         <Card key={request.title} />
       </KeyboardAvoidingView>
