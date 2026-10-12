@@ -161,14 +161,14 @@ adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
 wait_for "Settings"
 tap "Settings"
 wait_for "Light sensor"
+# Connections to the light sensor before and after choosing the theme (the report doesn't name apps).
+light_users() { adb shell dumpsys sensorservice | grep -Eo 'Light sensor \(handle=[^,]+, connections=[0-9]+' | grep -Eo '[0-9]+$' | head -1; }
+before=$(light_users); before=${before:-0}
 tap "Light sensor"
-sleep 2
-adb shell dumpsys sensorservice > "$OUT/sensors.txt"
-# The app uses no other sensor, so any registration of ours is the light sensor.
-if ! grep -q "app.tessel.viewer" "$OUT/sensors.txt"; then
-  grep -iE "light|tessel" "$OUT/sensors.txt" | head -20
-  echo "The light sensor theme didn't start the light sensor"; exit 1
-fi
+sleep 3
+after=$(light_users); after=${after:-0}
+echo "light sensor connections: $before before, $after with the light sensor theme"
+if [ "$after" -le "$before" ]; then echo "The light sensor theme didn't start the light sensor"; exit 1; fi
 adb emu sensor set light 1
 sleep 5
 adb exec-out screencap -p > "$OUT/7-sensor-dark.png"
