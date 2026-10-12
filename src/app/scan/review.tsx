@@ -10,6 +10,7 @@ import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
+import { shell } from '@/lib/shell';
 import type { FilterId } from '@/scan/engine/imaging/filters';
 import { isBlurred } from '@/scan/engine/imaging/sharpness';
 import { defaultTitle } from '@/scan/export';
@@ -44,7 +45,8 @@ export default function ScanReview() {
 
   useEffect(() => void restore(), [restore]);
   useEffect(() => {
-    folders.roots(false).then(setRoots, () => setRoots([]));
+    // The app's own folder is the default ("null") choice, listed first.
+    folders.roots(false).then((r) => setRoots(r.filter((x) => x.kind !== 'app')), () => setRoots([]));
   }, []);
   // Render (and read) the pages in the background while the user looks them over, so saving is quick.
   useEffect(() => {
@@ -89,7 +91,7 @@ export default function ScanReview() {
   const addFolder = async () => {
     const root = await folders.add().catch(() => null);
     if (!root) return;
-    setRoots(await folders.roots(false).catch(() => [root]));
+    setRoots((await folders.roots(false).catch(() => [root])).filter((x) => x.kind !== 'app'));
     setPrefs({ scanTo: root.id });
     setChoosing(false);
   };
@@ -179,7 +181,7 @@ export default function ScanReview() {
                   <View style={{ flex: 1 }}>
                     <T>{t.scanSaveTo}</T>
                     <T v="caption" color={p.muted} numberOfLines={1}>
-                      {target ? target.name : t.scanLibraryOnly}
+                      {target ? target.name : shell ? t.scanAppFolder : t.scanLibraryOnly}
                     </T>
                   </View>
                   <Icon name="chevronRight" color={p.muted} size={20} />
@@ -217,7 +219,7 @@ export default function ScanReview() {
             <T v="headline" style={{ marginBottom: space.sm }}>
               {t.scanSaveTo}
             </T>
-            <Choice icon="pages" label={t.scanLibraryOnly} note={t.scanLibraryNote} on={!target} onPress={() => (setPrefs({ scanTo: null }), setChoosing(false))} />
+            <Choice icon="pages" label={shell ? t.scanAppFolder : t.scanLibraryOnly} note={shell ? t.scanAppFolderNote : t.scanLibraryNote} on={!target} onPress={() => (setPrefs({ scanTo: null }), setChoosing(false))} />
             {roots.map((r) => (
               <Choice key={r.id} icon="folder" label={r.name} on={target?.id === r.id} onPress={() => (setPrefs({ scanTo: r.id }), setChoosing(false))} />
             ))}

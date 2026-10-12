@@ -2,7 +2,7 @@ import { Asset } from 'expo-asset';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
-import type { ImportItem } from '@/state/library';
+import { SAMPLE_FILE, type ImportItem } from '@/state/library';
 import { canOpenInPlace, pickHandles, type FileHandle } from './fsa';
 
 export async function pickPdfs(): Promise<ImportItem[]> {
@@ -19,10 +19,10 @@ export async function pickPdfs(): Promise<ImportItem[]> {
 
 export async function sampleItem(): Promise<ImportItem> {
   const asset = Asset.fromModule(require('../../assets/samples/welcome-to-tessel.pdf'));
-  const name = 'welcome-to-tessel.pdf';
+  const name = SAMPLE_FILE;
   if (Platform.OS === 'web') {
     const file = await (await fetch(asset.uri)).blob();
-    return { name, size: file.size, file };
+    return { name, size: file.size, file, bundled: true };
   }
   await asset.downloadAsync();
   return { name, size: 0, uri: asset.localUri ?? asset.uri };

@@ -6,6 +6,7 @@ import { coverData, readBytes } from '@/book/platform';
 import { asPasswordError, engine } from '@/engine';
 import { askPassword, rememberPassword } from '@/state/password';
 import type { FileHandle } from '@/lib/fsa';
+import { folders } from '@/lib/folders';
 import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
@@ -14,7 +15,20 @@ import { repo, type DocRecord, type ReadingPosition } from '@/storage';
  * `handle` (Chromium) or `link` (a document in a folder, through the Android app): the file in place;
  * the library then links to it instead of keeping a copy.
  */
-export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle; link?: string };
+export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle; link?: string; bundled?: boolean };
+
+/**
+ * Android app: a document that would only be a hidden copy inside the app (a scan, a file opened from mail
+ * or another app) becomes a real file in Documents/Tessel, and the library links to it. Elsewhere, and for
+ * the bundled sample, the library keeps its copy.
+ */
+async function intoAppFolder(item: ImportItem): Promise<ImportItem> {
+  if (item.handle || item.link || !item.file || item.bundled) return item;
+  const app = await folders.appFolder().catch(() => null);
+  if (!app) return item;
+  const made = await folders.create({ root: app.id }, item.name, item.file);
+  return { ...item, name: made.name, link: made.uri };
+}
 
 /** What the library stores for an imported item: the file in place where possible, else a copy. */
 const fileData = (item: ImportItem) => item.handle ?? (item.link ? ({ kind: 'shell', uri: item.link } as const) : undefined) ?? item.file ?? item.uri!;
@@ -51,6 +65,8 @@ type LibraryState = {
 const nameOfUri = (uri: string) => decodeURIComponent(uri).split(/[/:]/).pop() ?? uri;
 
 const COVER_WIDTH = 360;
+/** The bundled guide: it stays a copy (it is part of the app, not the user's document). */
+export const SAMPLE_FILE = 'welcome-to-tessel.pdf';
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -140,6 +156,26 @@ export const useLibrary = create<LibraryState>((set, get) => {
     }, 600);
   };
 
+  /** Android app, once per document: copies kept inside the app by earlier versions move to Documents/Tessel. */
+  const moveCopies = async () => {
+    const app = await folders.appFolder().catch(() => null);
+    if (!app) return;
+    for (const d of get().docs) {
+      if (d.linked || d.fileName === SAMPLE_FILE) continue;
+      try {
+        const src = await repo.source(d.id);
+        if (src.kind !== 'bytes') continue;
+        const type = /\.epub$/i.test(d.fileName) ? 'application/epub+zip' : 'application/pdf';
+        const made = await folders.create({ root: app.id }, d.fileName, new Blob([src.bytes], { type }));
+        if (!made.uri) continue;
+        await repo.relink(d.id, made.uri);
+        patch(d.id, (x) => ({ ...x, linked: true, fileName: made.name }));
+      } catch {
+        // Tried again on the next start.
+      }
+    }
+  };
+
   return {
     docs: [],
     covers: {},
@@ -153,18 +189,21 @@ export const useLibrary = create<LibraryState>((set, get) => {
       set({ docs, loaded: true });
       const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
       set({ covers: Object.fromEntries(entries) });
+      void moveCopies();
     },
 
     async importFiles(items) {
       const added: DocRecord[] = [];
-      for (const item of items) {
+      for (let item of items) {
         const existing = get().docs.find((d) => d.fileName === item.name && d.bytes === item.size);
         if (existing) {
           added.push(existing);
           continue;
         }
-        set((s) => ({ importing: [...s.importing, item.name] }));
+        const label = item.name;
+        set((s) => ({ importing: [...s.importing, label] }));
         try {
+          item = await intoAppFolder(item);
           const source = item.file
             ? ({ kind: 'bytes', bytes: await item.file.arrayBuffer() } as const)
             : ({ kind: 'uri', uri: item.uri! } as const);
@@ -200,7 +239,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
         } catch (e) {
           set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
         } finally {
-          set((s) => ({ importing: s.importing.filter((n) => n !== item.name) }));
+          set((s) => ({ importing: s.importing.filter((n) => n !== label) }));
         }
       }
       return added;
