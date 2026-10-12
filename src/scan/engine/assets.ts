@@ -12,3 +12,22 @@ export const workerFile = (name: ScanWorker) => `scan-${name}.js`;
 export const workerModels = () => new URL('../models/', self.location.href).href;
 /** Inside a worker: ONNX Runtime's wasm, next to the worker. */
 export const workerWasm = () => new URL(ORT_WASM, self.location.href).href;
+
+/**
+ * Threads for ONNX Runtime: several when memory can be shared with other workers. Browsers allow that only
+ * on cross-origin isolated pages; Android's WebView may allow it without (its pages have no isolation
+ * headers to give). Tried for real: a shared buffer that can't be posted means one thread.
+ */
+export function threadCount(): number {
+  if (typeof SharedArrayBuffer === 'undefined') return 1;
+  try {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true });
+    const channel = new MessageChannel();
+    channel.port1.postMessage(memory.buffer);
+    channel.port1.close();
+    channel.port2.close();
+  } catch {
+    return 1;
+  }
+  return Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+}

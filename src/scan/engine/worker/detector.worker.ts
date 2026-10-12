@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web/wasm';
-import { DETECT_MODEL, workerModels, workerWasm } from '../assets';
+import { DETECT_MODEL, workerModels, threadCount, workerWasm } from '../assets';
 import { heatmapsToQuad, type Detection } from '../detect/heatmap';
 import {
   clipToFrame,
@@ -31,7 +31,7 @@ const REFINE_EDGE = 1600;
 ort.env.wasm.wasmPaths = { wasm: workerWasm() };
 // Threads need cross-origin isolation, which static hosts like GitHub Pages
 // cannot provide. Single-threaded SIMD is fast enough for a 1.6 GFLOP model.
-ort.env.wasm.numThreads = self.crossOriginIsolated ? 4 : 1;
+ort.env.wasm.numThreads = threadCount();
 
 let session: ort.InferenceSession | null = null;
 
