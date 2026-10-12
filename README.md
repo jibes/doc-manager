@@ -33,7 +33,7 @@ F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6
 
 **Files.** The folder button on the home screen browses your folders as a grid of first-page and cover thumbnails (made on the device, cached until a file changes). By default Tessel sees only folders you add through Android's folder picker. In Settings you can optionally turn on **all files access**, which adds “All documents” (every PDF and EPUB on the device, newest first) and “Internal storage”. Documents open where they are, and saving edits writes back to them. On a computer, Chrome and Edge browse folders the same way.
 
-Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release for each `v*` tag or manual run of the Android workflow with a version (signing key from the `ANDROID_*` repository secrets).
+Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release when `package.json`'s version on main is new (or for a `v*` tag, or a manual run of the Android workflow with a version) (signing key from the `ANDROID_*` repository secrets).
 
 ## Architecture
 
