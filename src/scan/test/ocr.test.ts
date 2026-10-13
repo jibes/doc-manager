@@ -158,6 +158,37 @@ describe('recognition', () => {
   });
 });
 
+describe('reading order', () => {
+  const box = (x0: number, y0: number, x1: number, y1: number, score = 1) => ({ x0, y0, x1, y1, score });
+  const order = (boxes: ReturnType<typeof box>[], names: string[]) => readingOrder(boxes).map((b) => names[boxes.indexOf(b)]);
+
+  it('reads two columns of text one after the other', () => {
+    // Left column at lines 0, 30, 60, 90; right column, in smaller type, at 15, 40, 65.
+    const boxes = [box(0, 0, 200, 20), box(0, 30, 200, 50), box(0, 60, 200, 80), box(0, 90, 200, 110), box(300, 15, 500, 29), box(300, 40, 500, 54), box(300, 65, 500, 79)];
+    expect(order(boxes, ['L1', 'L2', 'L3', 'L4', 'R1', 'R2', 'R3'])).toEqual(['L1', 'L2', 'L3', 'L4', 'R1', 'R2', 'R3']);
+  });
+
+  it("reads a form's labels and values across, row by row", () => {
+    const boxes = [box(0, 0, 100, 20), box(300, 0, 400, 20), box(0, 30, 100, 50), box(300, 31, 400, 51), box(0, 60, 100, 80), box(300, 59, 400, 79)];
+    expect(order(boxes, ['Datum', 'd', 'Zahlbar', 'z', 'Kunde', 'k'])).toEqual(['Datum', 'd', 'Zahlbar', 'z', 'Kunde', 'k']);
+  });
+
+  it('reads a table with several cells per row across', () => {
+    const names = ['Item', 'Qty', 'Price', 'Thing', '1', '20.00', 'Other', '2', '5.00'];
+    const boxes = [
+      box(0, 0, 150, 22), box(300, -3, 340, 17), box(400, -3, 460, 17),
+      box(0, 30, 150, 50), box(300, 30, 310, 50), box(400, 30, 460, 50),
+      box(0, 60, 150, 80), box(300, 60, 310, 80), box(400, 60, 450, 80),
+    ];
+    expect(order(boxes, names)).toEqual(names);
+  });
+
+  it('reads a band across the page before the columns under it', () => {
+    const boxes = [box(0, 0, 500, 20), box(0, 60, 200, 80), box(0, 90, 200, 110), box(0, 120, 200, 140), box(300, 70, 500, 84), box(300, 95, 500, 109)];
+    expect(order(boxes, ['Title', 'L1', 'L2', 'L3', 'R1', 'R2'])).toEqual(['Title', 'L1', 'L2', 'L3', 'R1', 'R2']);
+  });
+});
+
 describe('searchable PDF', () => {
   it('writes an invisible, positioned text layer with WinAnsi text', async () => {
     const pdf = buildPdf([
@@ -178,9 +209,9 @@ describe('searchable PDF', () => {
     expect(text).toContain('/BaseFont /Helvetica /Encoding /WinAnsiEncoding');
     expect(text).toContain('/Font << /F0 4 0 R >>');
     expect(text).toContain(' BT 3 Tr'); // render mode 3: invisible
-    expect(text).toContain('(Gr\\374\\337e) Tj'); // ü ß as WinAnsi octal
-    expect(text).toContain('(\\(1\\)) Tj'); // parentheses escaped
-    expect(text).toContain('(\\2005) Tj'); // € is 0x80 in WinAnsi
+    expect(text).toContain('(Gr\\374\\337e ) Tj'); // ü ß as WinAnsi octal, a space before the next word
+    expect(text).toContain('(\\(1\\) ) Tj'); // parentheses escaped
+    expect(text).toContain('(\\2005) Tj'); // € is 0x80 in WinAnsi; the line's last word has no space
     expect(text).toMatch(/\d+(\.\d+)? Tz 1 0 0 1 [\d.]+ [\d.]+ Tm/);
   });
 
@@ -202,6 +233,22 @@ describe('searchable PDF', () => {
     [
       ...text.matchAll(/\/F0 ([\d.]+) Tf ([\d.]+) Tz 1 0 0 1 [\d.]+ [\d.]+ Tm (\(.*?[^\\]\)) Tj/g),
     ].map((m) => ({ size: Number(m[1]), scale: Number(m[2]), string: m[3] }));
+
+  it('separates words on a line with real spaces, not between lines', async () => {
+    const text = await pdfText(
+      buildPdf([
+        page([
+          { text: 'Zahlbar', x0: 0, y0: 0, x1: 70, y1: 20 },
+          { text: 'bis', x0: 74, y0: 1, x1: 100, y1: 21 },
+          { text: 'Datum', x0: 0, y0: 30, x1: 50, y1: 50 },
+        ]),
+      ]),
+    );
+    expect(drawn(text).map((d) => d.string)).toEqual(['(Zahlbar )', '(bis)', '(Datum)']);
+    // The scale fits the word itself to its box, as when it is drawn alone; the space reaches past it.
+    const alone = drawn(await pdfText(buildPdf([page([{ text: 'Zahlbar', x0: 0, y0: 0, x1: 70, y1: 20 }])])));
+    expect(drawn(text)[0].scale).toBe(alone[0].scale);
+  });
 
   it('escapes backslashes in words', async () => {
     const text = await pdfText(buildPdf([page([{ text: 'a\\b', x0: 0, y0: 0, x1: 50, y1: 20 }])]));

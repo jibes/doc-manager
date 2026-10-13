@@ -1,6 +1,6 @@
 import { cropShapeUnknown } from './engine/imaging/quad';
 import { pageSizePoints, type PageSize } from './engine/pdf/paper';
-import { buildPdf, type PdfPage } from './engine/pdf/writer';
+import { buildPdf, type PdfInfo, type PdfPage } from './engine/pdf/writer';
 import { encodedPage, turnedPage, uprightPage, type PageText } from './exportCache';
 import type { Page, ScanSettings } from './types';
 
@@ -64,6 +64,7 @@ export async function exportPdf(
     onTurn,
     latest,
     signal,
+    enrich,
   }: {
     searchable?: boolean;
     /** Called while waiting for a page's text recognition. */
@@ -76,6 +77,11 @@ export async function exportPdf(
     latest?: () => Page[];
     /** Cancels the export (it rejects with an AbortError). */
     signal?: AbortSignal;
+    /**
+     * Last look at the pages before the PDF is put together (each with the page as exported, upright): may change
+     * their words, and returns details for the PDF's information.
+     */
+    enrich?: (pages: { pdf: PdfPage; page: Page }[]) => Promise<Omit<PdfInfo, 'title' | 'created'> | undefined>;
   } = {},
 ): Promise<Blob> {
   let skipped = false;
@@ -86,7 +92,7 @@ export async function exportPdf(
     onReading?.(index, total);
     return skipText ? Promise.race([text, skipText.then(() => none)]) : text;
   };
-  const one = async (page: Page, i: number, total: number): Promise<PdfPage> => {
+  const one = async (page: Page, i: number, total: number): Promise<{ pdf: PdfPage; page: Page }> => {
     const encoded = await unlessAborted(encodedPage(page, settings, { text: searchable }), signal);
     let { image, width, height } = encoded;
     const reading = encoded.text;
@@ -107,17 +113,11 @@ export async function exportPdf(
     }
     const upright = text?.turn ? turnedPage(page, text.turn) : page;
     const size = pagePaperSize(upright, width, height);
-    return {
-      pixelWidth: width,
-      pixelHeight: height,
-      width: size.width,
-      height: size.height,
-      image,
-      words: found,
-    };
+    const pdf = { pixelWidth: width, pixelHeight: height, width: size.width, height: size.height, image, words: found };
+    return { pdf, page: upright };
   };
 
-  const built = new Map<Page, PdfPage>();
+  const built = new Map<Page, { pdf: PdfPage; page: Page }>();
   let list = latest?.() ?? pages;
   for (let round = 1; ; round++) {
     if (list.length === 0) throw aborted();
@@ -134,8 +134,10 @@ export async function exportPdf(
     list = now;
   }
   onProgress(list.length, list.length);
+  const done = list.map((p) => built.get(p)!);
+  const more = enrich ? await unlessAborted(enrich(done), signal) : undefined;
   return buildPdf(
-    list.map((p) => built.get(p)!),
-    { title: typeof title === 'function' ? title() : title },
+    done.map((d) => d.pdf),
+    { ...more, title: typeof title === 'function' ? title() : title },
   );
 }

@@ -16,6 +16,7 @@ import { isBlurred } from '@/scan/engine/imaging/sharpness';
 import { defaultTitle } from '@/scan/export';
 import { prefetchExports } from '@/scan/exportCache';
 import { saveScan, type SaveProgress } from '@/scan/save';
+import { aiHost, aiReady } from '@/scan/ai';
 import { useScan } from '@/scan/session';
 import { FilterChips } from '@/scan/ui/FilterChips';
 import { PageImage } from '@/scan/ui/PageImage';
@@ -35,6 +36,9 @@ export default function ScanReview() {
   const { pages, title, loaded, restore, setTitle, applyToAll, clear, moveTo, moveMany, removeMany, updateMany } = useScan();
   const scan = usePrefs((s) => s.scan);
   const scanTo = usePrefs((s) => s.scanTo);
+  const ai = usePrefs((s) => s.ai);
+  // AI reading is offered once set up in Settings, and works on the text recognised on the device.
+  const aiOffered = aiReady(ai) && scan.ocr;
   const setPrefs = usePrefs((s) => s.set);
   const [roots, setRoots] = useState<FolderRoot[]>([]);
   const [choosing, setChoosing] = useState(false);
@@ -111,8 +115,9 @@ export default function ScanReview() {
     saving.current = controller;
     setProgress({ phase: 'render', done: 0, total: pages.length });
     try {
-      const doc = await saveScan(pages, scan, title.trim() || placeholder, target, setProgress, controller.signal);
+      const { doc, aiError } = await saveScan(pages, scan, title, placeholder, target, setProgress, controller.signal, aiOffered && ai.read ? ai : undefined);
       clear();
+      if (aiError) await ask({ title: t.scanAiFailedTitle, body: t.scanAiFailed(aiError), confirm: t.done });
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
       else router.replace('/');
     } catch (e) {
@@ -255,6 +260,20 @@ export default function ScanReview() {
                   </View>
                   <Switch value={scan.ocr} onValueChange={(ocr) => setPrefs({ scan: { ...scan, ocr } })} trackColor={{ true: p.accent }} />
                 </Pressable>
+                {aiOffered && (
+                  <>
+                    <View style={{ height: 1, backgroundColor: p.hairline }} />
+                    <Pressable testID="scan-ai" accessibilityRole="switch" accessibilityState={{ checked: ai.read }} aria-checked={ai.read} onPress={() => setPrefs({ ai: { ...ai, read: !ai.read } })} style={styles.row}>
+                      <View style={{ flex: 1 }}>
+                        <T>{t.scanAi}</T>
+                        <T v="caption" color={p.muted}>
+                          {t.scanAiNote(aiHost(ai))}
+                        </T>
+                      </View>
+                      <Switch value={ai.read} onValueChange={(read) => setPrefs({ ai: { ...ai, read } })} trackColor={{ true: p.accent }} />
+                    </Pressable>
+                  </>
+                )}
                 <View style={{ height: 1, backgroundColor: p.hairline }} />
                 <Pressable testID="scan-destination" accessibilityRole="button" onPress={() => setChoosing(true)} style={styles.row}>
                   <View style={{ flex: 1 }}>
@@ -291,7 +310,11 @@ export default function ScanReview() {
             ) : progress ? (
               <>
                 <T testID="scan-progress" v="label" color={p.inkSoft} style={{ flex: 1 }}>
-                  {progress.phase === 'read' ? t.scanReading(progress.done + 1, progress.total) : t.scanPreparing(Math.min(progress.done + 1, progress.total), progress.total)}
+                  {progress.phase === 'ai'
+                    ? t.scanAiReading(progress.total)
+                    : progress.phase === 'read'
+                      ? t.scanReading(progress.done + 1, progress.total)
+                      : t.scanPreparing(Math.min(progress.done + 1, progress.total), progress.total)}
                 </T>
                 <Button kind="quiet" label={t.cancel} onPress={() => saving.current?.abort()} />
               </>

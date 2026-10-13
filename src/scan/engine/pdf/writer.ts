@@ -30,6 +30,10 @@ export interface PdfWord {
 
 export interface PdfInfo {
   title?: string;
+  /** Who issued the document (read by AI), its kind, and words to find it by. */
+  author?: string;
+  subject?: string;
+  keywords?: string[];
   /** Defaults to now. */
   created?: Date;
 }
@@ -136,11 +140,13 @@ function textLayer(page: PdfPage): string {
   const sx = page.width / page.pixelWidth;
   const sy = page.height / page.pixelHeight;
   let ops = ' BT 3 Tr';
-  for (const word of page.words) {
+  const words = page.words;
+  words.forEach((word, i) => {
+    const next = words[i + 1];
     const natural = textWidth(word.text);
     const height = (word.y1 - word.y0) * sy;
     const width = (word.x1 - word.x0) * sx;
-    if (!(natural > 0) || !(height > 0) || !(width > 0)) continue;
+    if (!(natural > 0) || !(height > 0) || !(width > 0)) return;
     // Cap height is ~0.72 em; letters fill most of a detected line box.
     const size = height * 0.75;
     const scale = (100 * width) / (natural * size);
@@ -148,10 +154,20 @@ function textLayer(page: PdfPage): string {
     // PDF y runs upwards; put the baseline near the bottom of the box.
     const y = page.height - (word.y1 * sy - height * 0.2);
     // A NaN or Infinity would print as a name, and break the whole page.
-    if (![size, scale, x, y].every(Number.isFinite)) continue;
-    ops += ` /F0 ${num(size)} Tf ${num(scale)} Tz 1 0 0 1 ${num(x)} ${num(y)} Tm ${winAnsi(word.text)} Tj`;
-  }
+    if (![size, scale, x, y].every(Number.isFinite)) return;
+    // A real space after a word that the next one follows on the same line: readers that copy or search the
+    // text otherwise guess word breaks from positions, and run close words together ("Zahlbarbis"). The
+    // scale is the word's own, so the space only reaches past the box.
+    const text = next && sameLine(word, next) ? `${word.text} ` : word.text;
+    ops += ` /F0 ${num(size)} Tf ${num(scale)} Tz 1 0 0 1 ${num(x)} ${num(y)} Tm ${winAnsi(text)} Tj`;
+  });
   return `${ops} ET`;
+}
+
+/** The next word continues this one's line: it overlaps it vertically by half and starts to its right. */
+function sameLine(a: PdfWord, b: PdfWord): boolean {
+  const overlap = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  return overlap > 0.5 * Math.min(a.y1 - a.y0, b.y1 - b.y0) && b.x0 >= a.x0 + (a.x1 - a.x0) / 2;
 }
 
 function num(n: number): string {
@@ -197,10 +213,13 @@ export function buildPdf(pages: PdfPage[], info: PdfInfo = {}): Blob {
   const kids = pages.map((_, i) => `${pageId(i)} 0 R`).join(' ');
   object(2, `<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
   const infoParts = [
-    `/Producer ${pdfString('Doc Scanner')}`,
+    `/Producer ${pdfString('Tessel')}`,
     `/CreationDate ${pdfDate(info.created ?? new Date())}`,
   ];
   if (info.title) infoParts.push(`/Title ${pdfString(info.title)}`);
+  if (info.author) infoParts.push(`/Author ${pdfString(info.author)}`);
+  if (info.subject) infoParts.push(`/Subject ${pdfString(info.subject)}`);
+  if (info.keywords?.length) infoParts.push(`/Keywords ${pdfString(info.keywords.join(', '))}`);
   object(3, `<< ${infoParts.join(' ')} >>`);
   object(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
 

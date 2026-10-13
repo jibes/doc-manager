@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
@@ -10,6 +10,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
 import { AppearancePicker } from '@/reader/AppearancePanel';
+import { testAi, type AiApi } from '@/scan/ai';
 import { hasLightSensor } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
 
@@ -143,13 +144,105 @@ export default function Settings() {
             )}
           </>
         )}
+
+        {Platform.OS === 'web' && <AiSection />}
       </View>
       <Toast message={error} onDismiss={() => setError(null)} />
     </ScrollView>
   );
 }
 
+/** The AI model scans can be read with: API type, address, key, model, and a test. */
+function AiSection() {
+  const p = usePalette();
+  const ai = usePrefs((s) => s.ai);
+  const setPrefs = usePrefs((s) => s.set);
+  const [status, setStatus] = useState<string | null>(null);
+  const set = (patch: Partial<typeof ai>) => {
+    setStatus(null);
+    setPrefs({ ai: { ...ai, ...patch } });
+  };
+  const test = async () => {
+    setStatus(t.aiTesting);
+    try {
+      await testAi(ai);
+      setStatus(t.aiTestOk);
+    } catch (e) {
+      setStatus(t.aiTestFailed(e instanceof Error ? e.message : String(e)));
+    }
+  };
+  const field = (testID: string, label: string, value: string, onChange: (v: string) => void, placeholder?: string, secret?: boolean) => (
+    <View style={{ gap: space.xs }}>
+      <T v="caption" color={p.muted}>
+        {label}
+      </T>
+      <TextInput
+        testID={testID}
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={p.muted}
+        secureTextEntry={secret}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={[styles.input, { color: p.ink, borderColor: p.hairline, backgroundColor: p.canvas }]}
+      />
+    </View>
+  );
+  const apis: [AiApi, string][] = [
+    ['anthropic', t.aiApiAnthropic],
+    ['openai', t.aiApiOpenAi],
+  ];
+  return (
+    <>
+      <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+        {t.aiTitle}
+      </T>
+      <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline, padding: space.lg, gap: space.lg }]}>
+        <View style={{ gap: space.xs }}>
+          <T v="caption" color={p.muted}>
+            {t.aiApi}
+          </T>
+          <View accessibilityRole="radiogroup" style={[styles.segment, { backgroundColor: p.hairline }]}>
+            {apis.map(([k, label]) => (
+              <Pressable
+                key={k}
+                testID={`ai-api-${k}`}
+                accessibilityRole="radio"
+                aria-checked={ai.api === k}
+                onPress={() => set({ api: k })}
+                style={[styles.segBtn, ai.api === k && { backgroundColor: p.raised }]}
+              >
+                <T v="label" color={ai.api === k ? p.ink : p.muted}>
+                  {label}
+                </T>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        {field('ai-url', t.aiUrl, ai.url, (url) => set({ url }), t.aiUrlHint(ai.api))}
+        {field('ai-key', t.aiKey, ai.key, (key) => set({ key }), undefined, true)}
+        {field('ai-model', t.aiModel, ai.model, (model) => set({ model }), t.aiModelHint(ai.api))}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+          <Button testID="ai-test" kind="quiet" label={t.aiTest} onPress={() => void test()} />
+          {status && (
+            <T testID="ai-status" v="caption" color={p.inkSoft} style={{ flex: 1 }}>
+              {status}
+            </T>
+          )}
+        </View>
+      </View>
+      <T v="caption" color={p.muted} style={styles.note}>
+        {t.aiNote}
+      </T>
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
+  input: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: space.md, height: 40, fontFamily: fonts.sans, fontSize: 15 },
+  segment: { flexDirection: 'row', borderRadius: radius.sm + 2, padding: 3 },
+  segBtn: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   kicker: { marginBottom: space.md },
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingLeft: space.lg, paddingRight: space.sm, minHeight: 56 },
