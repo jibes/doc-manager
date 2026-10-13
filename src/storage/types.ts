@@ -25,6 +25,8 @@ export type DocRecord = {
   reading?: { since: number; finishedAt?: number };
   /** Last view used for this document: original pages or reflowed text. */
   view?: 'page' | 'text';
+  /** Pages shown with inverted colours (dark slides, night reading). */
+  invert?: boolean;
   /** Opened in place: the library points at the user's file instead of keeping a copy (Chromium, Android app folders). */
   linked?: boolean;
   /** Absent for PDFs. Books have virtual pages (`pageCount`), about a printed page each. */

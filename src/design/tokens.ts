@@ -1,6 +1,9 @@
 import { Platform, type TextStyle } from 'react-native';
 
-export type ThemeName = 'paper' | 'sepia' | 'dusk' | 'night';
+export type ThemeName = 'light' | 'dark';
+
+/** How rendered (white) PDF pages are shown: a GPU filter on web, a blend overlay on native, and the colour behind them while they load. */
+export type PageLook = { cssFilter: string; blend?: { color: string; mode: 'multiply' | 'difference' }; base: string };
 
 export type Palette = {
   name: ThemeName;
@@ -26,14 +29,16 @@ export type Palette = {
   scrim: string;
   /** Chrome glass over the reading surface. */
   glass: string;
-  /** How rendered (white) pages are tinted for this theme. */
-  page: { cssFilter: string; blend?: { color: string; mode: 'multiply' | 'difference' } };
+  /** Pages as printed: untouched in Light; in Dark slightly dimmed and warm, so a white page doesn't glare. */
+  page: PageLook;
+  /** Pages with "Invert colours" (per document): light text on a dark page. */
+  inverted: PageLook;
   shadow: string;
 };
 
 export const palettes: Record<ThemeName, Palette> = {
-  paper: {
-    name: 'paper',
+  light: {
+    name: 'light',
     dark: false,
     canvas: '#ECE8DF',
     surface: '#F7F5F0',
@@ -50,32 +55,12 @@ export const palettes: Record<ThemeName, Palette> = {
     markRing: '#D06A00',
     scrim: 'rgba(27,26,23,0.28)',
     glass: 'rgba(247,245,240,0.82)',
-    page: { cssFilter: 'none' },
+    page: { cssFilter: 'none', base: '#FFFFFF' },
+    inverted: { cssFilter: 'invert(0.92) hue-rotate(180deg)', blend: { color: '#EBEBEB', mode: 'difference' }, base: '#151515' },
     shadow: 'rgba(60,48,30,0.16)',
   },
-  sepia: {
-    name: 'sepia',
-    dark: false,
-    canvas: '#E6DAC3',
-    surface: '#F2E8D6',
-    raised: '#F8F1E4',
-    ink: '#3A2E20',
-    inkSoft: '#5A4934',
-    muted: '#927E62',
-    hairline: 'rgba(58,46,32,0.12)',
-    accent: '#8A4B24',
-    accentInk: '#FFF8EE',
-    accentSoft: 'rgba(138,75,36,0.12)',
-    mark: 'rgba(214,140,40,0.30)',
-    markActive: 'rgba(200,100,20,0.50)',
-    markRing: '#B4570E',
-    scrim: 'rgba(58,46,32,0.30)',
-    glass: 'rgba(242,232,214,0.84)',
-    page: { cssFilter: 'sepia(0.32) saturate(0.92) brightness(0.97)', blend: { color: '#F1E2C4', mode: 'multiply' } },
-    shadow: 'rgba(90,60,20,0.18)',
-  },
-  dusk: {
-    name: 'dusk',
+  dark: {
+    name: 'dark',
     dark: true,
     canvas: '#18191C',
     surface: '#222327',
@@ -92,29 +77,10 @@ export const palettes: Record<ThemeName, Palette> = {
     markRing: '#FFB238',
     scrim: 'rgba(0,0,0,0.45)',
     glass: 'rgba(34,35,39,0.80)',
-    page: { cssFilter: 'invert(0.86) hue-rotate(180deg) contrast(0.94)', blend: { color: '#DCDCDC', mode: 'difference' } },
+    // About 70 %: the page's white sits just below the app's light text, with a touch of warmth.
+    page: { cssFilter: 'brightness(0.7) sepia(0.14)', blend: { color: '#B5AE9F', mode: 'multiply' }, base: '#B5AE9F' },
+    inverted: { cssFilter: 'invert(0.86) hue-rotate(180deg) contrast(0.94)', blend: { color: '#DCDCDC', mode: 'difference' }, base: '#2B2B2B' },
     shadow: 'rgba(0,0,0,0.5)',
-  },
-  night: {
-    name: 'night',
-    dark: true,
-    canvas: '#000000',
-    surface: '#0E0E0F',
-    raised: '#1A1A1C',
-    ink: '#DAD5CA',
-    inkSoft: '#B5B0A6',
-    muted: '#77736C',
-    hairline: 'rgba(218,213,202,0.10)',
-    accent: '#A9BEE3',
-    accentInk: '#0A0C10',
-    accentSoft: 'rgba(169,190,227,0.13)',
-    mark: 'rgba(255,200,80,0.24)',
-    markActive: 'rgba(255,180,40,0.44)',
-    markRing: '#FFAA30',
-    scrim: 'rgba(0,0,0,0.6)',
-    glass: 'rgba(14,14,15,0.80)',
-    page: { cssFilter: 'invert(1) hue-rotate(180deg) brightness(0.84) contrast(0.96)', blend: { color: '#D2D2D2', mode: 'difference' } },
-    shadow: 'rgba(0,0,0,0)',
   },
 };
 

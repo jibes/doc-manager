@@ -49,10 +49,12 @@ const clampZoom = (z: number) => Math.min(4, Math.max(0.5, z));
 
 export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHandle; cache: RasterCache }) {
   const p = usePalette();
+  // "Invert colours" (per document): the pages, their thumbnails and text view figures; the app keeps its own colours.
+  const pageP = useMemo(() => (doc.invert ? { ...p, page: p.inverted } : p), [p, doc.invert]);
   const fit = usePrefs((s) => s.fit);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, toggleReading, markOpened, setView, updateFileInfo } = useLibrary();
+  const { savePosition, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo } = useLibrary();
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
   const view = doc.view ?? 'page';
   const textApiRef = useRef<ReflowApi | null>(null);
@@ -478,6 +480,10 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   };
   const menuItems: MenuItem[] = [
     ...(narrow ? [readingItem] : []),
+    // Page view only: text view always follows the appearance.
+    ...(view === 'page'
+      ? [{ key: 'invert', icon: 'invert' as const, label: doc.invert ? t.originalColours : t.invertColours, onPress: () => toggleInvert(doc.id) }]
+      : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
@@ -501,7 +507,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       {vp && view === 'text' && (
         <ReflowView
           handle={handle}
-          palette={p}
+          palette={pageP}
           width={vp.w}
           padTop={insets.top + TOP_BAR}
           padBottom={insets.bottom + BOTTOM_BAR}
@@ -541,7 +547,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
                       width={layout.widths[item]}
                       height={layout.heights[item]}
                       cache={cache}
-                      palette={p}
+                      palette={pageP}
                       hits={hitsByPage.get(item)}
                       activeHit={hits[active]}
                       onPress={onPagePress}
@@ -687,7 +693,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
 
       {panel === 'contents' && (
         <ContentsPanel
-          palette={p}
+          palette={pageP}
           outline={outline}
           page={page}
           sizes={handle.pageSizes}

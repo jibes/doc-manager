@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
@@ -14,6 +14,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
+import { ask } from '@/state/ask';
 import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
@@ -31,16 +32,10 @@ function open(doc: DocRecord) {
   ready.then(() => router.push({ pathname: '/read/[id]', params: { id: doc.id } }));
 }
 
-function confirmRemove(doc: DocRecord, remove: (id: string) => void) {
-  const msg = t.removeConfirm(doc.title);
-  if (Platform.OS === 'web') {
-    if (window.confirm(msg)) remove(doc.id);
-  } else {
-    Alert.alert(t.removeTitle, msg, [
-      { text: t.cancel, style: 'cancel' },
-      { text: t.remove, style: 'destructive', onPress: () => remove(doc.id) },
-    ]);
-  }
+/** Asks in the app's own dialog (not the browser's, which shows the page address). */
+async function confirmRemove(doc: DocRecord, remove: (id: string) => void) {
+  const answer = await ask({ title: t.removeTitle, body: t.removeConfirm(doc.title), confirm: t.remove, destructive: true });
+  if (answer !== null) remove(doc.id);
 }
 
 export default function Home() {
@@ -78,7 +73,7 @@ export default function Home() {
 
   if (!loaded) return <View style={{ flex: 1, backgroundColor: p.canvas }} />;
 
-  const removeDoc = (d: DocRecord) => confirmRemove(d, remove);
+  const removeDoc = (d: DocRecord) => void confirmRemove(d, remove);
 
   return (
     <DropZone onFiles={add}>

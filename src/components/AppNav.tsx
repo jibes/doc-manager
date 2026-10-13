@@ -90,7 +90,7 @@ export function TabBar({ current }: { current: Tab }) {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   return (
-    <View role="tablist" style={[styles.bar, { paddingBottom: insets.bottom, backgroundColor: p.glass, borderColor: p.hairline }]}>
+    <View role="tablist" style={[styles.bar, { paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
       <BarItem tab="library" current={current} />
       {scanSupported && (
         <Pressable testID="scan" accessibilityRole="button" accessibilityLabel={t.scan} onPress={() => router.push('/scan')} style={styles.barItem}>

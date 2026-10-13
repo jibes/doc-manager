@@ -154,28 +154,30 @@ sleep 2
 if adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi
 echo "--- file operations passed ---"
 
-# Light sensor theme: choosing it makes the app listen to the light sensor (the switching itself is covered
-# by the web e2e with a simulated sensor); screenshots in a dark and a bright room for the record.
+# Auto appearance: in the app it follows the light sensor (the switching itself is covered by the web e2e
+# with a simulated sensor). Light stops listening; Auto starts again. Screenshots in a dark and a bright room.
 for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
 adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
 wait_for "Settings"
 tap "Settings"
-wait_for "Light sensor"
-# Connections to the light sensor before and after choosing the theme (the report doesn't name apps).
+wait_for "Auto: follows the light around you"
+tap "Light"
+sleep 2
+# Connections to the light sensor with Light and with Auto (the report doesn't name apps).
 light_users() { { adb shell dumpsys sensorservice | grep -Eo 'Light sensor \(handle=[^,]+, connections=[0-9]+' | grep -Eo '[0-9]+$' | head -1; } || true; }
 before=$(light_users); before=${before:-0}
-tap "Light sensor"
+tap "Auto: follows the light around you"
 sleep 3
 after=$(light_users); after=${after:-0}
-echo "light sensor connections: $before before, $after with the light sensor theme"
-if [ "$after" -le "$before" ]; then echo "The light sensor theme didn't start the light sensor"; exit 1; fi
+echo "light sensor connections: $before with Light, $after with Auto"
+if [ "$after" -le "$before" ]; then echo "Auto didn't start the light sensor"; exit 1; fi
 adb emu sensor set light 1
 sleep 5
 adb exec-out screencap -p > "$OUT/7-sensor-dark.png"
 adb emu sensor set light 3000
 sleep 5
 adb exec-out screencap -p > "$OUT/8-sensor-bright.png"
-echo "--- light sensor theme: listening ---"
+echo "--- Auto appearance: listening to the light sensor ---"
 
 # Scanner: Android's camera permission, the live camera with the page detector (ONNX Runtime) loaded in the
 # WebView, a photo taken by hand (the emulated camera shows no page: cropped by hand), and a searchable PDF

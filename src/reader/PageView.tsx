@@ -13,7 +13,6 @@ import { RasterView } from './RasterView';
 import { TextLayer } from './TextLayer';
 
 /** What an untinted white page looks like under each theme, shown before the raster lands. */
-const PAGE_BASE: Record<Palette['name'], string> = { paper: '#FFFFFF', sepia: '#F3E6CC', dusk: '#2B2B2B', night: '#151515' };
 
 type Props = {
   page: number;
@@ -102,8 +101,8 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
       aria-label={t.pageN(page + 1)}
       style={[
         styles.page,
-        { width, height, backgroundColor: PAGE_BASE[palette.name] },
-        palette.name !== 'night' && elevation(palette.shadow, 1),
+        { width, height, backgroundColor: palette.page.base },
+        elevation(palette.shadow, 1),
       ]}
     >
       {!raster && (

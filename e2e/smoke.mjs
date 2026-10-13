@@ -137,13 +137,13 @@ async function run(name, viewport, isMobile) {
 
   await reveal();
   await page.getByTestId('open-appearance').click();
-  await page.getByLabel('Black').click();
+  await page.getByTestId('appearance-dark').click();
   await page.waitForTimeout(500);
-  await shot('5-night');
-  await page.getByLabel('Sepia').click();
+  await shot('5-dark');
+  await page.getByTestId('appearance-light').click();
   await page.waitForTimeout(400);
-  await shot('6-sepia');
-  await page.getByLabel('Automatic').click();
+  await shot('6-light');
+  await page.getByTestId('appearance-auto').click();
   await page.keyboard.press('Escape');
 
   // Text view: reflowed from the page you're on, footers gone, and back to the same page.
@@ -362,10 +362,11 @@ async function forms() {
   await page.getByTestId('field-agree').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="field-agree"]')?.getAttribute('aria-checked') === 'true', null, { timeout: 5000 });
   check(await page.getByTestId('save').isVisible(), 'forms: editing fields offers Save');
-  // Leaving with unsaved edits asks first (dismissed here: stay).
-  page.once('dialog', (d) => d.dismiss());
+  // Leaving with unsaved edits asks first, in the app's own dialog (cancelled here: stay).
   await page.getByTestId('back').click();
-  check((await page.getByTestId('reader').count()) === 1, 'forms: leaving with unsaved edits asks first');
+  const asked = await page.getByTestId('ask-confirm').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).last().click().catch(() => {});
+  check(asked && (await page.getByTestId('reader').count()) === 1, 'forms: leaving with unsaved edits asks first');
   await page.getByTestId('save').click();
   await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
   await page.getByTestId('back').click();
@@ -665,7 +666,7 @@ async function shellBridge() {
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
   await page.getByTestId('home-settings').locator('visible=true').click();
-  await page.getByRole('radio', { name: /Light sensor/ }).click();
+  await page.getByTestId('appearance-auto').locator('visible=true').click();
   const bg = () => page.evaluate(() => document.documentElement.style.backgroundColor);
   const lux = (v) => page.evaluate((v) => window.dispatchEvent(new CustomEvent('tessel-light', { detail: v })), v);
   await lux(800);
@@ -678,12 +679,12 @@ async function shellBridge() {
   const dark = await bg();
   await page.screenshot({ path: `${OUT}shell-settings-sensor.png` });
   const calls = (await page.evaluate(() => window.__shell.calls)).filter((c) => c[0] === 'light');
-  check(calls.some((c) => c[1] === true) && bright !== dark && /rgb\((\d{1,2}), \1, \1\)|rgb\(\d{1,2}, \d{1,2}, \d{1,2}\)/.test(dark), `shell: the light sensor theme follows the light (${bright} → ${dark})`);
+  check(calls.some((c) => c[1] === true) && bright !== dark && /rgb\((\d{1,2}), \1, \1\)|rgb\(\d{1,2}, \d{1,2}, \d{1,2}\)/.test(dark), `shell: Auto follows the light sensor (${bright} → ${dark})`);
   await lux(1);
   await page.getByRole('radio', { name: 'Light', exact: true }).click();
   await page.waitForTimeout(200);
   const off = (await page.evaluate(() => window.__shell.calls)).filter((c) => c[0] === 'light').at(-1);
-  check(off?.[1] === false, 'shell: the sensor stops when another theme is chosen');
+  check(off?.[1] === false, 'shell: the sensor stops when Light is chosen');
   await ctx.close();
 }
 
@@ -1254,6 +1255,41 @@ async function tabs() {
   }
 }
 
+// Appearance: Light / Dark / Auto; in Dark pages are dimmed, not inverted; "Invert colours" is per document.
+async function appearance() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
+  // Someone who chose Black before 1.4 gets Dark.
+  await ctx.addInitScript(() => {
+    if (!sessionStorage.getItem('seeded')) {
+      localStorage.setItem('quire.prefs', JSON.stringify({ theme: 'night' }));
+      sessionStorage.setItem('seeded', '1');
+    }
+  });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`appearance: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByTestId('home-settings').locator('visible=true').click();
+  check((await page.getByTestId('appearance-dark').locator('visible=true').getAttribute('aria-checked')) === 'true', 'appearance: an earlier Black theme becomes Dark');
+  await page.goBack();
+  await page.getByText('Open sample').click();
+  const filter = () => page.evaluate(() => [...document.querySelectorAll('canvas')].find((c) => c.offsetParent && c.width > 200)?.style.filter ?? '');
+  await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
+  const dim = await filter();
+  check(/brightness\(0\.7/.test(dim) && !/invert/.test(dim), `appearance: in Dark, pages are dimmed, not inverted (${dim})`);
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-invert').click();
+  await page.waitForTimeout(300);
+  check(/invert/.test(await filter()), 'appearance: Invert colours inverts the pages');
+  await page.reload();
+  await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
+  check(/invert/.test(await filter()), 'appearance: the document stays inverted');
+  await page.keyboard.press('v');
+  await page.getByTestId('text-view').waitFor();
+  await page.getByTestId('open-more').click();
+  check((await page.getByTestId('menu-invert').count()) === 0, 'appearance: text view follows the appearance (no Invert colours)');
+  await ctx.close();
+}
+
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
 await step('german', german);
 await step('locked', locked);
@@ -1262,6 +1298,7 @@ await step('columns', columns);
 await step('scan', scan);
 await step('scanner', scanner);
 await step('tabs', tabs);
+await step('appearance', appearance);
 await step('regressions', regressions);
 await step('books', books);
 await step('shell', shellBridge);
