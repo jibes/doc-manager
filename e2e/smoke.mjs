@@ -1367,6 +1367,93 @@ async function details() {
   await ctx.close();
 }
 
+// Search across documents: a picked folder (walked, subfolders too, hidden ones skipped) and the library are
+// indexed in the background; a hit opens at its page with the query highlighted; new details are found.
+async function searchArchive() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    // Single files come through the file chooser (a library copy), folders through the picker above.
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`search: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  await page.evaluate(
+    async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+      for (const [path, b64] of files) {
+        const parts = path.split('/');
+        let dir = root;
+        for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d, { create: true });
+        const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+      }
+    },
+    [['2026/columns.pdf', fixture('columns.pdf')], ['.stversions/old.pdf', fixture('tagged.pdf')]],
+  );
+  await vis('tab-files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  // One document in the library too.
+  await page.goto(BASE);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+  await page.goto(BASE);
+  // The search field appears once something is indexed.
+  await vis('library-search').waitFor({ timeout: 30000 });
+  const hits = async (q) => {
+    await vis('library-search').fill(q);
+    await page.waitForTimeout(600);
+    return vis('archive-hit').allInnerTexts();
+  };
+  // Indexing may still be going: wait for the folder's document to be found.
+  let found = [];
+  for (let i = 0; i < 30 && !found.length; i++) found = await hits('Orderly');
+  check(found.length === 1 && /Archive/.test(found[0]), `search: a document in a folder's subfolder is found by its text (${found.map((x) => x.split('\n')[0])})`);
+  check((await hits('Old title')).length === 0, 'search: a library document already listed above is not repeated');
+  // "Cross references" in the folder's document matches too.
+  let inLibrary = [];
+  for (let i = 0; i < 30 && !inLibrary.some((x) => x.startsWith('Old title')); i++) inLibrary = await hits('cross-reference');
+  check(inLibrary.some((x) => x.startsWith('Old title')), `search: a library document is found by its text (${inLibrary.map((x) => x.replace(/\n/g, ' / '))})`);
+  const hidden = await hits('Annual');
+  check(hidden.every((x) => !/old/.test(x)), 'search: hidden folders (.stversions) are left out');
+
+  // Opening a hit: at its page, with the query highlighted.
+  await hits('Orderly');
+  await vis('archive-hit').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('find-bar').waitFor({ timeout: 15000 }).then(
+    () => check(true, 'search: a hit opens with the query highlighted'),
+    () => check(false, 'search: a hit opens with the query highlighted'),
+  );
+
+  // New details are searchable once saved.
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').filter({ hasText: 'Old title' }).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('detail-sender').fill('Hanfsamen Handels GmbH');
+  await page.getByTestId('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+  await page.goto(BASE);
+  await vis('library-search').waitFor({ timeout: 30000 });
+  // It is in the library, so it shows there (by its sender); search the text it was indexed with plus the new sender.
+  let byDetails = [];
+  for (let i = 0; i < 20 && !byDetails.length; i++) byDetails = await hits('Hanfsamen Stream');
+  const listed = await page.getByTestId('recent-row').filter({ hasText: 'Old title' }).count();
+  check(byDetails.length === 1 || listed === 1, `search: details saved in a document are found (${byDetails.length} in all documents, ${listed} in the library)`);
+  // The same file opened from the folder isn't counted twice.
+  check((await hits('Orderly')).length === 1, 'search: a folder file opened into the library is listed once');
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -1560,6 +1647,7 @@ await step('scan', scan);
 await step('scanner', scanner);
 await step('ai', aiReading);
 await step('details', details);
+await step('search', searchArchive);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

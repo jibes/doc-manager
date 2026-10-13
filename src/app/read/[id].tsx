@@ -16,7 +16,9 @@ import { usePalette } from '@/state/prefs';
 import { FILE_ACCESS, FILE_MOVED, repo } from '@/storage';
 
 export default function ReadScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `page` and `q`: opened from a search across documents, at the match, highlighted.
+  const { id, page: pageParam, q } = useLocalSearchParams<{ id: string; page?: string; q?: string }>();
+  const at = useMemo(() => (pageParam != null && Number.isFinite(Number(pageParam)) ? { page: Number(pageParam), query: q } : undefined), [pageParam, q]);
   const p = usePalette();
   const { loaded, load } = useLibrary();
   const doc = useLibrary((s) => s.docs.find((d) => d.id === id));
@@ -89,7 +91,7 @@ export default function ReadScreen() {
   }
 
   if (state.status === 'ready' && 'book' in state) return <BookReader doc={doc} book={state.book} image={state.image} />;
-  if (state.status === 'ready' && 'handle' in state) return <Reader doc={doc} handle={state.handle} cache={state.cache} onReload={retry} />;
+  if (state.status === 'ready' && 'handle' in state) return <Reader doc={doc} handle={state.handle} cache={state.cache} onReload={retry} at={at} />;
   return null;
 }
 

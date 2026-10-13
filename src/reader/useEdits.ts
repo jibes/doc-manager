@@ -6,6 +6,7 @@ import { t } from '@/i18n';
 import { ask } from '@/state/ask';
 import type { Current } from '@/lib/fileActions';
 import { goBack } from '@/lib/nav';
+import { invalidate } from '@/archive/indexer';
 import { repo, type DocRecord } from '@/storage';
 
 /**
@@ -24,6 +25,7 @@ export function useEdits(doc: DocRecord, handle: DocHandle) {
       // Ask for write access first, while the click or key press still counts as a user gesture.
       if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
       await repo.writeFile(doc.id, await handle.save());
+      invalidate(doc.id);
       setDirty(false);
       setNotice(doc.linked ? t.savedInPlace(doc.fileName) : t.savedCopy);
     } catch {

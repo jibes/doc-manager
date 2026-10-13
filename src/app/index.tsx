@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ArchiveResults } from '@/archive/Results';
+import { useIndex } from '@/archive/indexer';
 import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { DropZone } from '@/components/DropZone';
@@ -49,6 +51,8 @@ export default function Home() {
   const [showFinished, setShowFinished] = useState(false);
   const { kind: installKind, install } = useInstall();
   const tabBar = useTabBar();
+  // Documents indexed for search across the library and folders.
+  const indexed = useIndex((s) => s.count);
 
   useEffect(() => {
     load();
@@ -146,19 +150,22 @@ export default function Home() {
                   <T v="kicker" color={p.muted}>
                     {query ? t.found(filtered.length) : t.recentCount(docs.length)}
                   </T>
-                  {docs.length > 5 && (
+                  {(docs.length > 5 || indexed > 0) && (
                     <View style={[styles.search, { backgroundColor: p.hairline }]}>
                       <Icon name="search" size={15} color={p.muted} />
                       <TextInput
+                        testID="library-search"
                         value={query}
                         onChangeText={setQuery}
-                        placeholder={t.filter}
+                        placeholder={indexed > 0 ? t.searchAll : t.filter}
                         placeholderTextColor={p.muted}
                         style={[styles.searchInput, { color: p.ink }]}
                       />
                     </View>
                   )}
                 </View>
+                {/* Searching with no match in the library: nothing to frame (matches in all documents follow). */}
+                {(filtered.length > 0 || importing.length > 0 || !query) && (
                 <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
                   {importing.map((name) => (
                     <View key={name} style={[styles.row, { borderColor: p.hairline }]}>
@@ -179,7 +186,9 @@ export default function Home() {
                     />
                   ))}
                 </View>
+                )}
               </View>
+              <ArchiveResults query={query} skip={new Set(filtered.map((d) => d.id))} />
             </>
           )}
         </View>

@@ -19,6 +19,8 @@ import { PasswordDialog } from '@/components/PasswordDialog';
 import { shell } from '@/lib/shell';
 import { useAmbientLight } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
+import { schedule, startIndexing } from '@/archive/indexer';
+import { useLibrary } from '@/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -38,6 +40,14 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync().catch(() => {});
   }, [loaded, error]);
+
+  // Search across documents: the index is built in the background, and again when the library changes.
+  useEffect(() => {
+    startIndexing();
+    return useLibrary.subscribe((s, prev) => {
+      if (s.docs.length !== prev.docs.length) schedule();
+    });
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

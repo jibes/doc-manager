@@ -27,6 +27,7 @@ import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 import { detailsOf, saveDetails } from '@/archive/details';
+import { invalidate, pauseIndexing } from '@/archive/indexer';
 import type { Details } from '@/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
 import { DetailsPanel } from './DetailsPanel';
@@ -53,7 +54,21 @@ const TOP_BAR = 56;
 const BOTTOM_BAR = 64;
 const clampZoom = (z: number) => Math.min(4, Math.max(0.5, z));
 
-export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handle: DocHandle; cache: RasterCache; onReload?: () => void }) {
+export function Reader({
+  doc,
+  handle,
+  cache,
+  onReload,
+  at,
+}: {
+  doc: DocRecord;
+  handle: DocHandle;
+  cache: RasterCache;
+  onReload?: () => void;
+  /** Open at this page, with this search (from a search across documents), instead of where it was left. */
+  at?: { page: number; query?: string };
+}) {
+  const [start] = useState(() => (at ? { page: Math.max(0, Math.min(at.page, handle.pageCount - 1)), offset: 0 } : doc.position));
   const p = usePalette();
   // "Invert colours" (per document): the pages, their thumbnails and text view figures; the app keeps its own colours.
   const pageP = useMemo(() => (doc.invert ? { ...p, page: p.inverted } : p), [p, doc.invert]);
@@ -73,6 +88,8 @@ export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handl
     return message;
   });
   const [savingDetails, setSavingDetails] = useState(false);
+  // Indexing shares the PDF engine: it waits while a document is open.
+  useEffect(() => pauseIndexing(), []);
   const writeDetails = async (details: Details) => {
     setSavingDetails(true);
     try {
@@ -80,6 +97,7 @@ export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handl
       if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
       await saveDetails(doc.id, handle, details);
       setDetails(doc.id, { title: details.title, author: details.sender });
+      invalidate(doc.id);
       afterReload = t.detailsSaved;
       // Reopened from the file, so everything (and a later save of form edits) starts from the new details.
       if (onReload) onReload();
@@ -94,7 +112,7 @@ export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handl
   const list = useRef<FlatList<number>>(null);
   const [vp, setVp] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoomRaw] = useState(1);
-  const [page, setPage] = useState(doc.position?.page ?? 0);
+  const [page, setPage] = useState(start?.page ?? 0);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
   // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
@@ -108,9 +126,9 @@ export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handl
   const [menu, setMenu] = useState(false);
 
   // Position bookkeeping lives in refs: scroll events must not re-render the tree.
-  const posRef = useRef(doc.position ?? { page: 0, offset: 0 });
+  const posRef = useRef(start ?? { page: 0, offset: 0 });
   // Where text view opens: the saved position at mount, then wherever page view was when switching.
-  const [textStart, setTextStart] = useState(() => ({ page: doc.position?.page ?? 0, y: doc.position?.offset ?? 0 }));
+  const [textStart, setTextStart] = useState(() => ({ page: start?.page ?? 0, y: start?.offset ?? 0 }));
   const switchView = useCallback(
     (next: 'page' | 'text') => {
       // Open on the page the reader sees (the indicator), keeping the in-page offset when it's the same page.
@@ -299,7 +317,7 @@ export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handl
   );
 
   // ---------- search ----------
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(at?.query ?? '');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [active, setActive] = useState(-1);
   const [searching, setSearching] = useState(false);
