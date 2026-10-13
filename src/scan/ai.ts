@@ -115,14 +115,17 @@ const trimSlash = (url: string) => url.trim().replace(/\/+$/, '');
  * Anthropic's Messages API over fetch. (The official SDK can't initialise in this app's web bundle: Metro trips
  * over a circular import in it.) Browsers may call it directly with the header below; the key is the user's own.
  */
-async function viaAnthropic(s: AiSettings, pages: AiPage[], signal?: AbortSignal): Promise<string> {
-  const images = await Promise.all(pages.map(async (p) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await base64(p.jpeg) } })));
+/** A request: images (JPEG), the instructions, and the JSON schema the reply should follow. */
+type Request = { images: Blob[]; text: string; schema: object };
+
+async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): Promise<string> {
+  const images = await Promise.all(req.images.map(async (jpeg) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await base64(jpeg) } })));
   const body = (structured: boolean) =>
     JSON.stringify({
       model: s.model.trim(),
       max_tokens: 16000,
-      messages: [{ role: 'user', content: [...images, { type: 'text', text: prompt(pages) }] }],
-      ...(structured ? { output_config: { format: { type: 'json_schema', schema: RESULT_SCHEMA } } } : {}),
+      messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
+      ...(structured ? { output_config: { format: { type: 'json_schema', schema: req.schema } } } : {}),
     });
   let last = '';
   // A model or server without structured output gets the request again without it: the prompt asks for JSON anyway.
@@ -150,15 +153,15 @@ async function viaAnthropic(s: AiSettings, pages: AiPage[], signal?: AbortSignal
   throw new Error(`The server answered ${last}`);
 }
 
-async function viaOpenAi(s: AiSettings, pages: AiPage[], signal?: AbortSignal): Promise<string> {
-  const images = await Promise.all(pages.map(async (p) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${await base64(p.jpeg)}` } })));
+async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Promise<string> {
+  const images = await Promise.all(req.images.map(async (jpeg) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${await base64(jpeg)}` } })));
   const body = (format: unknown) =>
     JSON.stringify({
       model: s.model.trim(),
-      messages: [{ role: 'user', content: [...images, { type: 'text', text: prompt(pages) }] }],
+      messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
       ...(format ? { response_format: format } : {}),
     });
-  const formats = [{ type: 'json_schema', json_schema: { name: 'scan', strict: true, schema: RESULT_SCHEMA } }, { type: 'json_object' }, null];
+  const formats = [{ type: 'json_schema', json_schema: { name: 'document', strict: true, schema: req.schema } }, { type: 'json_object' }, null];
   let last = '';
   for (const format of formats) {
     const res = await fetch(`${trimSlash(s.url)}/chat/completions`, {
@@ -181,9 +184,29 @@ async function viaOpenAi(s: AiSettings, pages: AiPage[], signal?: AbortSignal): 
 }
 
 /** Sends the pages and returns what the model read. Throws with a message for the user on any failure. */
+const send = (s: AiSettings, req: Request, signal?: AbortSignal) => (s.api === 'anthropic' ? viaAnthropic(s, req, signal) : viaOpenAi(s, req, signal));
+
 export async function readWithAi(s: AiSettings, pages: AiPage[], signal?: AbortSignal): Promise<AiResult> {
-  const text = s.api === 'anthropic' ? await viaAnthropic(s, pages, signal) : await viaOpenAi(s, pages, signal);
+  const text = await send(s, { images: pages.map((p) => p.jpeg), text: prompt(pages), schema: RESULT_SCHEMA }, signal);
   return parseResult(text, pages.length);
+}
+
+/** What a document is, from its text alone (cheaper than images): for documents that already have text. */
+export type AiDescription = Omit<AiResult, 'pages'>;
+const { pages: _pages, ...describing } = RESULT_SCHEMA.properties;
+export const DESCRIBE_SCHEMA = object(describing);
+
+/** Longest text sent: the first pages say what a document is. */
+const DESCRIBE_CHARS = 12_000;
+
+export async function describeWithAi(s: AiSettings, text: string, signal?: AbortSignal): Promise<AiDescription> {
+  const instructions = [
+    'Below is the text of a document. Describe it: title, date, sender, type and keywords. Reply with the JSON object only.',
+    '',
+    text.slice(0, DESCRIBE_CHARS) || '(no text)',
+  ].join('\n');
+  const { pages: _ignored, ...description } = parseResult(await send(s, { images: [], text: instructions, schema: DESCRIBE_SCHEMA }, signal), 0);
+  return description;
 }
 
 /** A small request (a blank page) that checks the address, key and model, for Settings. */

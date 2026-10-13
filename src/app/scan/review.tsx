@@ -23,7 +23,8 @@ import { PageImage } from '@/scan/ui/PageImage';
 import { Unsupported } from '@/scan/ui/Unsupported';
 import { useTileDrag } from '@/scan/ui/useTileDrag';
 import { ask } from '@/state/ask';
-import { usePalette, usePrefs } from '@/state/prefs';
+import { INBOX_TARGET, usePalette, usePrefs } from '@/state/prefs';
+import { inboxDir } from '@/archive/inbox';
 
 const MAX_W = 960;
 const TILE_MIN = 140;
@@ -74,7 +75,9 @@ export default function ScanReview() {
     if (pages.length) prefetchExports(pages, scan);
   }, [pages, scan]);
 
-  const target = roots.find((r) => r.id === scanTo) ?? null;
+  const archive = usePrefs((s) => s.archive);
+  const toInbox = !!archive && scanTo === INBOX_TARGET;
+  const target = toInbox ? null : (roots.find((r) => r.id === scanTo) ?? null);
   // The chips show (and set) the filter of the selected pages while selecting, else of all pages.
   const scope = selected ? picked : pages;
   const common = scope.length && scope.every((pg) => pg.spec.filter === scope[0].spec.filter) ? scope[0].spec.filter : selected ? null : scan.defaultFilter;
@@ -115,7 +118,8 @@ export default function ScanReview() {
     saving.current = controller;
     setProgress({ phase: 'render', done: 0, total: pages.length });
     try {
-      const { doc, aiError } = await saveScan(pages, scan, title, placeholder, target, setProgress, controller.signal, aiOffered && ai.read ? ai : undefined);
+      const to = toInbox ? { root: archive!, dir: await inboxDir(archive!) } : target && { root: target.id };
+      const { doc, aiError } = await saveScan(pages, scan, title, placeholder, to, setProgress, controller.signal, aiOffered && ai.read ? ai : undefined);
       clear();
       if (aiError) await ask({ title: t.scanAiFailedTitle, body: t.scanAiFailed(aiError), confirm: t.done });
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
@@ -279,7 +283,7 @@ export default function ScanReview() {
                   <View style={{ flex: 1 }}>
                     <T>{t.scanSaveTo}</T>
                     <T v="caption" color={p.muted} numberOfLines={1}>
-                      {target ? target.name : shell ? t.scanAppFolder : t.scanLibraryOnly}
+                      {toInbox ? t.scanToInbox : target ? target.name : shell ? t.scanAppFolder : t.scanLibraryOnly}
                     </T>
                   </View>
                   <Icon name="chevronRight" color={p.muted} size={20} />
@@ -335,7 +339,8 @@ export default function ScanReview() {
             <T v="headline" style={{ marginBottom: space.sm }}>
               {t.scanSaveTo}
             </T>
-            <Choice icon="pages" label={shell ? t.scanAppFolder : t.scanLibraryOnly} note={shell ? t.scanAppFolderNote : t.scanLibraryNote} on={!target} onPress={() => (setPrefs({ scanTo: null }), setChoosing(false))} />
+            <Choice icon="pages" label={shell ? t.scanAppFolder : t.scanLibraryOnly} note={shell ? t.scanAppFolderNote : t.scanLibraryNote} on={!target && !toInbox} onPress={() => (setPrefs({ scanTo: null }), setChoosing(false))} />
+            {archive && <Choice icon="inbox" label={t.scanToInbox} note={t.scanToInboxNote} on={toInbox} onPress={() => (setPrefs({ scanTo: INBOX_TARGET }), setChoosing(false))} />}
             {roots.map((r) => (
               <Choice key={r.id} icon="folder" label={r.name} on={target?.id === r.id} onPress={() => (setPrefs({ scanTo: r.id }), setChoosing(false))} />
             ))}
@@ -348,7 +353,7 @@ export default function ScanReview() {
   );
 }
 
-function Choice({ icon, label, note, on, onPress }: { icon: 'pages' | 'folder' | 'folderAdd'; label: string; note?: string; on?: boolean; onPress: () => void }) {
+function Choice({ icon, label, note, on, onPress }: { icon: 'pages' | 'folder' | 'folderAdd' | 'inbox'; label: string; note?: string; on?: boolean; onPress: () => void }) {
   const p = usePalette();
   return (
     <Pressable accessibilityRole="radio" accessibilityState={{ checked: !!on }} onPress={onPress} style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.choice, pressed && { opacity: 0.7 }, hovered && { backgroundColor: p.hairline }]}>

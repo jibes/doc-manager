@@ -1,4 +1,4 @@
-import { folders, type FolderRoot } from '@/lib/folders';
+import { folders, type Place } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import type { DocRecord } from '@/storage';
 import { aiTitle, applyReading, pageLines, readWithAi, type AiSettings } from './ai';
@@ -33,7 +33,7 @@ export async function saveScan(
   title: string,
   /** The name when neither the user nor the model gave one. */
   fallback: string,
-  to: FolderRoot | null,
+  to: Place | null,
   onProgress: (p: SaveProgress) => void,
   signal?: AbortSignal,
   ai?: AiSettings,
@@ -72,6 +72,6 @@ export async function saveScan(
   const file = pdfFilename(name());
   const { importFiles } = useLibrary.getState();
   if (!to) return { doc: (await importFiles([{ name: file, size: pdf.size, file: pdf }]))[0], aiError };
-  const entry = await folders.create({ root: to.id }, file, pdf);
+  const entry = await folders.create(to, file, pdf);
   return { doc: (await importFiles([{ name: entry.name, size: pdf.size, file: pdf, handle: entry.handle, link: entry.uri }]))[0], aiError };
 }

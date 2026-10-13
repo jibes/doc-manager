@@ -19,7 +19,7 @@ import { pickPdfs, sampleItem } from '@/lib/pick';
 import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { useLibrary, type ImportItem } from '@/state/library';
-import { usePalette } from '@/state/prefs';
+import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 
 const MAX_W = 1120;
@@ -53,6 +53,7 @@ export default function Home() {
   const tabBar = useTabBar();
   // Documents indexed for search across the library and folders.
   const indexed = useIndex((s) => s.count);
+  const inboxShown = usePrefs((s) => !!s.archive && s.inboxHere);
 
   useEffect(() => {
     load();
@@ -97,6 +98,7 @@ export default function Home() {
                 onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
               />
             )}
+            {inboxShown && <IconButton testID="open-inbox" icon="inbox" label={t.inboxTitle} onPress={() => router.push('/inbox')} />}
             {indexed > 0 && <IconButton testID="open-documents" icon="documents" label={t.documentsTitle} onPress={() => router.push('/documents')} />}
             {/* Quiet: Files is where documents are found ("Other location…" there opens the system picker too). */}
             {docs.length > 0 && <IconButton testID="add" icon="plus" label={t.addPdf} onPress={async () => add(await pickPdfs())} />}

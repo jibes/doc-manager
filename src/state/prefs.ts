@@ -8,6 +8,9 @@ import { DEFAULT_SCAN_SETTINGS, type ScanSettings } from '@/scan/types';
 import { loadPrefs, savePrefs } from '@/storage/prefs';
 import { useAmbient } from './ambient';
 
+/** `scanTo` for the archive's Inbox folder. */
+export const INBOX_TARGET = 'inbox';
+
 export type Appearance = 'light' | 'dark' | 'auto';
 export type FitMode = 'width' | 'page';
 export type TextFont = 'serif' | 'sans';
@@ -27,7 +30,7 @@ type Prefs = {
   allFiles: boolean;
   /** Scanner: filter, auto-capture, resolution, text recognition. */
   scan: ScanSettings;
-  /** Where scans are saved: a folder's id, or null for the library. */
+  /** Where scans are saved: a folder's id, the archive's inbox (INBOX_TARGET), or null for the library. */
   scanTo: string | null;
   /** Reading scans with an AI model at an address the user gives (off until set up). */
   ai: AiSettings;
@@ -35,13 +38,15 @@ type Prefs = {
   archive: string | null;
   /** Saved views while there is no archive folder (this device only). */
   views: SavedView[];
+  /** This device sorts the archive's inbox (one device should, so two never file the same document). */
+  inboxHere: boolean;
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [] };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -52,8 +57,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere });
   },
 }));
 

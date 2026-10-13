@@ -68,6 +68,7 @@ export function Button({
   onPress,
   style,
   testID,
+  disabled,
 }: {
   label: string;
   icon?: IconName;
@@ -75,6 +76,7 @@ export function Button({
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+  disabled?: boolean;
 }) {
   const p = usePalette();
   const fg = kind === 'primary' ? p.accentInk : p.ink;
@@ -82,6 +84,8 @@ export function Button({
     <Pressable
       testID={testID}
       accessibilityRole="button"
+      disabled={disabled}
+      accessibilityState={{ disabled: !!disabled }}
       onPress={() => {
         tick();
         onPress?.();
@@ -97,7 +101,7 @@ export function Button({
           backgroundColor: kind === 'primary' ? p.ink : hovered ? p.hairline : 'transparent',
           borderWidth: kind === 'quiet' ? 1 : 0,
           borderColor: p.hairline,
-          opacity: pressed ? 0.75 : 1,
+          opacity: disabled ? 0.4 : pressed ? 0.75 : 1,
           transform: [{ scale: pressed ? 0.98 : 1 }],
         },
         style,
