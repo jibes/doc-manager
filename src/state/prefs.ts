@@ -40,13 +40,17 @@ type Prefs = {
   views: SavedView[];
   /** This device sorts the archive's inbox (one device should, so two never file the same document). */
   inboxHere: boolean;
+  /** Share the reading list, positions and bookmarks with the other devices through the archive. */
+  shareReading: boolean;
+  /** This device's name for that ("<random>.json" in .tessel/state). */
+  deviceId: string;
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, shareReading: true, deviceId: '' };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -57,8 +61,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId });
   },
 }));
 

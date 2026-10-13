@@ -1069,6 +1069,11 @@ async function foldersShell() {
         }
         return dir;
       },
+      names: ({ root, path }) =>
+        Object.keys(state.texts ?? {})
+          .filter((k) => k.startsWith(`${root}|${path.join('/')}/`))
+          .map((k) => k.slice(`${root}|${path.join('/')}/`.length))
+          .filter((n) => !n.includes('/')),
       readText: ({ root, path }) => (state.texts ?? {})[`${root}|${path.join('/')}`] ?? null,
       writeText: ({ root, path, text }) => (((state.texts ??= {})[`${root}|${path.join('/')}`] = text), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
@@ -1951,6 +1956,96 @@ async function syncSafety() {
   await ctx.close();
 }
 
+// Reading shared between devices: this device's state goes to .tessel/state/<device>.json; another device's file
+// (written here by hand) brings its newer bookmarks and a document from its reading list.
+async function sharedReading() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`shared: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  await page.evaluate(async (b64) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+    const w = await (await (await root.getDirectoryHandle('Books', { create: true })).getFileHandle('notes.pdf', { create: true })).createWritable();
+    await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    await w.close();
+  }, fixture('columns.pdf'));
+  await vis('tab-files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  check((await vis('share-reading-switch').getAttribute('aria-checked')) === 'true', 'shared: reading is shared once there is an archive');
+  await vis('screen-back').click();
+
+  // A document here: on the reading list, with a bookmark.
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/scan.pdf', import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-reading').click();
+  await vis('bookmark').click();
+  await page.goto(BASE);
+  const states = () =>
+    page.evaluate(async () => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      const out = {};
+      try {
+        const dir = await (await root.getDirectoryHandle('.tessel')).getDirectoryHandle('state');
+        for await (const [name, h] of dir.entries()) out[name] = JSON.parse(await (await h.getFile()).text());
+      } catch {}
+      return out;
+    });
+  const nudge = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  let mine = null;
+  for (let i = 0; i < 30 && !mine; i++) {
+    await nudge();
+    await page.waitForTimeout(500);
+    mine = Object.entries(await states()).find(([n]) => n !== 'other.json');
+  }
+  const [mineName, mineState] = mine ?? ['', { docs: {} }];
+  const [key, entry] = Object.entries(mineState.docs)[0] ?? [];
+  check(!!entry?.reading?.v?.since && entry?.bookmarks?.v?.length === 1, `shared: this device's reading is written to the archive (${mineName})`);
+
+  // Another device: the bookmark removed later there, and a document of the archive on its reading list.
+  const later = Date.now() + 60_000;
+  await page.evaluate(
+    async ({ key, later, b64 }) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).subarray(0, 65536);
+      let end = bytes.length;
+      for (let i = 0; i + 5 <= bytes.length; i++) if (String.fromCharCode(...bytes.subarray(i, i + 5)) === '%%EOF') { end = i + 5; break; }
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.slice(0, end)));
+      const notes = Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
+      const state = { version: 1, device: 'other', docs: { [key]: { title: 'Scan', bookmarks: { v: [], at: later } }, [notes]: { title: 'Notes', reading: { v: { since: later }, at: later }, position: { v: { page: 0, offset: 0.4 }, at: later } } } };
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      const dir = await (await root.getDirectoryHandle('.tessel')).getDirectoryHandle('state');
+      const w = await (await dir.getFileHandle('other.json', { create: true })).createWritable();
+      await w.write(JSON.stringify(state));
+      await w.close();
+    },
+    { key, later, b64: fixture('columns.pdf') },
+  );
+  let listed = '';
+  for (let i = 0; i < 60 && !/Orderly Notes/.test(listed); i++) {
+    await nudge();
+    await page.waitForTimeout(1000);
+    listed = await vis('reading-list').innerText().catch(() => '');
+  }
+  check(/Orderly Notes/.test(listed), 'shared: a document on another device’s reading list comes onto this one’s, from the archive');
+  const after = (await states())[mineName]?.docs?.[key];
+  check(after?.bookmarks?.v?.length === 0 && after?.bookmarks?.at === later, 'shared: a newer change from another device wins (bookmark removed there)');
+  await vis('home-settings').click();
+  check(/Shared with 1 other device/.test(await vis('share-reading-note').innerText()), 'shared: Settings says with how many devices');
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -2149,6 +2244,7 @@ await step('documents', documentsScreen);
 await step('inbox', inbox);
 await step('searchable', searchable);
 await step('sync', syncSafety);
+await step('shared', sharedReading);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

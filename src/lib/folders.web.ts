@@ -61,6 +61,7 @@ const shellFolders: FoldersApi = {
     }),
   share: (_root, list) => shellRequest('share', { uris: list.map((e) => e.uri) }),
   dirAt: async (root, path, create) => (path.length ? shellRequest<string | null>('dirAt', { root, path, create }) : undefined),
+  listNames: (root, path) => shellRequest<string[]>('names', { root, path }),
   readText: (root, path) => shellRequest<string | null>('readText', { root, path }),
   writeText: (root, path, text) => shellRequest('writeText', { root, path, text }),
   allFiles: async () => (await shellAccess()).allFiles,
@@ -222,6 +223,17 @@ const browserFolders: FoldersApi = {
     } catch (e) {
       if (create) throw e;
       return null;
+    }
+  },
+  async listNames(root, path) {
+    try {
+      let dir = await folderHandle(root);
+      for (const part of path) dir = await dir.getDirectoryHandle(part);
+      const out: string[] = [];
+      for await (const [name, h] of dir.entries()) if (h.kind === 'file') out.push(name);
+      return out;
+    } catch {
+      return [];
     }
   },
   async readText(root, path) {

@@ -256,6 +256,22 @@ class Folders(private val context: Context) {
         }
     }
 
+    /** The names of the files (not folders) in the folder at `path` below a place; none when it doesn't exist. */
+    fun names(root: String, path: List<String>): JSONArray {
+        val out = JSONArray()
+        val id = dirAt(root, path, false) ?: return out
+        if (root == "device" || root == "app") {
+            File(id).listFiles()?.filter { it.isFile }?.forEach { out.put(it.name) }
+            return out
+        }
+        val tree = tree(root)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)
+        resolver.query(children, arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE), null, null, null)?.use { c ->
+            while (c.moveToNext()) if (c.getString(1) != Document.MIME_TYPE_DIR) out.put(c.getString(0))
+        }
+        return out
+    }
+
     /**
      * The folder at `path` below a place, made where missing when `create`: its ID as list() and create() take it
      * (a document ID in a picked folder, a path on the device), or null.
