@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { aiTitle, applyReading, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
+import { aiTitle, anthropicReply, applyReading, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -60,5 +60,29 @@ describe('AI reading', () => {
     expect(aiTitle(r)).toBe('2026-10-02 Caritas Zürich – Rechnung 61106');
     expect(aiTitle({ ...r, title: 'Caritas Zürich Rechnung' })).toBe('2026-10-02 Caritas Zürich Rechnung');
     expect(aiTitle({ ...r, date: '', sender: '', title: '' })).toBe('Rechnung');
+  });
+});
+
+describe('replies', () => {
+  const sse = (events: object[]) => events.map((e) => `event: x\ndata: ${JSON.stringify(e)}\n\n`).join('');
+
+  it('read an Anthropic stream, or a whole message', () => {
+    const stream = sse([
+      { type: 'message_start' },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: '{"title":' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: '"A"}' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    ]);
+    expect(anthropicReply(stream)).toBe('{"title":"A"}');
+    expect(anthropicReply(JSON.stringify({ content: [{ type: 'text', text: 'whole' }] }))).toBe('whole');
+    expect(() => anthropicReply(sse([{ type: 'error', error: { message: 'Overloaded' } }]))).toThrow('Overloaded');
+    expect(() => anthropicReply(sse([{ type: 'message_delta', delta: { stop_reason: 'refusal' } }]))).toThrow(/declined/);
+  });
+
+  it('read a Chat Completions stream, or a whole reply', () => {
+    const stream = `${sse([{ choices: [{ delta: { content: 'he' } }] }, { choices: [{ delta: { content: 'llo' } }] }])}data: [DONE]\n\n`;
+    expect(openAiReply(stream)).toBe('hello');
+    expect(openAiReply(JSON.stringify({ choices: [{ message: { content: 'whole' } }] }))).toBe('whole');
+    expect(() => openAiReply(sse([{ choices: [{ delta: { refusal: 'no' } }] }]))).toThrow(/declined/);
   });
 });

@@ -3,10 +3,12 @@ import { create } from 'zustand';
 import { engine } from '@/engine';
 import { folders } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
+import type { PageWords } from '@/engine/types';
 import { describeWithAi, type AiSettings } from '@/scan/ai';
 import { usePrefs } from '@/state/prefs';
 import { schedule } from './indexer';
-import { infoFor, parseTags, readTrailer, withInfo, type Details } from './pdfInfo';
+import { infoFor, parseTags, readTrailer, real, withInfo, type Details } from './pdfInfo';
+import { makeSearchable, pagesWithoutText, readPages, textOf } from './searchable';
 import { applyRules, DEFAULT_RULES, findDate, parseRules, pathFor, serializeRules, type Rules } from './rules';
 
 /**
@@ -72,13 +74,17 @@ export async function changeRules(archive: string, edit: (r: Rules) => Rules): P
 
 /* ------------------------------------------------------------- sorting ---- */
 
-/** A document in the inbox, read: its text, the details it has (with a date found in it), and those proposed. */
-export type Proposal = { entry: FolderEntry; text: string; own: Details; details: Details };
+/**
+ * A document in the inbox, read: its text, the details it has (with a date found in it), and those proposed.
+ * `read`: an image-only document's first page as recognised on the device (it gets a text layer when filed).
+ */
+export type Proposal = { entry: FolderEntry; text: string; own: Details; details: Details; read?: PageWords[] };
 
 /** The proposal again with (changed) rules. */
 export const withRules = (p: Proposal, rules: Rules): Proposal => ({ ...p, details: applyRules(`${p.text}\n${p.entry.name}`, p.own, rules.rules) });
 
 const stem = (name: string) => name.replace(/\.pdf$/i, '');
+
 
 export async function propose(archive: string, entry: FolderEntry, rules: Rules): Promise<Proposal> {
   const bytes = await (await folders.read(archive, entry)).arrayBuffer();
@@ -90,9 +96,21 @@ export async function propose(archive: string, entry: FolderEntry, rules: Rules)
       const runs = await handle.pageText(p).catch(() => []);
       pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join(''));
     }
-    const text = pages.join('\n');
-    const own: Details = { title: m.title || stem(entry.name), sender: m.author ?? '', type: m.subject ?? '', tags: parseTags(m.keywords), date: m.date || findDate(text) };
-    return withRules({ entry, text, own, details: own }, rules);
+    let text = pages.join('\n');
+    // No text of its own: its first page is read on the device, for the rules and the date.
+    let read: PageWords[] | undefined;
+    if ((await pagesWithoutText(handle, 1)).length) {
+      read = await readPages(handle, [0]).catch(() => []);
+      text = textOf(read);
+    }
+    const own: Details = {
+      title: real(m.title) || stem(entry.name),
+      sender: real(m.author),
+      type: real(m.subject),
+      tags: parseTags(m.keywords),
+      date: m.date || findDate(text),
+    };
+    return withRules({ entry, text, own, details: own, read }, rules);
   } finally {
     handle.close();
   }
@@ -121,15 +139,27 @@ export function destination(details: Details, entry: FolderEntry, rules: Rules, 
  * Files a document: its details written into it (left as they are in a protected PDF), saved where the
  * template says (a free name if one is taken), then removed from the inbox. Returns the filed file.
  */
-export async function fileDocument(archive: string, inbox: string | undefined, p: Proposal, details: Details, path: string[]): Promise<FolderEntry> {
-  const bytes = new Uint8Array(await (await folders.read(archive, p.entry)).arrayBuffer());
-  let out: Uint8Array<ArrayBuffer> = bytes;
+export async function fileDocument(
+  archive: string,
+  inbox: string | undefined,
+  p: Proposal,
+  details: Details,
+  path: string[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<FolderEntry> {
+  let bytes = new Uint8Array(await (await folders.read(archive, p.entry)).arrayBuffer());
   if (!readTrailer(bytes).encrypted) {
     const handle = await engine.open({ kind: 'bytes', bytes: bytes.slice().buffer });
-    const other = handle.metadata.other;
-    handle.close();
-    out = withInfo(bytes, infoFor(details, other));
+    try {
+      // Pages without text get it (read on the device), so the filed document can be searched.
+      const searchable = await makeSearchable(handle, onProgress, undefined, p.read);
+      if (typeof searchable !== 'string') bytes = new Uint8Array(searchable);
+      bytes = withInfo(bytes, infoFor(details, handle.metadata.other));
+    } finally {
+      handle.close();
+    }
   }
+  const out: Uint8Array<ArrayBuffer> = bytes;
   const dir = await ensureDir(archive, path.slice(0, -1));
   const filed = await folders.create({ root: archive, dir }, path[path.length - 1], new Blob([out], { type: 'application/pdf' }));
   // Only once the copy is safely written.

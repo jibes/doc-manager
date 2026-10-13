@@ -399,12 +399,14 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
     }
   };
 
-  // Normalised frame points → stage pixels, under object-fit: cover.
+  // The whole camera picture, as large as fits, at the bottom of the stage (a black bar above it, not a crop):
+  // every pixel the camera sees is shown, so what is framed is what is taken.
   const { width: vw, height: vh } = videoSize;
   const { width: cw, height: ch } = stageSize;
-  const scale = vw && vh && cw && ch ? Math.max(cw / vw, ch / vh) : 0;
-  const polygon =
-    shown && scale ? shown.map(([x, y]) => `${(cw - vw * scale) / 2 + x * vw * scale},${(ch - vh * scale) / 2 + y * vh * scale}`).join(' ') : '';
+  const scale = vw && vh && cw && ch ? Math.min(cw / vw, ch / vh) : 0;
+  const frame = scale ? { left: (cw - vw * scale) / 2, top: ch - vh * scale, width: vw * scale, height: vh * scale } : null;
+  // Normalised frame points → stage pixels.
+  const polygon = shown && frame ? shown.map(([x, y]) => `${frame.left + x * frame.width},${frame.top + y * frame.height}`).join(' ') : '';
 
   const status =
     detectorState === 'loading'
@@ -432,21 +434,27 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
 
   return (
     <View style={styles.screen}>
-      <div ref={stage} style={{ position: 'relative', flex: 1, overflow: 'hidden', borderBottomLeftRadius: 24, borderBottomRightRadius: 24 }}>
-        <video
-          ref={video}
-          // The picture is decoration for screen readers (the status line says what matters), and Android's
-          // WebView would otherwise announce "Unable to play media" and draw its grey play-button poster.
-          aria-hidden
-          poster={BLANK}
-          disablePictureInPicture
-          playsInline
-          muted
-          autoPlay
-          onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
-          onResize={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-        />
+      <div ref={stage} style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
+        <div
+          data-testid="camera-frame"
+          style={{ position: 'absolute', overflow: 'hidden', borderRadius: 24, ...(frame ?? { left: 0, top: 0, width: '100%', height: '100%' }) }}
+        >
+          <video
+            ref={video}
+            // The picture is decoration for screen readers (the status line says what matters), and Android's
+            // WebView would otherwise announce "Unable to play media" and draw its grey play-button poster.
+            aria-hidden
+            poster={BLANK}
+            disablePictureInPicture
+            playsInline
+            muted
+            autoPlay
+            onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
+            onResize={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+          {flash && <div style={{ position: 'absolute', inset: 0, background: '#fff', opacity: 0.85 }} />}
+        </div>
         <svg aria-hidden viewBox={`0 0 ${cw || 1} ${ch || 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
           {polygon && (
             <polygon
@@ -458,7 +466,6 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
             />
           )}
         </svg>
-        {flash && <div style={{ position: 'absolute', inset: 0, background: '#fff', opacity: 0.85 }} />}
         {cameraError ? (
           <View style={styles.notice}>
             <T v="body" color="#fff" style={{ textAlign: 'center' }}>

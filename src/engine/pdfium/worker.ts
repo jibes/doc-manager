@@ -702,6 +702,96 @@ function save(docId: number): ArrayBuffer {
   }
 }
 
+// ---------- recognised text ----------
+
+const FPDF_TEXTRENDERMODE_INVISIBLE = 3;
+/** FPDF_SaveAsCopy flag: append the changes, keeping the file's bytes as they were. */
+const FPDF_INCREMENTAL = 1;
+
+/** The next word continues this one's line: overlaps it vertically by half and starts to its right. */
+function sameLine(a: NormRect, b: NormRect): boolean {
+  const overlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return overlap > 0.5 * Math.min(a.h, b.h) && b.x >= a.x + a.w / 2;
+}
+
+/**
+ * Invisible text over each word recognised on a page (as a scanner's text layer), so the page can be searched,
+ * selected and copied. Boxes are normalized to the page as shown (rotation applied); each word is stretched to
+ * its box along the line's direction, whatever the page's rotation. Returns the file with the text appended as
+ * an incremental update.
+ */
+function addTextLayer(docId: number, pages: { page: number; turn?: number; words: { text: string; box: NormRect }[] }[]): ArrayBuffer {
+  const d = getDoc(docId);
+  for (const { page: pageIndex, words, turn = 0 } of pages) {
+    if (!words.length) continue;
+    const page = M.FPDF_LoadPage(d.ptr, pageIndex);
+    if (!page) continue;
+    try {
+      const { toPage: shownToPage } = pageTransform(d, pageIndex, page);
+      // A point of the upright text → the page as shown → page space.
+      const toPage = (u: number, v: number) => {
+        const [x, y] = [
+          [u, v],
+          [v, 1 - u],
+          [1 - u, 1 - v],
+          [1 - v, u],
+        ][((turn % 4) + 4) % 4];
+        return shownToPage(x, y);
+      };
+      const { width, height } = d.pageSizes[pageIndex];
+      const ptH = turn % 2 ? width : height;
+      words.forEach((w, i) => {
+        const next = words[i + 1];
+        const text = next && sameLine(w.box, next.box) ? `${w.text} ` : w.text;
+        const { x, y, w: bw, h: bh } = w.box;
+        // Baseline near the bottom of the box; letters fill most of a detected line's height.
+        const base = y + bh * 0.8;
+        const [x0, y0] = toPage(x, base);
+        const [x1, y1] = toPage(x + bw, base);
+        const size = bh * ptH * 0.75;
+        const length = Math.hypot(x1 - x0, y1 - y0);
+        if (!(size > 0.5) || !(length > 0) || ![x0, y0, x1, y1].every(Number.isFinite)) return;
+        const obj = M.FPDFPageObj_NewTextObj(d.ptr, 'Helvetica', size);
+        if (!obj) return;
+        const n = (text.length + 1) * 2;
+        const set = withScratch(n, (p) => {
+          M.pdfium.stringToUTF16(text, p, n);
+          return M.FPDFText_SetText(obj, p);
+        });
+        M.FPDFTextObj_SetTextRenderMode(obj, FPDF_TEXTRENDERMODE_INVISIBLE);
+        // Its natural width at this size (the trailing space excluded), to stretch it onto the box.
+        const natural = withScratch(16, (b) => {
+          if (!M.FPDFPageObj_GetBounds(obj, b, b + 4, b + 8, b + 12)) return 0;
+          return M.pdfium.getValue(b + 8, 'float') - M.pdfium.getValue(b, 'float');
+        });
+        if (!set || !(natural > 0)) {
+          M.FPDFPageObj_Destroy(obj);
+          return;
+        }
+        const ux = (x1 - x0) / length;
+        const uy = (y1 - y0) / length;
+        const scale = length / natural;
+        M.FPDFPageObj_Transform(obj, ux * scale, uy * scale, -uy, ux, x0, y0);
+        M.FPDFPage_InsertObject(page, obj);
+      });
+      if (!M.FPDFPage_GenerateContent(page)) throw new Error('Could not write the text into the page');
+    } finally {
+      M.FPDF_ClosePage(page);
+    }
+  }
+  const w = M.PDFiumExt_OpenFileWriter();
+  try {
+    if (!M.FPDF_SaveAsCopy(d.ptr, w, FPDF_INCREMENTAL)) throw new Error('Could not save the PDF');
+    const n = M.PDFiumExt_GetFileWriterSize(w);
+    return withScratch(n, (p) => {
+      M.PDFiumExt_GetFileWriterData(w, p, n);
+      return heap().slice(p, p + n).buffer;
+    });
+  } finally {
+    M.PDFiumExt_CloseFileWriter(w);
+  }
+}
+
 // ---------- annotations ----------
 
 const hex = (n: number) => n.toString(16).padStart(2, '0');
@@ -1013,6 +1103,10 @@ async function run(job: Job) {
       const d = getDoc(job.doc);
       // Unedited: the bytes it was opened from, so an update appended to them changes nothing else.
       const bytes = d.dirty ? save(job.doc) : heap().slice(d.buf, d.buf + d.len).buffer;
+      return post({ id: job.id, ok: true, result: bytes }, [bytes]);
+    }
+    case 'addText': {
+      const bytes = addTextLayer(job.doc, job.pages);
       return post({ id: job.id, ok: true, result: bytes }, [bytes]);
     }
     case 'save': {

@@ -128,7 +128,8 @@ async function run(name, viewport, isMobile) {
 
     // Zooming (trackpad pinch: ctrl+wheel) keeps the spot under the cursor where it was (once the page is wider
     // than the window: until then it stays centred). ⌘+ zooms about the middle first.
-    for (let i = 0; i < 4; i++) await page.keyboard.press('Control+=');
+    for (let i = 0; i < 4; i++) await page.getByLabel(/^Zoom in/).first().click();
+    await page.getByText('207%').first().waitFor({ timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(600);
     const spot = { x: 900, y: 420 };
     const under = () =>
@@ -1049,6 +1050,12 @@ async function foldersShell() {
           return { from: uri, to: uriOf(reId(id)) };
         }),
       share: ({ uris }) => ((log.shared = uris), null),
+      // AI requests go through the app (the WebView's own host isn't an origin a server's CORS knows).
+      http: ({ url, headers, body }) => {
+        log.http = { url, headers, body: JSON.parse(body) };
+        const text = JSON.stringify({ title: 'T', date: '', sender: '', type: '', keywords: [], pages: [] });
+        return { status: 200, body: JSON.stringify({ content: [{ type: 'text', text }], stop_reason: 'end_turn' }) };
+      },
       readText: ({ root, path }) => (state.texts ?? {})[`${root}|${path.join('/')}`] ?? null,
       writeText: ({ root, path, text }) => (((state.texts ??= {})[`${root}|${path.join('/')}`] = text), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
@@ -1269,6 +1276,22 @@ async function foldersShell() {
   await vis('tab-files').click();
   const first = await vis('folder-root').first().innerText();
   check(first.startsWith('Tessel'), `folders-shell: the Tessel folder is the first place in Files (${first.split('\n')[0]})`);
+
+  // AI reading in the app: the request is made by the app, not the WebView (no CORS, no "Failed to fetch").
+  let direct = 0;
+  await page.route('https://ai.test/**', (route) => (direct++, route.abort()));
+  await vis('home-settings').click();
+  await vis('ai-api-anthropic').click();
+  await vis('ai-url').fill('https://ai.test/v1');
+  await vis('ai-key').fill('sk-test');
+  await vis('ai-model').fill('test-model');
+  await vis('ai-test').click();
+  const works = await page.getByText('It works.').waitFor({ timeout: 15000 }).then(() => true, () => false);
+  const http = await page.evaluate(() => window.__shell.http);
+  check(
+    works && direct === 0 && http?.url === 'https://ai.test/v1/messages' && http.headers['x-api-key'] === 'sk-test' && http.body.model === 'test-model',
+    `folders-shell: AI requests go through the app (${http?.url}, ${direct} from the page)`,
+  );
   await ctx.close();
 }
 
@@ -1294,6 +1317,19 @@ async function aiReading() {
     if (failing) return route.fulfill({ status: 500, headers: cors, body: 'down for maintenance' });
     const text = JSON.stringify(reply);
     if (req.url().endsWith('/v1/messages')) {
+      // Asked to stream, it streams (the text in two parts), as the real API does.
+      if (body.stream) {
+        const half = Math.floor(text.length / 2);
+        const events = [
+          { type: 'message_start', message: { id: 'msg_1', role: 'assistant', content: [] } },
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: text.slice(0, half) } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: text.slice(half) } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+          { type: 'message_stop' },
+        ];
+        return route.fulfill({ headers: { ...cors, 'content-type': 'text/event-stream' }, body: events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join('') });
+      }
       return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }) });
     }
     return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: text } }] }) });
@@ -1309,7 +1345,7 @@ async function aiReading() {
   await vis('ai-test').click();
   await page.getByText('It works.').waitFor({ timeout: 15000 }).then(() => check(true, 'ai: Test reaches the model'), () => check(false, 'ai: Test reaches the model'));
   const probe = sent.at(-1);
-  check(probe?.headers['x-api-key'] === 'sk-test' && probe?.body.model === 'test-model' && probe?.body.output_config?.format?.type === 'json_schema', 'ai: Anthropic request carries key, model and the JSON schema');
+  check(probe?.headers['x-api-key'] === 'sk-test' && probe?.body.model === 'test-model' && probe?.body.output_config?.format?.type === 'json_schema' && probe?.body.stream === true, 'ai: Anthropic request carries key, model and the JSON schema, and asks for a stream');
 
   // A scan read with AI: no title typed, so the model's names the file.
   await page.goto(BASE);
@@ -1698,6 +1734,76 @@ async function inbox() {
   await ctx.close();
 }
 
+// Image-only PDFs made searchable: from the reader, and when filed from the inbox.
+async function searchable() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`searchable: ${e.message}`));
+
+  await openFixture(page, 'scan.pdf');
+  await page.waitForTimeout(800);
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-searchable').click();
+  await page.getByText('Text added: the document can now be searched, selected and copied.').waitFor({ timeout: 180000 });
+  await page.waitForSelector('[data-testid=text-layer] span', { timeout: 15000 });
+  const text = await page.$$eval('[data-testid=text-layer] span', (s) => s.map((x) => x.textContent).join(' '));
+  check(/quick brown fox/.test(text) && /Second Page/.test(text), `searchable: a scanned PDF gets its text, on every page (${text.slice(0, 60)}…)`);
+  await page.getByTestId('open-more').click();
+  check((await page.getByTestId('menu-searchable').count()) === 0, 'searchable: and is no longer offered for it');
+  await page.keyboard.press('Escape');
+
+  // The inbox reads an image-only document's first page for its details, and files it searchable.
+  const b64 = readFileSync(new URL('./fixtures/scan.pdf', import.meta.url)).toString('base64');
+  await page.evaluate(async (data) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+    const inbox = await root.getDirectoryHandle('Inbox', { create: true });
+    const w = await (await inbox.getFileHandle('letter.pdf', { create: true })).createWritable();
+    await w.write(Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+    await w.close();
+  }, b64);
+  await page.goto(BASE);
+  await vis('tab-files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('inbox-here-switch').click();
+  await vis('screen-back').click();
+  await vis('open-inbox').click();
+  const card = page.getByTestId('inbox-item').filter({ hasText: 'letter.pdf' });
+  await card.getByTestId('inbox-no-text').waitFor({ timeout: 120000 });
+  check(true, 'inbox: an image-only document is marked to be made searchable');
+  // A rule matches words that are only in the picture.
+  await vis('rule-match').fill('quick brown fox');
+  await vis('rule-sender').fill('Fox Ltd');
+  await vis('rule-add').click();
+  await page.waitForTimeout(300);
+  check(
+    (await card.getByTestId('inbox-sender').inputValue()) === 'Fox Ltd' && (await card.getByTestId('inbox-title').inputValue()) === 'letter',
+    'inbox: rules match its recognised text (a tool’s placeholder details count as none)',
+  );
+  await card.getByTestId('inbox-file').click();
+  await page.getByText(/^Filed: /).waitFor({ timeout: 180000 });
+  // Found by the words in its picture, in all documents.
+  await page.goto(BASE);
+  await vis('library-search').waitFor({ timeout: 30000 });
+  let hits = [];
+  for (let i = 0; i < 40 && !hits.some((h) => /Fox Ltd/.test(h)); i++) {
+    await vis('library-search').fill('');
+    await vis('library-search').fill('continues page');
+    await page.waitForTimeout(800);
+    hits = await vis('archive-hit').allInnerTexts();
+  }
+  check(hits.some((h) => /Fox Ltd/.test(h)), `searchable: the filed document is found by its recognised text (${hits.map((h) => h.split('\n')[0])})`);
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -1894,6 +2000,7 @@ await step('details', details);
 await step('search', searchArchive);
 await step('documents', documentsScreen);
 await step('inbox', inbox);
+await step('searchable', searchable);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

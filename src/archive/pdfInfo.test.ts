@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { buildPdf } from '@/scan/engine/pdf/writer';
-import { infoFor, parseTags, pdfText, readTrailer, withInfo } from './pdfInfo';
+import { infoFor, parseTags, pdfText, readTrailer, real, withInfo } from './pdfInfo';
 
 const text = (b: Uint8Array) => new TextDecoder('latin1').decode(b);
 const tablePdf = async () =>
@@ -79,5 +79,13 @@ describe('document information by incremental update', () => {
     expect(info).toEqual({ Creator: 'Word', Title: 'Rechnung', Author: 'Caritas', Subject: 'Rechnung', Keywords: 'a, b', DocumentDate: '2026-10-02' });
     expect(infoFor({ title: '', sender: '', type: '', tags: [], date: '2.10.' }, {})).toMatchObject({ Title: undefined, DocumentDate: undefined });
     expect(parseTags('Steuer; 2026, Steuer ,')).toEqual(['Steuer', '2026']);
+  });
+});
+
+describe('placeholder details', () => {
+  it('count as none', () => {
+    expect(['untitled', 'Anonymous', '(unspecified)', ' unknown ', '-', 'n/a'].map(real)).toEqual(['', '', '', '', '', '']);
+    expect(real(' KoRo ')).toBe('KoRo');
+    expect(real(undefined)).toBe('');
   });
 });

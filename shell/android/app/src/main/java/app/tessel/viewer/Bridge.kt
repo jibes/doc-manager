@@ -38,6 +38,8 @@ class Bridge(private val activity: MainActivity) {
     private val outgoing = HashMap<String, Pair<File, String>>()
     val folders = Folders(activity)
     private val worker = Executors.newSingleThreadExecutor()
+    /** Network requests (AI reading) take long; they don't hold up folder work. */
+    private val network = Executors.newCachedThreadPool()
 
     /** Registers files from a VIEW/SEND intent; returns how many were usable. */
     fun accept(uris: List<Uri>): Int {
@@ -124,6 +126,7 @@ class Bridge(private val activity: MainActivity) {
             // Interactive: answered when the user comes back from the system screen.
             "pickFolder" -> activity.runOnUiThread { activity.pickFolder { tree -> done(tree?.let { JSONObject().put("uri", it.toString()).put("name", folders.treeName(it)) }) } }
             "requestAllFiles" -> activity.runOnUiThread { activity.requestAllFiles { done(it) } }
+            "http" -> network.execute { runCatching { http(a) }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) } }
             else -> worker.execute {
                 runCatching<Any?> {
                     when (method) {
@@ -162,6 +165,33 @@ class Bridge(private val activity: MainActivity) {
                     }
                 }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) }
             }
+        }
+    }
+
+    /**
+     * An HTTPS request made by the app rather than the WebView: AI reading goes to an address the user chose,
+     * and the WebView's page origin (this app's own host) is one that address's CORS rules don't know.
+     * {url, method, headers, body} → {status, body}.
+     */
+    private fun http(a: JSONObject): JSONObject {
+        val url = java.net.URL(a.getString("url"))
+        if (url.protocol != "https" && url.protocol != "http") throw IllegalArgumentException("Not a web address")
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        try {
+            conn.requestMethod = a.optString("method", "POST")
+            conn.connectTimeout = 30_000
+            conn.readTimeout = 300_000
+            a.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> conn.setRequestProperty(k, h.getString(k)) } }
+            if (a.has("body")) {
+                conn.doOutput = true
+                conn.outputStream.use { it.write(a.getString("body").toByteArray()) }
+            }
+            val status = conn.responseCode
+            val stream = if (status >= 400) conn.errorStream else conn.inputStream
+            val body = stream?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
+            return JSONObject().put("status", status).put("body", body)
+        } finally {
+            conn.disconnect()
         }
     }
 

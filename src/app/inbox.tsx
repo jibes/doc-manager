@@ -47,6 +47,8 @@ export default function Inbox() {
   const [edits, setEdits] = useState<Record<string, Edits>>({});
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+  // While filing makes a document searchable: how far reading its text has come.
+  const [progress, setProgress] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!archive || !here) return;
@@ -82,7 +84,9 @@ export default function Inbox() {
     const path = pathOf(item);
     setBusy((b) => new Set(b).add(item.entry.id));
     try {
-      await fileDocument(archive, dir, item, detailsOf(item, edits[item.entry.id]), path);
+      await fileDocument(archive, dir, item, detailsOf(item, edits[item.entry.id]), path, (done, total) =>
+        setProgress((all) => ({ ...all, [item.entry.id]: t.searchableProgress(done, total) })),
+      );
       setItems((list) => (list ?? []).filter((x) => x.entry.id !== item.entry.id));
       setNotice(t.inboxFiled(path.join('/')));
       return true;
@@ -95,6 +99,7 @@ export default function Inbox() {
         next.delete(item.entry.id);
         return next;
       });
+      setProgress(({ [item.entry.id]: _done, ...rest }) => rest);
     }
   };
   const fileAll = async () => {
@@ -152,6 +157,7 @@ export default function Inbox() {
                     path={pathOf(item)}
                     valid={valid(item)}
                     busy={busy.has(item.entry.id)}
+                    progress={progress[item.entry.id]}
                     onFile={() => void fileOne(item)}
                     onSuggest={aiReady(ai) ? () => void askAi(item) : undefined}
                     onOpen={() => void openDoc({ key: item.entry.id, place: { kind: 'folder', root: archive, rootName: '', entry: item.entry }, name: item.entry.name, size: item.entry.size, modified: item.entry.modified, ...detailsOf(item), pages: [] }, 0, '').catch((e) => setNotice(message(e)))}
@@ -209,6 +215,7 @@ function Card(props: {
   path: string[];
   valid: boolean;
   busy: boolean;
+  progress?: string;
   onFile: () => void;
   onSuggest?: () => void;
   onOpen: () => void;
@@ -234,6 +241,11 @@ function Card(props: {
         <Field label={t.detailDate} value={d.date} onChange={(date) => onEdit({ date })} testID="inbox-date" placeholder={t.detailDateHint} error={!valid} />
       </View>
       <Field label={t.detailTags} value={edits.tags ?? d.tags.join(', ')} onChange={(tags) => onEdit({ tags })} testID="inbox-tags" placeholder={t.inboxTags} />
+      {item.read && (
+        <T v="caption" color={p.muted} testID="inbox-no-text">
+          {props.progress ?? t.inboxNoText}
+        </T>
+      )}
       <T v="caption" color={p.inkSoft} testID="inbox-dest" numberOfLines={2}>
         → {path.join(' / ')}
       </T>

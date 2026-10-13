@@ -42,6 +42,9 @@ export const engine: DocumentEngine = {
       bytes: async () => {
         throw new Error('Saving is not available in the app yet');
       },
+      addTextLayer: async () => {
+        throw new Error('Saving is not available in the app yet');
+      },
       close: () => PdfEngine.close(r.handle),
     };
     return handle;

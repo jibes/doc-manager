@@ -9,6 +9,12 @@ export type Size = { width: number; height: number };
 /** Rect in normalized page space: 0..1, origin top-left. */
 export type NormRect = { x: number; y: number; w: number; h: number };
 
+/**
+ * Words recognised on a page, in reading order. Boxes are normalized to the page as shown turned by `turn`
+ * clockwise quarter turns (so the text reads upright: a page scanned sideways has turn 1 or 3).
+ */
+export type PageWords = { page: number; turn?: number; words: { text: string; box: NormRect }[] };
+
 export type DocMetadata = {
   title?: string;
   author?: string;
@@ -158,6 +164,8 @@ export interface DocHandle {
   save(): Promise<ArrayBuffer>;
   /** The file as it is: the bytes it was opened from, or (with unsaved edits) as save() writes it. */
   bytes(): Promise<ArrayBuffer>;
+  /** The file with invisible text over recognised words (an incremental update to bytes()); the handle is unchanged. */
+  addTextLayer(pages: PageWords[]): Promise<ArrayBuffer>;
   close(): void;
 }
 
