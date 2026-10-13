@@ -22,7 +22,7 @@ export function ScreenHeader({ title, over, children }: { title: string; over?: 
             {over}
           </T>
         ) : null}
-        <T accessibilityRole="header" v="headline" numberOfLines={1} style={{ fontSize: 17 }}>
+        <T accessibilityRole="header" v="headline" numberOfLines={2} style={{ fontSize: 17 }}>
           {title}
         </T>
       </View>

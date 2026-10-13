@@ -478,12 +478,9 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
     label: readingMode ? t.removeFromReadingList : t.addToReadingList,
     onPress: () => toggleReading(doc.id),
   };
+  // Document actions; how it looks lives in Aa, how to find things in the bar.
   const menuItems: MenuItem[] = [
-    ...(narrow ? [readingItem] : []),
-    // Page view only: text view always follows the appearance.
-    ...(view === 'page'
-      ? [{ key: 'invert', icon: 'invert' as const, label: doc.invert ? t.originalColours : t.invertColours, onPress: () => toggleInvert(doc.id) }]
-      : []),
+    readingItem,
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
@@ -585,21 +582,15 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           {edits.dirty && (
             <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginRight: space.sm }} />
           )}
+          {/* Phones: the view switch is at the top of Aa (and V on a keyboard). */}
           {!narrow && (
             <IconButton
-              icon={readingMode ? 'readingOn' : 'readingAdd'}
-              label={readingMode ? t.removeFromReadingList : t.addToReadingList}
-              active={readingMode}
-              onPress={() => toggleReading(doc.id)}
-              testID="reading-toggle"
+              icon={view === 'page' ? 'textView' : 'pageView'}
+              label={`${view === 'page' ? t.textView : t.pageView} (V)`}
+              onPress={() => switchView(view === 'page' ? 'text' : 'page')}
+              testID="view-toggle"
             />
           )}
-          <IconButton
-            icon={view === 'page' ? 'textView' : 'pageView'}
-            label={`${view === 'page' ? t.textView : t.pageView} (V)`}
-            onPress={() => switchView(view === 'page' ? 'text' : 'page')}
-            testID="view-toggle"
-          />
           <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
           <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
@@ -726,7 +717,18 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         />
       )}
       {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
-      {panel === 'appearance' && <AppearancePanel palette={p} view={view} zoom={zoom} onZoom={setZoom} onClose={() => setPanel(null)} />}
+      {panel === 'appearance' && (
+        <AppearancePanel
+          palette={p}
+          view={view}
+          onView={switchView}
+          invert={!!doc.invert}
+          onInvert={() => toggleInvert(doc.id)}
+          zoom={zoom}
+          onZoom={setZoom}
+          onClose={() => setPanel(null)}
+        />
+      )}
       {view === 'page' && <SelectionBubble palette={p} onHighlight={onHighlight} />}
       <NoteDialog request={noteRequest} palette={p} />
       <Toast message={edits.notice} onDismiss={edits.clearNotice} />

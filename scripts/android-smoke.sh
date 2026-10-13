@@ -83,12 +83,17 @@ wait_for "Welcome to Tessel"
 sleep 4
 adb exec-out screencap -p > "$OUT/2-sample.png"
 # Text view: PDFium's text extraction, running as WebAssembly in a worker inside the WebView.
+# On phones the view switch lives in the Aa panel.
+tap "Appearance"
+wait_for "Text view"
 tap "Text view"
 wait_for "Every PDF you open lands in Recent"
 adb exec-out screencap -p > "$OUT/2b-text-view.png"
 echo "--- screen (text view) ---"; screen | head -25
 tap "Page view"
 sleep 2
+tap_last "Close"
+sleep 1
 adb shell input keyevent KEYCODE_BACK
 wait_for "Welcome to Tessel"
 adb exec-out screencap -p > "$OUT/3-library.png"
@@ -113,7 +118,7 @@ sleep 5
 adb exec-out screencap -p > "$OUT/4-files.png"
 echo "--- screen (files) ---"; screen | head -25
 tap "smoke-columns.pdf"
-wait_for "Text view"
+wait_for "Appearance"
 adb exec-out screencap -p > "$OUT/5-from-folder.png"
 
 # File operations on real storage: new folder, rename, move, delete.

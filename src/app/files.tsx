@@ -137,7 +137,7 @@ function Roots({ bottom }: { bottom: number }) {
                 ]}
               >
                 <Icon name={rootIcon[r.kind]} color={r.kind === 'folder' ? p.accent : p.ink} />
-                <T v="label" numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+                <T v="label" numberOfLines={2} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20, paddingVertical: space.sm }}>
                   {r.name}
                 </T>
                 {r.locked ? (
@@ -559,8 +559,8 @@ function Tile({
           </View>
         )}
       </View>
-      <T v="caption" numberOfLines={2} style={{ marginTop: space.sm, fontFamily: fonts.sansMedium, fontSize: 12.5, lineHeight: 16 }}>
-        {entry.name}
+      <T v="caption" numberOfLines={isDir ? 3 : 2} style={[styles.tileName, hyphenate]}>
+        {isDir ? entry.name : bareName(entry.name)}
       </T>
       {!isDir && (
         <T v="caption" color={p.muted} numberOfLines={1} style={{ fontSize: 11 }}>
@@ -571,7 +571,13 @@ function Tile({
   );
 }
 
+/** The thumbnail already says it's a document: "Report.pdf" shows as "Report". */
+const bareName = (name: string) => name.replace(/\.(pdf|epub)$/i, '');
+/** Long words in narrow tiles break at syllables (in the page's language), not mid-letter. */
+const hyphenate = (Platform.OS === 'web' ? { hyphens: 'auto', overflowWrap: 'anywhere' } : {}) as object;
+
 const styles = StyleSheet.create({
+  tileName: { marginTop: space.sm, fontFamily: fonts.sansMedium, fontSize: 12.5, lineHeight: 16 },
   empty: { alignItems: 'center', gap: space.md, paddingTop: space.xxxl, paddingHorizontal: space.lg },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   rootRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.lg, minHeight: 56 },

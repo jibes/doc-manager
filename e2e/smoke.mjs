@@ -24,6 +24,15 @@ async function newContext(opts, { fsa = false } = {}) {
   return ctx;
 }
 
+/** Page ↔ text view: the bar's button on wide screens, the switch at the top of Aa on phones. */
+async function switchView(page) {
+  if (await page.getByTestId('view-toggle').locator('visible=true').count()) return page.getByTestId('view-toggle').click();
+  await page.getByTestId('open-appearance').click();
+  const toText = (await page.getByTestId('view-segment-text').getAttribute('aria-checked')) !== 'true';
+  await page.getByTestId(toText ? 'view-segment-text' : 'view-segment-page').click();
+  await page.keyboard.press('Escape');
+}
+
 function check(cond, msg) {
   console.log(`${cond ? '✓' : '✗'} ${msg}`);
   if (!cond) failures++;
@@ -151,19 +160,19 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('page-input').fill('3');
   await page.getByTestId('page-input').press('Enter');
   await page.waitForTimeout(400);
-  await page.getByTestId('view-toggle').click();
+  await switchView(page);
   await page.getByTestId('text-view').waitFor({ timeout: 15000 });
   await page.waitForTimeout(800);
   const textLabel = parseInt(await page.getByTestId('page-label').innerText(), 10);
   const flowText = await page.getByTestId('text-view').innerText();
   check(textLabel === 3 && flowText.includes('Finding your way'), `${name}: text view opens at page ${textLabel} with reflowed text`);
   await shot('5b-text');
-  await page.getByTestId('view-toggle').click();
+  await switchView(page);
   await page.waitForTimeout(800);
   check(parseInt(await page.getByTestId('page-label').innerText(), 10) === 3, `${name}: back in page view at the same page`);
   if (!isMobile) {
     // Search from text view: matches are highlighted in the text, and picking a hit stays there.
-    await page.getByTestId('view-toggle').click();
+    await switchView(page);
     await page.getByTestId('text-view').waitFor();
     await page.getByTestId('open-search').click();
     await page.getByTestId('search-input').fill('scrubber');
@@ -176,7 +185,7 @@ async function run(name, viewport, isMobile) {
     check((await page.getByTestId('text-view').count()) === 1 && marked > 0, `${name}: search in text view highlights matches in place`);
     await page.keyboard.press('Escape');
     await page.getByTestId('find-clear').click();
-    await page.getByTestId('view-toggle').click();
+    await switchView(page);
     await page.getByTestId('pages').waitFor();
   }
 
@@ -196,11 +205,9 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('bookmark').click();
 
   // Reading list: the toggle switches to reading behaviour (progress in the page pill).
-  // On narrow screens it lives in the More menu.
-  if (isMobile) {
-    await page.getByTestId('open-more').click();
-    await page.getByTestId('menu-reading').click();
-  } else await page.getByTestId('reading-toggle').click();
+  // It lives in the More menu (a document action).
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-reading').click();
   await page.waitForTimeout(300);
   check(/%/.test(await page.getByTestId('page-label').innerText()), `${name}: reading-list document shows progress`);
   await page.getByTestId('back').click();
@@ -269,7 +276,7 @@ async function tagged() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
-  await page.getByTestId('view-toggle').click();
+  await switchView(page);
   await page.getByTestId('text-view').waitFor({ timeout: 15000 });
   await page.waitForTimeout(600);
   const text = await page.getByTestId('text-view').innerText();
@@ -301,7 +308,7 @@ async function columns() {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`columns: ${e.message}`));
   await openFixture(page, 'columns.pdf');
-  await page.getByTestId('view-toggle').click();
+  await switchView(page);
   await page.getByTestId('text-view').waitFor({ timeout: 15000 });
   await page.waitForTimeout(800);
   const list = page.getByTestId('text-view');
@@ -328,7 +335,7 @@ async function scan() {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`scan: ${e.message}`));
   await openFixture(page, 'scan.pdf');
-  await page.getByTestId('view-toggle').click();
+  await switchView(page);
   await page.getByTestId('ocr-start').click({ timeout: 15000 });
   const recognized = () => page.waitForFunction(() => /scanned pages/i.test(document.body.innerText) && /kept so it never runs twice/i.test(document.body.innerText), null, { timeout: 120000 });
   await recognized().then(
@@ -498,7 +505,8 @@ async function regressions() {
   check(!!bubble && bubble.y >= 0 && bubble.y + bubble.height <= 860, 'regression: highlight bubble stays on screen for long selections');
   // A last page taller than the screen kept reading-list documents from ever finishing.
   await page.evaluate(() => getSelection().removeAllRanges());
-  await page.getByTestId('reading-toggle').click();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-reading').click();
   await page.keyboard.press('End');
   await page.waitForTimeout(1000);
   await page.keyboard.press('Escape');
@@ -812,14 +820,14 @@ async function foldersDesktop() {
   const byName = await names();
   await vis('sort').click();
   const byDate = await names();
-  check(byName[0] === 'columns.pdf' && byDate[0] === 'form.pdf', `folders: sorts by name and by date (${byName} / ${byDate})`);
+  check(byName[0] === 'columns' && byDate[0] === 'form', `folders: sorts by name and by date (${byName} / ${byDate})`);
   await page.screenshot({ path: `${OUT}folders-grid.png` });
   await vis('folder-dir').click();
-  await page.getByText('book.epub').waitFor();
+  await page.getByText('book', { exact: true }).waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).some((i) => i.naturalWidth > 0), null, { timeout: 10000 }).catch(() => {});
   check((await thumbs()) === 1, 'folders: books show their cover');
   await vis('screen-back').click();
-  await page.getByText('columns.pdf').locator('visible=true').first().click();
+  await page.getByText('columns', { exact: true }).locator('visible=true').first().click();
   await page.getByTestId('reader').waitFor();
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'folders: a document opens from the grid');
   await page.goto(BASE);
@@ -832,7 +840,8 @@ async function foldersDesktop() {
   await page.waitForTimeout(400);
   check((await thumbs()) === 2 && (await vis('thumb-pending').count()) === 0, 'folders: thumbnails are cached');
   // File operations on the folder itself.
-  const text = (x) => page.getByText(x, { exact: true }).locator('visible=true');
+  // Tiles show document names without their extension.
+  const text = (x) => page.getByText(x.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
   const inOpfs = (path) =>
     page.evaluate(async (path) => {
       let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Library');
@@ -1015,7 +1024,8 @@ async function foldersShell() {
   page.on('pageerror', (e) => errors.push(`folders-shell: ${e.message}`));
   // Screens below the top of the stack stay mounted (hidden): look at the visible one only.
   const vis = (id) => page.getByTestId(id).locator('visible=true');
-  const text = (s) => page.getByText(s, { exact: true }).locator('visible=true');
+  // Tiles show document names without their extension.
+  const text = (s) => page.getByText(s.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
   const names = async () => (await vis('folder-grid').innerText()).split('\n');
   const shownThumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length);
   await page.goto(BASE);
@@ -1073,10 +1083,10 @@ async function foldersShell() {
   await text('Archive').click();
   await vis('paste').click();
   await text('columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('columns.pdf'), 'folders-shell: a document moves into another folder');
+  check((await names()).includes('columns'), 'folders-shell: a document moves into another folder');
   await vis('screen-back').click();
   await page.waitForTimeout(300);
-  check(!(await names()).includes('columns.pdf'), 'folders-shell: …and is gone from where it was');
+  check(!(await names()).includes('columns'), 'folders-shell: …and is gone from where it was');
   // Rename it there; the library follows the file through the move and the rename.
   await text('Archive').click();
   await page.locator('[data-testid="folder-doc"]:visible').first().click({ button: 'right' }).catch(() => {});
@@ -1088,7 +1098,7 @@ async function foldersShell() {
   await page.getByTestId('ask-input').fill('two columns.pdf');
   await page.getByTestId('ask-confirm').click();
   await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('two columns.pdf'), 'folders-shell: a document can be renamed');
+  check((await names()).includes('two columns'), 'folders-shell: a document can be renamed');
   await page.goto(BASE);
   await page.getByTestId('recent-row').first().waitFor();
   const rows = await page.getByTestId('recent-row').allInnerTexts();
@@ -1115,14 +1125,14 @@ async function foldersShell() {
   await vis('screen-back').click();
   await vis('paste').click();
   await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('two columns.pdf'), 'folders-shell: a document can be copied to another folder');
+  check((await names()).includes('two columns'), 'folders-shell: a document can be copied to another folder');
   await text('Archive').click();
   await vis('select').click();
   await text('two columns.pdf').click();
   await vis('act-delete').click();
   await page.getByTestId('ask-confirm').click();
   await page.waitForTimeout(500);
-  check(!(await names()).includes('two columns.pdf'), 'folders-shell: a document can be deleted');
+  check(!(await names()).includes('two columns'), 'folders-shell: a document can be deleted');
   await page.goto(BASE);
   await page.getByTestId('recent-row').first().waitFor();
   const left = await page.getByTestId('recent-row').allInnerTexts();
@@ -1140,7 +1150,7 @@ async function foldersShell() {
   await text('All documents').click();
   await vis('folder-grid').waitFor();
   const all = await vis('folder-doc').allInnerTexts();
-  check(all.length === 3 && all[0].startsWith('form.pdf') && all[0].includes('Papers'), `folders-shell: all documents, newest first, with their folder (${all.map((x) => x.split('\n')[0])})`);
+  check(all.length === 3 && all[0].startsWith('form\n') && all[0].includes('Papers'), `folders-shell: all documents, newest first, with their folder (${all.map((x) => x.split('\n')[0])})`);
   check((await vis('new-folder').count()) === 0, 'folders-shell: no new folder in “All documents”');
 
   // A scan saved into a folder through the app.
@@ -1219,7 +1229,7 @@ async function scanner() {
     return new TextDecoder().decode((await file.slice(0, 5).arrayBuffer()));
   }).catch(() => null);
   check(saved === '%PDF-', 'scanner: PDF written into the chosen folder');
-  await page.getByTestId('view-toggle').click();
+  await switchView(page);
   await page.waitForFunction(() => /ACME/.test(document.body.innerText) && /INVOICE/i.test(document.body.innerText), null, { timeout: 30000 }).then(
     () => check(true, 'scanner: recognised text is in the PDF'),
     () => check(false, 'scanner: recognised text is in the PDF'),
@@ -1276,17 +1286,20 @@ async function appearance() {
   await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
   const dim = await filter();
   check(/brightness\(0\.7/.test(dim) && !/invert/.test(dim), `appearance: in Dark, pages are dimmed, not inverted (${dim})`);
-  await page.getByTestId('open-more').click();
-  await page.getByTestId('menu-invert').click();
+  await page.getByTestId('open-appearance').click();
+  await page.getByTestId('invert-toggle').click();
+  await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   check(/invert/.test(await filter()), 'appearance: Invert colours inverts the pages');
-  await page.reload();
+  // Reopened from the library (the static test server has no fallback for deep links).
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().click();
   await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
   check(/invert/.test(await filter()), 'appearance: the document stays inverted');
   await page.keyboard.press('v');
   await page.getByTestId('text-view').waitFor();
-  await page.getByTestId('open-more').click();
-  check((await page.getByTestId('menu-invert').count()) === 0, 'appearance: text view follows the appearance (no Invert colours)');
+  await page.getByTestId('open-appearance').click();
+  check((await page.getByTestId('invert-toggle').count()) === 0, 'appearance: text view follows the appearance (no Invert colours)');
   await ctx.close();
 }
 

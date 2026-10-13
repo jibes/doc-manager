@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
@@ -14,6 +14,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
+import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
@@ -272,8 +273,16 @@ function Row({
   const p = usePalette();
   const [hover, setHover] = useState(false);
   const onList = !!doc.reading;
+  // One place for what can be done with a document: its ⋯ button, or a long press.
+  const actions = () =>
+    showActions(doc.title, [
+      { key: 'reading', icon: onList ? 'readingOn' : 'readingAdd', label: onList ? t.removeFromReadingList : t.addToReadingList, onPress: onReading },
+      { key: 'remove', icon: 'trash', label: t.removeFromLibrary, destructive: true, onPress: onRemove },
+    ]);
   return (
     <View
+      onPointerEnter={() => setHover(true)}
+      onPointerLeave={() => setHover(false)}
       style={[
         styles.row,
         { borderColor: p.hairline, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth, backgroundColor: hover ? p.raised : 'transparent' },
@@ -283,44 +292,26 @@ function Row({
         testID="recent-row"
         accessibilityRole="button"
         accessibilityLabel={doc.title}
+        accessibilityHint={t.rowHint}
         onPress={() => open(doc)}
-        onLongPress={onRemove}
-        onHoverIn={() => setHover(true)}
-        onHoverOut={() => setHover(false)}
+        onLongPress={actions}
         style={styles.rowMain}
       >
         <Cover uri={cover} aspect={doc.coverAspect} width={36} />
         <View style={{ flex: 1, gap: 2 }}>
-          <T v="label" numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
+          <T v="label" numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20 }}>
             {doc.title}
           </T>
           <T v="caption" color={p.muted} numberOfLines={1}>
+            {onList ? `${t.readingList} · ` : ''}
             {t.docMeta(doc.pageCount, doc.bytes, doc.openedAt)}
             {doc.format === 'epub' ? ' · EPUB' : ''}
             {doc.linked ? ` · ${t.inPlace}` : ''}
           </T>
         </View>
       </Pressable>
-      {/* Siblings, not children: buttons can't nest in the DOM. */}
-      <IconButton
-        testID="row-reading"
-        icon={onList ? 'readingOn' : 'readingAdd'}
-        label={onList ? t.removeFromReadingList : t.addToReadingList}
-        active={onList}
-        size={36}
-        onPress={onReading}
-      />
-      {Platform.OS === 'web' && (
-        <IconButton
-          icon="trash"
-          label={t.remove}
-          size={36}
-          onPress={onRemove}
-          onHoverIn={() => setHover(true)}
-          onHoverOut={() => setHover(false)}
-          style={{ opacity: hover ? 1 : 0.35 }}
-        />
-      )}
+      {/* A sibling, not a child: buttons can't nest in the DOM. */}
+      <IconButton testID="row-more" icon="more" label={t.moreFor(doc.title)} size={36} onPress={actions} color={hover ? p.ink : p.muted} />
     </View>
   );
 }
