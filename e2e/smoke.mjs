@@ -486,9 +486,12 @@ async function regressions() {
   // Text view page jumps landed on the previous page's carried-over paragraph.
   await page.keyboard.press('v');
   await page.getByTestId('text-view').waitFor();
-  await page.keyboard.press('Home');
-  // Wait for the jump to land: → from wherever the view still was proves nothing (it once read page 7).
-  for (let i = 0; i < 25 && (await pageNo()) !== 1; i++) await page.waitForTimeout(200);
+  // Wait for the jump to land: → from wherever the view still was proves nothing (it once read page 7). A text view
+  // still being built can restore its earlier place after the key, so Home is pressed until page 1 is reached.
+  for (let i = 0; i < 25 && (await pageNo()) !== 1; i++) {
+    await page.keyboard.press('Home');
+    await page.waitForTimeout(300);
+  }
   await page.keyboard.press('ArrowRight');
   for (let i = 0; i < 25 && (await pageNo()) === 1; i++) await page.waitForTimeout(200);
   await page.waitForTimeout(300);
