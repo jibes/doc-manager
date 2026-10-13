@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
+import { Icon } from '@/components/Icon';
 import { t } from '@/i18n';
 import { IconButton, T, tick } from '@/components/primitives';
 import { fonts, palettes, radius, space, type Palette, type ThemeName } from '@/design/tokens';
@@ -64,17 +65,20 @@ function Segment<K extends string>({
   value,
   options,
   onChange,
+  testID,
 }: {
   p: Palette;
   value: K;
   options: [K, string][];
   onChange: (k: K) => void;
+  testID?: string;
 }) {
   return (
-    <View style={[styles.segment, { backgroundColor: p.hairline }]}>
+    <View testID={testID} accessibilityRole="radiogroup" style={[styles.segment, { backgroundColor: p.hairline }]}>
       {options.map(([k, label]) => (
         <Pressable
           key={k}
+          testID={testID && `${testID}-${k}`}
           accessibilityRole="radio"
           aria-checked={value === k}
           onPress={() => onChange(k)}
@@ -151,12 +155,20 @@ function TextSettings({ p }: { p: Palette }) {
 export function AppearancePanel({
   palette: p,
   view,
+  onView,
+  invert,
+  onInvert,
   zoom,
   onZoom,
   onClose,
 }: {
   palette: Palette;
   view: 'page' | 'text';
+  /** PDFs: switch between page and text view (books have text only). */
+  onView?: (v: 'page' | 'text') => void;
+  /** This document's "Invert colours" (page view). */
+  invert?: boolean;
+  onInvert?: () => void;
   zoom: number;
   onZoom: (z: number) => void;
   onClose: () => void;
@@ -169,6 +181,19 @@ export function AppearancePanel({
   return (
     <Panel title={t.appearance} onClose={onClose} compact testID="appearance-panel">
       <View style={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.xl }}>
+        {/* How to read first: the page as printed, or its text reflowed (V). */}
+        {onView && (
+          <Segment<'page' | 'text'>
+            p={p}
+            value={view}
+            options={[
+              ['page', t.pageView],
+              ['text', t.textView],
+            ]}
+            onChange={onView}
+            testID="view-segment"
+          />
+        )}
         <AppearancePicker />
 
         {view === 'text' ? (
@@ -204,6 +229,19 @@ export function AppearancePanel({
                 <IconButton icon="zoomIn" label={t.zoomIn} onPress={() => onZoom(zoom * 1.2)} disabled={zoom >= 4} />
               </View>
             </View>
+
+            {onInvert && (
+              <Pressable testID="invert-toggle" role="switch" aria-checked={!!invert} onPress={onInvert} style={styles.switchRow}>
+                <Icon name="invert" size={20} color={p.inkSoft} />
+                <View style={{ flex: 1 }}>
+                  <T>{t.invertColours}</T>
+                  <T v="caption" color={p.muted}>
+                    {t.invertNote}
+                  </T>
+                </View>
+                <Switch value={!!invert} onValueChange={onInvert} trackColor={{ true: p.accent }} />
+              </Pressable>
+            )}
           </>
         )}
       </View>
@@ -219,4 +257,5 @@ const styles = StyleSheet.create({
   segBtn: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   zoom: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   zoomVal: { minWidth: 64, alignItems: 'center' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
 });
