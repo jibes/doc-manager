@@ -24,13 +24,9 @@ async function newContext(opts, { fsa = false } = {}) {
   return ctx;
 }
 
-/** Page ↔ text view: the bar's button on wide screens, the switch at the top of Aa on phones. */
+/** Page ↔ text view: the Text view button in the bar. */
 async function switchView(page) {
-  if (await page.getByTestId('view-toggle').locator('visible=true').count()) return page.getByTestId('view-toggle').click();
-  await page.getByTestId('open-appearance').click();
-  const toText = (await page.getByTestId('view-segment-text').getAttribute('aria-checked')) !== 'true';
-  await page.getByTestId(toText ? 'view-segment-text' : 'view-segment-page').click();
-  await page.keyboard.press('Escape');
+  await page.getByTestId('view-toggle').click();
 }
 
 function check(cond, msg) {
@@ -64,7 +60,7 @@ async function run(name, viewport, isMobile) {
   const label = await page.getByTestId('page-label').innerText().catch(() => '');
   check(parseInt(label, 10) >= 3, `${name}: page indicator advanced (${label.replace(/\s+/g, ' ')})`);
   // Plain viewer: the toolbar never hides.
-  check(await page.getByTestId('open-contents').isVisible(), `${name}: viewer keeps toolbar visible after scrolling`);
+  check(await page.getByTestId('open-find').isVisible(), `${name}: viewer keeps toolbar visible after scrolling`);
 
   if (!isMobile) {
     // Text layer: drag-select a heading and read the selection back.
@@ -106,20 +102,23 @@ async function run(name, viewport, isMobile) {
     await page.waitForTimeout(350);
   };
   await reveal();
-  await page.getByTestId('open-contents').click();
-  await page.getByTestId('contents-panel').waitFor();
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('find-panel').waitFor();
   await page.waitForTimeout(400);
   await shot('3-contents');
-  await page.getByTestId('contents-panel').getByText('The reading list', { exact: true }).click();
+  await page.getByTestId('find-panel').getByText('The reading list', { exact: true }).click();
   await page.waitForTimeout(500);
   const afterToc = await page.getByTestId('page-label').innerText().catch(() => '');
   check(parseInt(afterToc, 10) === 5, `${name}: TOC jump to "The reading list" → page ${parseInt(afterToc, 10)}`);
-  if (!isMobile) await page.getByTestId('open-contents').click();
+  if (!isMobile) await page.getByTestId('open-find').click();
 
   await reveal();
-  await page.getByTestId('open-search').click();
+  await page.getByTestId('open-find').click();
+  check((await page.getByTestId('contents-body').count()) === 1, `${name}: Find shows the contents under its search field`);
+  check(await page.getByTestId('view-toggle').isVisible(), `${name}: Text view is in the bar`);
   await page.getByTestId('search-input').fill('tessel');
   await page.waitForFunction(() => document.body.innerText.match(/\d+ results?/), null, { timeout: 10000 });
+  check((await page.getByTestId('contents-body').count()) === 0 && (await page.getByTestId('search-results').count()) === 1, `${name}: typing in Find replaces the contents with matches`);
   await page.waitForTimeout(300);
   await page.getByTestId('search-input').press('Enter');
   await page.waitForTimeout(700);
@@ -174,7 +173,7 @@ async function run(name, viewport, isMobile) {
     // Search from text view: matches are highlighted in the text, and picking a hit stays there.
     await switchView(page);
     await page.getByTestId('text-view').waitFor();
-    await page.getByTestId('open-search').click();
+    await page.getByTestId('open-find').click();
     await page.getByTestId('search-input').fill('scrubber');
     await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 10000 });
     await page.getByTestId('search-input').press('Enter');
@@ -418,7 +417,7 @@ async function annotations() {
   await page.getByTestId('note-input').fill('Try dragging a file in');
   await page.getByTestId('note-save').click();
   await page.getByTestId('save').waitFor();
-  await page.getByTestId('open-contents').click();
+  await page.getByTestId('open-find').click();
   await page.getByTestId('tab-notes').click();
   const rows = page.getByTestId('note-row');
   await rows.nth(1).waitFor({ timeout: 5000 });
@@ -436,7 +435,7 @@ async function annotations() {
   await page.getByTestId('recent-row').first().waitFor();
   await page.reload();
   await page.getByTestId('recent-row').first().click();
-  await page.getByTestId('open-contents').click();
+  await page.getByTestId('open-find').click();
   await page.getByTestId('tab-notes').click();
   await rows.first().waitFor({ timeout: 5000 });
   const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Use Open file/.test(await rows.first().innerText());
@@ -466,11 +465,11 @@ async function regressions() {
   await page.waitForTimeout(300);
   check((await page.getByTestId('reader').count()) === 1 && (await page.getByTestId('more-menu').count()) === 0, 'regression: Esc closes the More menu, not the document');
   // Pages grid opened at the last page rendered no rows above it.
-  await page.getByTestId('open-contents').click();
+  await page.getByTestId('open-find').click();
   await page.getByTestId('tab-pages').click();
   await page.waitForTimeout(800);
-  check(await page.getByTestId('contents-panel').getByText('1', { exact: true }).isVisible(), 'regression: pages grid renders all rows');
-  check((await page.getByTestId('open-contents').getAttribute('aria-pressed')) === 'true', 'regression: toolbar toggles report aria-pressed');
+  check(await page.getByTestId('find-panel').getByText('1', { exact: true }).isVisible(), 'regression: pages grid renders all rows');
+  check((await page.getByTestId('open-find').getAttribute('aria-pressed')) === 'true', 'regression: toolbar toggles report aria-pressed');
   await page.keyboard.press('Escape');
   await page.getByTestId('open-appearance').click();
   check((await page.getByRole('radio', { name: 'Auto' }).first().getAttribute('aria-checked')) === 'true', 'regression: theme radios report aria-checked');
@@ -553,17 +552,18 @@ async function books() {
   await page.waitForTimeout(500);
   check(hidden && (await toolbar()), `books: a tap on the text shows the hidden toolbar (hidden before: ${hidden})`);
   // Contents.
-  await page.getByTestId('open-contents').click();
-  await page.getByTestId('contents-panel').getByText('The Harbour', { exact: true }).click();
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('find-panel').getByText('The Harbour', { exact: true }).click();
   await page.waitForTimeout(800);
   check(/^1 \//.test(await label()), `books: contents jump to chapter one (${await label()})`);
   const img = await view.evaluate((root) => { const i = root.querySelector('img'); return i ? i.naturalWidth : -1; });
   check(img > 0, 'books: images from the book are shown');
-  await page.getByTestId('contents-panel').getByText('At dusk').click();
+  await page.getByTestId('find-panel').getByText('At dusk').click();
   await page.waitForTimeout(800);
   const dusk = await view.evaluate((root) => [...root.querySelectorAll('div')].some((e) => e.children.length === 0 && e.textContent === 'At dusk' && e.getBoundingClientRect().top > 50 && e.getBoundingClientRect().top < innerHeight));
   check(dusk, 'books: contents jump to a section');
   await page.keyboard.press('Escape');
+  await page.getByTestId('find-panel').waitFor({ state: 'detached' });
   // Search.
   await page.keyboard.press('Control+f');
   await page.getByTestId('search-input').fill('first ferry');
@@ -572,7 +572,7 @@ async function books() {
   // Esc in the (focused) field closes the panel and keeps the matches.
   await page.getByTestId('search-input').press('Escape');
   await page.waitForTimeout(800);
-  check((await page.getByTestId('search-panel').count()) === 0 && (await page.getByTestId('find-clear').count()) === 1, 'books: Esc in the search field closes search, keeps matches');
+  check((await page.getByTestId('find-panel').count()) === 0 && (await page.getByTestId('find-clear').count()) === 1, 'books: Esc in the search field closes search, keeps matches');
   const marked = await view.evaluate((root) => [...root.querySelectorAll('span')].filter((e) => /^first ferry$/i.test(e.textContent) && getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)').length);
   check(marked > 0, `books: search highlights matches (${marked})`);
   await page.getByTestId('find-clear').click();
@@ -617,8 +617,8 @@ async function books() {
   await fc.setFiles(new URL('./fixtures/book2.epub', import.meta.url).pathname);
   await view.waitFor({ timeout: 10000 });
   await page.waitForTimeout(500);
-  await page.getByTestId('open-contents').click();
-  await page.getByTestId('contents-panel').getByText('Departure').waitFor({ timeout: 5000 }).then(
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('find-panel').getByText('Departure').waitFor({ timeout: 5000 }).then(
     () => check(true, 'books: EPUB 2 contents (NCX)'),
     () => check(false, 'books: EPUB 2 contents (NCX)'),
   );
@@ -779,7 +779,7 @@ async function german() {
   await page.getByText('Jedes Dokument').waitFor();
   await page.getByTestId('sample').click();
   await page.getByTestId('reader').waitFor();
-  await page.getByTestId('open-search').click();
+  await page.getByTestId('open-find').click();
   await page.getByTestId('search-input').fill('tessel');
   await page.waitForFunction(() => /\d+ Treffer/.test(document.body.innerText), null, { timeout: 10000 });
   check((await page.locator('html').getAttribute('lang')) === 'de', 'german: UI and <html lang> follow de-DE locale');

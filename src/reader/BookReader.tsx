@@ -16,14 +16,13 @@ import { usePalette } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
 import { AppearancePanel } from './AppearancePanel';
 import { BlockList, type BlockListApi, type FigureSource } from './BlockList';
-import { ContentsPanel } from './ContentsPanel';
+import { FindPanel } from './FindPanel';
 import { FindBar } from './FindBar';
 import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import { Scrubber } from './Scrubber';
-import { SearchPanel } from './SearchPanel';
 
-type PanelName = 'contents' | 'search' | 'appearance' | null;
+type PanelName = 'find' | 'appearance' | null;
 
 const TOP_BAR = 56;
 const BOTTOM_BAR = 64;
@@ -60,6 +59,12 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const [page, setPage] = useState(doc.position?.page ?? 0);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
+  // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
+  const [findFocus, setFindFocus] = useState(false);
+  const openFind = (focus: boolean) => {
+    setFindFocus(focus);
+    setPanel('find');
+  };
   const [menu, setMenu] = useState(false);
   const [editingPage, setEditingPage] = useState(false);
   const [initial] = useState(() => ({ page: doc.position?.page ?? 0, y: doc.position?.offset ?? 0 }));
@@ -173,7 +178,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
       if (mod && e.key === 'f') {
         e.preventDefault();
         setChrome(true);
-        return setPanel('search');
+        return openFind(true);
       }
       if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
       if (e.key === 'Escape') return menu ? setMenu(false) : panel ? setPanel(null) : searchActive ? onQuery('') : goBack();
@@ -193,7 +198,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
         Home: () => goToPage(0),
         End: () => goToPage(book.pageCount),
         b: () => toggleBookmark(doc.id, page),
-        t: () => setPanel((x) => (x === 'contents' ? null : 'contents')),
+        t: () => (panel === 'find' ? setPanel(null) : openFind(false)),
       };
       const fn = keys[e.key];
       if (fn) {
@@ -215,7 +220,6 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const bottomStyle = useAnimatedStyle(() => ({ opacity: chromeV.value, transform: [{ translateY: (1 - chromeV.value) * 10 }] }));
 
   const wide = isWide(winW);
-  const narrow = winW < 520;
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
   const bookmarked = doc.bookmarks.includes(page);
   const outline = useMemo(() => book.toc.map((e) => ({ title: e.title, page: e.page, depth: e.depth })), [book.toc]);
@@ -224,9 +228,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const pct = Math.round((page / Math.max(1, book.pageCount - 1)) * 100);
 
   const menuItems: MenuItem[] = [
-    ...(narrow
-      ? [{ key: 'reading', icon: readingMode ? ('readingOn' as const) : ('readingAdd' as const), label: readingMode ? t.removeFromReadingList : t.addToReadingList, onPress: () => toggleReading(doc.id) }]
-      : []),
+    { key: 'reading', icon: readingMode ? 'readingOn' : 'readingAdd', label: readingMode ? t.removeFromReadingList : t.addToReadingList, onPress: () => toggleReading(doc.id) },
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
   ];
@@ -268,17 +270,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
           </T>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {!narrow && (
-            <IconButton
-              icon={readingMode ? 'readingOn' : 'readingAdd'}
-              label={readingMode ? t.removeFromReadingList : t.addToReadingList}
-              active={readingMode}
-              onPress={() => toggleReading(doc.id)}
-              testID="reading-toggle"
-            />
-          )}
-          <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
-          <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
+          <IconButton icon="search" label={t.findShortcut} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
           <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
         </View>
@@ -332,7 +324,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
         </View>
       </View>
 
-      {searchActive && panel !== 'search' && (
+      {searchActive && panel !== 'find' && (
         <FindBar
           palette={p}
           query={q}
@@ -340,34 +332,32 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
           active={active}
           searching={false}
           top={insets.top + TOP_BAR + space.sm}
-          onOpen={() => setPanel('search')}
+          onOpen={() => openFind(true)}
           onStep={stepHit}
           onClear={() => onQuery('')}
         />
       )}
-      {panel === 'contents' && (
-        <ContentsPanel
+      {panel === 'find' && (
+        <FindPanel
           palette={p}
-          outline={outline}
-          page={page}
-          bookmarks={doc.bookmarks}
-          tabs={['contents', 'bookmarks']}
-          annotations={null}
-          onGo={(n) => {
-            goToPage(n);
-            if (!wide) setPanel(null);
+          contents={{
+            palette: p,
+            outline,
+            page,
+            bookmarks: doc.bookmarks,
+            tabs: ['contents', 'bookmarks'],
+            annotations: null,
+            onGo: (n) => {
+              goToPage(n);
+              if (!wide) setPanel(null);
+            },
           }}
-          onClose={() => setPanel(null)}
-        />
-      )}
-      {panel === 'search' && (
-        <SearchPanel
-          palette={p}
           query={query}
           onQuery={onQuery}
           hits={hits}
           active={active}
           searching={false}
+          focus={findFocus}
           onPick={(i) => {
             goToHit(i);
             if (!wide) setPanel(null);

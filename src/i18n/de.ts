@@ -164,6 +164,8 @@ export const de: Strings = {
   removeBookmark: 'Lesezeichen entfernen (B)',
   close: 'Schließen',
   navigate: 'Navigation',
+  find: 'Finden',
+  findShortcut: 'Suche und Inhalt (⌘F)',
   contents: 'Inhalt',
   pagesTab: 'Seiten',
   bookmarks: 'Lesezeichen',

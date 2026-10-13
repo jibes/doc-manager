@@ -6,7 +6,6 @@ import { Icon } from '@/components/Icon';
 import { IconButton, T } from '@/components/primitives';
 import { fonts, radius, space, type Palette } from '@/design/tokens';
 import type { Annotation, OutlineItem, Size } from '@/engine/types';
-import { Panel } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Thumb } from './Thumb';
 
@@ -38,10 +37,10 @@ type Props = {
   onEditNote?: (a: Annotation) => void;
   onDeleteNote?: (a: Annotation) => void;
   onGo: (page: number) => void;
-  onClose: () => void;
 };
 
-export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmarks, tabs: only, annotations, onEditNote, onDeleteNote, onGo, onClose }: Props) {
+/** Contents, pages, bookmarks and notes: the lower part of Find while nothing is searched. */
+export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmarks, tabs: only, annotations, onEditNote, onDeleteNote, onGo }: Props) {
   const [picked, setTab] = useState<Tab>('contents');
   // No outline → open on Pages instead of an empty Contents tab.
   const offered = only ?? (['contents', 'pages', 'bookmarks', 'notes'] as Tab[]).filter((k) => k !== 'pages' || (cache && sizes));
@@ -64,7 +63,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
   const tabs = allTabs.filter(([k]) => offered.includes(k));
 
   return (
-    <Panel title={t.navigate} onClose={onClose} testID="contents-panel">
+    <View style={{ flex: 1 }} testID="contents-body">
       <View style={[styles.segment, { backgroundColor: p.hairline }]}>
         {tabs.map(([k, label]) => (
           <Pressable
@@ -203,7 +202,7 @@ export function ContentsPanel({ palette: p, outline, page, sizes, cache, bookmar
             )}
           />
         ))}
-    </Panel>
+    </View>
   );
 }
 
