@@ -97,6 +97,7 @@ function handleFrom(r: OpenResult): DocHandle {
     fields: (page) => (r.hasForm ? client.call('fields', { doc: r.doc, page }) : Promise.resolve([])),
     setField: (page, index, value) => client.call('setField', { doc: r.doc, page, index, value }),
     save: () => client.call('save', { doc: r.doc }),
+    bytes: () => client.call('bytes', { doc: r.doc }),
     annotations: () => client.call('annots', { doc: r.doc }),
     addHighlight: (page, rects, color, contents) => client.call('addHighlight', { doc: r.doc, page, rects, color, contents }).then(() => {}),
     updateAnnotation: (page, index, patch) => client.call('updateAnnot', { doc: r.doc, page, index, ...patch }).then(() => {}),

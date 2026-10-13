@@ -53,7 +53,7 @@ const ANNOT_KINDS: Record<number, Annotation['kind']> = {
 };
 
 /** `form`: PDFium's form-fill environment (null when the PDF has no form); `dirty`: edited since open/save. */
-type Doc = { ptr: number; buf: number; pageSizes: Size[]; formInfo: number; form: number; dirty: boolean };
+type Doc = { ptr: number; buf: number; len: number; pageSizes: Size[]; formInfo: number; form: number; dirty: boolean };
 type SearchJob = Extract<Request, { type: 'search' }> & { cursor: number; textPtr: number };
 type Job = Exclude<Request, { type: 'cancel' }> | SearchJob;
 
@@ -143,8 +143,21 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
     M.FPDF_SetFormFieldHighlightColor(form, 0, FIELD_HIGHLIGHT);
     M.FPDF_SetFormFieldHighlightAlpha(form, 60);
   }
-  docs.set(doc, { ptr, buf, pageSizes, formInfo, form, dirty: false });
-  return { doc, pageCount, pageSizes, metadata: { title: meta('Title'), author: meta('Author') }, hasForm: !!form };
+  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, dirty: false });
+  // Entries kept as they are when Tessel rewrites the details.
+  const other: Record<string, string> = {};
+  for (const key of ['Creator', 'Producer', 'CreationDate', 'Trapped']) {
+    const v = meta(key);
+    if (v) other[key] = v;
+  }
+  const date = meta('DocumentDate');
+  return {
+    doc,
+    pageCount,
+    pageSizes,
+    metadata: { title: meta('Title'), author: meta('Author'), subject: meta('Subject'), keywords: meta('Keywords'), date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined, other },
+    hasForm: !!form,
+  };
 }
 
 /** Renders a page (or the `clip` region of it) so the output is `width` pixels wide. */
@@ -996,6 +1009,12 @@ async function run(job: Job) {
     case 'removeAnnot':
       removeAnnot(job.doc, job.page, job.index);
       return post({ id: job.id, ok: true, result: null });
+    case 'bytes': {
+      const d = getDoc(job.doc);
+      // Unedited: the bytes it was opened from, so an update appended to them changes nothing else.
+      const bytes = d.dirty ? save(job.doc) : heap().slice(d.buf, d.buf + d.len).buffer;
+      return post({ id: job.id, ok: true, result: bytes }, [bytes]);
+    }
     case 'save': {
       const bytes = save(job.doc);
       getDoc(job.doc).dirty = false;

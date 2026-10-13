@@ -11,6 +11,7 @@ export type Request =
   | { id: number; type: 'fields'; doc: number; page: number }
   | { id: number; type: 'setField'; doc: number; page: number; index: number; value: FormValue }
   | { id: number; type: 'save'; doc: number }
+  | { id: number; type: 'bytes'; doc: number }
   | { id: number; type: 'annots'; doc: number }
   | { id: number; type: 'addHighlight'; doc: number; page: number; rects: NormRect[]; color: string; contents?: string }
   | { id: number; type: 'updateAnnot'; doc: number; page: number; index: number; contents?: string; color?: string }
@@ -37,6 +38,7 @@ export type ResultMap = {
   fields: FormField[];
   setField: FormField[];
   save: ArrayBuffer;
+  bytes: ArrayBuffer;
   annots: Annotation[];
   addHighlight: null;
   updateAnnot: null;

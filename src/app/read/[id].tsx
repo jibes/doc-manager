@@ -89,7 +89,7 @@ export default function ReadScreen() {
   }
 
   if (state.status === 'ready' && 'book' in state) return <BookReader doc={doc} book={state.book} image={state.image} />;
-  if (state.status === 'ready' && 'handle' in state) return <Reader doc={doc} handle={state.handle} cache={state.cache} />;
+  if (state.status === 'ready' && 'handle' in state) return <Reader doc={doc} handle={state.handle} cache={state.cache} onReload={retry} />;
   return null;
 }
 

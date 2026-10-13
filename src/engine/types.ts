@@ -9,7 +9,16 @@ export type Size = { width: number; height: number };
 /** Rect in normalized page space: 0..1, origin top-left. */
 export type NormRect = { x: number; y: number; w: number; h: number };
 
-export type DocMetadata = { title?: string; author?: string };
+export type DocMetadata = {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string;
+  /** The document's own date (Tessel's DocumentDate entry), YYYY-MM-DD. */
+  date?: string;
+  /** The information dictionary's other entries, kept when the details are rewritten (creator, producer, dates). */
+  other: Record<string, string>;
+};
 
 export type OutlineItem = {
   title: string;
@@ -147,6 +156,8 @@ export interface DocHandle {
   removeAnnotation(page: number, index: number): Promise<void>;
   /** The document with all edits, as PDF bytes. */
   save(): Promise<ArrayBuffer>;
+  /** The file as it is: the bytes it was opened from, or (with unsaved edits) as save() writes it. */
+  bytes(): Promise<ArrayBuffer>;
   close(): void;
 }
 

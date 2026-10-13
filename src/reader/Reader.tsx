@@ -25,8 +25,11 @@ import type { Annotation, DocHandle, PageLink, SearchHit } from '@/engine/types'
 import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
-import type { DocRecord } from '@/storage';
+import { repo, type DocRecord } from '@/storage';
+import { detailsOf, saveDetails } from '@/archive/details';
+import type { Details } from '@/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
+import { DetailsPanel } from './DetailsPanel';
 import { flattenOutline, type FlatOutline } from './ContentsPanel';
 import { FindPanel } from './FindPanel';
 import { FindBar } from './FindBar';
@@ -41,26 +44,52 @@ import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Scrubber } from './Scrubber';
 
-type PanelName = 'find' | 'appearance' | null;
+type PanelName = 'find' | 'appearance' | 'details' | null;
+
+/** A message to show once the document has been reopened (after its details were written into the file). */
+let afterReload: string | null = null;
 
 const TOP_BAR = 56;
 const BOTTOM_BAR = 64;
 const clampZoom = (z: number) => Math.min(4, Math.max(0.5, z));
 
-export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHandle; cache: RasterCache }) {
+export function Reader({ doc, handle, cache, onReload }: { doc: DocRecord; handle: DocHandle; cache: RasterCache; onReload?: () => void }) {
   const p = usePalette();
   // "Invert colours" (per document): the pages, their thumbnails and text view figures; the app keeps its own colours.
   const pageP = useMemo(() => (doc.invert ? { ...p, page: p.inverted } : p), [p, doc.invert]);
   const fit = usePrefs((s) => s.fit);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo } = useLibrary();
+  const { savePosition, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = useLibrary();
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
   const view = doc.view ?? 'page';
   const textApiRef = useRef<ReflowApi | null>(null);
   // Reading-list documents get reading behaviour (immersive chrome, progress); everything else is a plain viewer.
   const readingMode = !!doc.reading;
   const edits = useEdits(doc, handle);
+  const [reloaded, setReloaded] = useState(() => {
+    const message = afterReload;
+    afterReload = null;
+    return message;
+  });
+  const [savingDetails, setSavingDetails] = useState(false);
+  const writeDetails = async (details: Details) => {
+    setSavingDetails(true);
+    try {
+      // Write access first, while the tap still counts as a user gesture.
+      if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
+      await saveDetails(doc.id, handle, details);
+      setDetails(doc.id, { title: details.title, author: details.sender });
+      afterReload = t.detailsSaved;
+      // Reopened from the file, so everything (and a later save of form edits) starts from the new details.
+      if (onReload) onReload();
+      else setReloaded(t.detailsSaved);
+    } catch (e) {
+      setReloaded(e instanceof Error && /encrypted/.test(e.message) ? t.detailsEncrypted : t.detailsFailed);
+    } finally {
+      setSavingDetails(false);
+    }
+  };
 
   const list = useRef<FlatList<number>>(null);
   const [vp, setVp] = useState<{ w: number; h: number } | null>(null);
@@ -484,6 +513,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   };
   // Document actions; how it looks lives in Aa, how to find things in the bar.
   const menuItems: MenuItem[] = [
+    { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
     readingItem,
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
@@ -730,7 +760,10 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       )}
       {view === 'page' && <SelectionBubble palette={p} onHighlight={onHighlight} />}
       <NoteDialog request={noteRequest} palette={p} />
-      <Toast message={edits.notice} onDismiss={edits.clearNotice} />
+      {panel === 'details' && (
+        <DetailsPanel palette={p} initial={detailsOf(handle, doc.title)} busy={savingDetails} onSave={(d) => void writeDetails(d)} onClose={() => setPanel(null)} />
+      )}
+      <Toast message={edits.notice ?? reloaded} onDismiss={() => (edits.clearNotice(), setReloaded(null))} />
     </View>
   );
 }
