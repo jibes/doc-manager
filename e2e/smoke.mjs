@@ -1056,6 +1056,19 @@ async function foldersShell() {
         const text = JSON.stringify({ title: 'T', date: '', sender: '', type: '', keywords: [], pages: [] });
         return { status: 200, body: JSON.stringify({ content: [{ type: 'text', text }], stop_reason: 'end_turn' }) };
       },
+      dirAt: ({ root, path, create }) => {
+        let dir = root === 'app' ? 'app' : 'root';
+        for (const name of path) {
+          let id = kids(dir).find((k) => nodes[k].kind === 'dir' && nodes[k].name === name);
+          if (!id) {
+            if (!create) return null;
+            id = newId();
+            nodes[id] = { name, kind: 'dir', parent: dir };
+          }
+          dir = id;
+        }
+        return dir;
+      },
       readText: ({ root, path }) => (state.texts ?? {})[`${root}|${path.join('/')}`] ?? null,
       writeText: ({ root, path, text }) => (((state.texts ??= {})[`${root}|${path.join('/')}`] = text), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
@@ -1804,6 +1817,140 @@ async function searchable() {
   await ctx.close();
 }
 
+// Sync safety: deleting in the archive goes to its trash (undoable), Syncthing's conflict copies and duplicates
+// are listed and resolved, the inbox spots a document that is already filed.
+async function syncSafety() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  const text = (x) => page.getByText(x.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`sync: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  await page.evaluate(
+    async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+      for (const [path, b64] of files) {
+        const parts = path.split('/');
+        let dir = root;
+        for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d, { create: true });
+        const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+      }
+    },
+    [
+      ['keepme.pdf', fixture('locked.pdf')],
+      ['2026/letter.pdf', fixture('xrefstream.pdf')],
+      ['2026/letter.sync-conflict-20261013-213005-ABCDEF7.pdf', fixture('columns.pdf')],
+      ['dup-one.pdf', fixture('tagged.pdf')],
+      ['Copies/dup-two.pdf', fixture('tagged.pdf')],
+    ],
+  );
+  const names = (path) =>
+    page.evaluate(async (path) => {
+      let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      try {
+        for (const d of path.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(d);
+      } catch {
+        return [];
+      }
+      const out = [];
+      for await (const name of dir.keys()) out.push(name);
+      return out.sort();
+    }, path);
+  const sizeOf = (path) =>
+    page.evaluate(async (path) => {
+      let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      const parts = path.split('/');
+      for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d);
+      return (await (await dir.getFileHandle(parts.at(-1))).getFile()).size;
+    }, path);
+
+  await vis('tab-files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('screen-back').click();
+
+  // Deleting in the archive: to its trash, without asking, and undoable.
+  await vis('tab-files').click();
+  await vis('folder-root').filter({ hasText: 'Archive' }).click();
+  await vis('folder-grid').waitFor();
+  await text('keepme.pdf').click({ button: 'right' });
+  await vis('act-delete').click();
+  await page.getByText('Moved to the trash.').waitFor({ timeout: 10000 });
+  check((await names('.tessel/trash')).includes('keepme.pdf') && !(await names('')).includes('keepme.pdf'), 'sync: deleting in the archive moves to its trash');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await page.waitForTimeout(800);
+  check((await names('')).includes('keepme.pdf') && !(await names('.tessel/trash')).includes('keepme.pdf'), 'sync: and Undo puts it back');
+
+  // Conflicts and duplicates, once the archive is read.
+  await page.goto(BASE);
+  await vis('sync-banner').waitFor({ timeout: 60000 }).catch(() => {});
+  for (let i = 0; i < 40 && !/2 sync issues/.test(await vis('sync-banner').innerText().catch(() => '')); i++) await page.waitForTimeout(500);
+  const banner = await vis('sync-banner').innerText().catch(() => '');
+  check(/2 sync issues/.test(banner), `sync: a conflict copy and a duplicate are noticed (${banner})`);
+  await vis('sync-banner').click();
+  await vis('sync-conflict').waitFor();
+  check((await vis('sync-conflict').count()) === 1 && (await vis('sync-duplicate').count()) === 1, 'sync: listed to resolve');
+  const copySize = await sizeOf('2026/letter.sync-conflict-20261013-213005-ABCDEF7.pdf');
+  await vis('sync-keep-copy').click();
+  await page.getByText('Kept. The other version is in the trash.').waitFor({ timeout: 10000 });
+  check(
+    (await names('2026')).join() === 'letter.pdf' && (await sizeOf('2026/letter.pdf')) === copySize && (await names('.tessel/trash')).includes('letter.pdf'),
+    `sync: keeping the other version puts it in place, the first in the trash (${await names('2026')})`,
+  );
+  await vis('sync-duplicate').getByTestId('sync-keep-one').first().click();
+  await page.waitForTimeout(800);
+  const left = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
+  check(left.length === 1, `sync: keeping one duplicate trashes the others (${left})`);
+
+  // The trash: restore one, delete one for good.
+  await vis('screen-back').click();
+  await vis('home-settings').click();
+  await vis('open-trash').click();
+  await vis('trash-item').first().waitFor();
+  const before = await vis('trash-item').count();
+  await vis('trash-item').filter({ hasText: 'dup' }).getByTestId('trash-restore').click();
+  await page.waitForTimeout(800);
+  const back = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
+  check(before === 2 && back.length === 2, `sync: a trashed document is restored where it was (${back})`);
+  await vis('trash-item').first().getByTestId('trash-delete').click();
+  await page.waitForTimeout(800);
+  check((await vis('trash-item').count()) === 0 && !(await names('.tessel/trash')).length, 'sync: and deleted for good from the trash');
+  const manifest = await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    return (await (await (await root.getDirectoryHandle('.tessel')).getFileHandle('trash.json')).getFile()).text();
+  });
+  check(JSON.parse(manifest).items.length === 0, 'sync: the trash remembers nothing it no longer has');
+
+  // The inbox: a document that is already filed.
+  await page.evaluate(async (b64) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    const inbox = await root.getDirectoryHandle('Inbox', { create: true });
+    const w = await (await inbox.getFileHandle('again.pdf', { create: true })).createWritable();
+    await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    await w.close();
+  }, fixture('tagged.pdf'));
+  await vis('screen-back').click();
+  await vis('inbox-here-switch').click();
+  await vis('screen-back').click();
+  await vis('open-inbox').click();
+  await vis('inbox-duplicate').waitFor({ timeout: 30000 }).catch(() => {});
+  check(/Already in the archive: dup-/.test(await vis('inbox-duplicate').innerText().catch(() => '')), 'inbox: a document already filed is pointed out');
+  await vis('inbox-discard').click();
+  await page.waitForTimeout(800);
+  check(!(await names('Inbox')).length && (await names('.tessel/trash')).includes('again.pdf'), 'inbox: and can go to the trash instead');
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -2001,6 +2148,7 @@ await step('search', searchArchive);
 await step('documents', documentsScreen);
 await step('inbox', inbox);
 await step('searchable', searchable);
+await step('sync', syncSafety);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

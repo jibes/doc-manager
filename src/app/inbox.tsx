@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { changeRules, destination, fileDocument, inboxFiles, loadRules, propose, suggest, useRules, withRules, type Proposal } from '@/archive/inbox';
 import type { Details } from '@/archive/pdfInfo';
 import { openDoc } from '@/archive/Results';
+import { discard } from '@/archive/trash';
 import type { Rule } from '@/archive/rules';
 import { Icon } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
@@ -159,6 +160,12 @@ export default function Inbox() {
                     busy={busy.has(item.entry.id)}
                     progress={progress[item.entry.id]}
                     onFile={() => void fileOne(item)}
+                    onDiscard={() =>
+                      void discard(archive, dir, [item.entry]).then(
+                        () => setItems((list) => (list ?? []).filter((x) => x.entry.id !== item.entry.id)),
+                        (e) => setNotice(message(e)),
+                      )
+                    }
                     onSuggest={aiReady(ai) ? () => void askAi(item) : undefined}
                     onOpen={() => void openDoc({ key: item.entry.id, place: { kind: 'folder', root: archive, rootName: '', entry: item.entry }, name: item.entry.name, size: item.entry.size, modified: item.entry.modified, ...detailsOf(item), pages: [] }, 0, '').catch((e) => setNotice(message(e)))}
                   />
@@ -217,6 +224,7 @@ function Card(props: {
   busy: boolean;
   progress?: string;
   onFile: () => void;
+  onDiscard: () => void;
   onSuggest?: () => void;
   onOpen: () => void;
 }) {
@@ -241,6 +249,14 @@ function Card(props: {
         <Field label={t.detailDate} value={d.date} onChange={(date) => onEdit({ date })} testID="inbox-date" placeholder={t.detailDateHint} error={!valid} />
       </View>
       <Field label={t.detailTags} value={edits.tags ?? d.tags.join(', ')} onChange={(tags) => onEdit({ tags })} testID="inbox-tags" placeholder={t.inboxTags} />
+      {item.duplicateOf && (
+        <View style={styles.duplicate}>
+          <T v="caption" color={p.markRing} style={{ flex: 1 }} testID="inbox-duplicate">
+            {t.inboxDuplicate(item.duplicateOf.name)}
+          </T>
+          <Button testID="inbox-discard" kind="quiet" icon="trash" label={t.inboxDiscard} onPress={props.onDiscard} />
+        </View>
+      )}
       {item.read && (
         <T v="caption" color={p.muted} testID="inbox-no-text">
           {props.progress ?? t.inboxNoText}
@@ -326,6 +342,7 @@ const styles = StyleSheet.create({
   fields: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
   input: { fontFamily: fonts.sans, fontSize: 15, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
+  duplicate: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   ruleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingLeft: space.lg, paddingRight: space.sm, paddingVertical: space.sm },
 });

@@ -9,6 +9,7 @@ import type { FolderEntry } from '@/lib/folderTypes';
 import { repo } from '@/storage';
 import { parseTags, real } from './pdfInfo';
 import { createIndex, searchIndex, type Hit, type IndexedDoc, type Place } from './search';
+import { duplicates, parseConflict, syncTemporary, type ConflictName } from './sync';
 
 /**
  * Keeps the search index up to date: walks the user's folders and the library, reads documents that are new or
@@ -27,7 +28,18 @@ const REWALK_MS = 5 * 60_000;
 let db: UseStore | null = null;
 const store = () => (db ??= createStore('tessel-index', 'docs'));
 
-export const useIndex = create<{ running: boolean; done: number; total: number; count: number }>(() => ({ running: false, done: 0, total: 0, count: 0 }));
+/** A Syncthing conflict copy found in a folder: kept out of the index, listed to be resolved. */
+export type Conflict = { root: string; rootName: string; dir?: string; entry: FolderEntry; name: ConflictName };
+
+export const useIndex = create<{ running: boolean; done: number; total: number; count: number; conflicts: Conflict[]; duplicates: number }>(() => ({
+  running: false,
+  done: 0,
+  total: 0,
+  count: 0,
+  conflicts: [],
+  /** Groups of documents with the same content. */
+  duplicates: 0,
+}));
 
 const docs = new Map<string, IndexedDoc>();
 let index: MiniSearch<IndexedDoc> | null = null;
@@ -39,7 +51,7 @@ function load(): Promise<void> {
     for (const d of stored) docs.set(d.key, d);
     index = createIndex();
     index.addAll(stored.filter((d) => !d.failed));
-    useIndex.setState({ count: index.documentCount });
+    useIndex.setState({ count: index.documentCount, duplicates: duplicates(stored).length });
   })();
   return loading;
 }
@@ -100,25 +112,28 @@ async function rootsToWalk(): Promise<FolderRoot[]> {
   return (all ? [all] : roots.filter((r) => r.kind !== 'device')).filter((r) => !r.locked);
 }
 
-async function walk(root: FolderRoot, dir: string | undefined, depth: number, out: Candidate[]): Promise<void> {
+async function walk(root: FolderRoot, dir: string | undefined, depth: number, out: Candidate[], conflicts: Conflict[]): Promise<void> {
   const entries = await folders.list(root.id, dir);
   for (const e of entries) {
-    // Hidden folders: Syncthing's versions, Tessel's own .tessel, trash.
-    if (e.name.startsWith('.')) continue;
+    // Hidden folders (Syncthing's versions, Tessel's own .tessel and trash) and files Syncthing is still writing.
+    if (syncTemporary(e.name)) continue;
     if (e.kind === 'dir') {
-      if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, out).catch(() => {});
+      if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, out, conflicts).catch(() => {});
     } else if (e.kind === 'pdf') {
-      out.push({ key: `${root.id}:${e.id}`, place: { kind: 'folder', root: root.id, rootName: root.name, entry: e }, name: e.name, size: e.size, modified: e.modified });
+      const conflict = parseConflict(e.name);
+      if (conflict) conflicts.push({ root: root.id, rootName: root.name, dir, entry: e, name: conflict });
+      else out.push({ key: `${root.id}:${e.id}`, place: { kind: 'folder', root: root.id, rootName: root.name, dir, entry: e }, name: e.name, size: e.size, modified: e.modified });
     }
   }
 }
 
 /** Everything to index now, and the roots whose listing failed (their records are kept, not dropped). */
-async function candidates(): Promise<{ list: Candidate[]; unlisted: Set<string> }> {
+async function candidates(): Promise<{ list: Candidate[]; unlisted: Set<string>; conflicts: Conflict[] }> {
   const list: Candidate[] = [];
   const unlisted = new Set<string>();
+  const conflicts: Conflict[] = [];
   for (const root of await rootsToWalk()) {
-    await walk(root, undefined, 0, list).catch(() => unlisted.add(root.id));
+    await walk(root, undefined, 0, list, conflicts).catch(() => unlisted.add(root.id));
   }
   // Library documents that aren't files in those folders already (a document opened from a folder is linked to it).
   const uris = list.map((c) => (c.place.kind === 'folder' ? c.place.entry.uri : undefined)).filter((u): u is string => !!u);
@@ -129,10 +144,16 @@ async function candidates(): Promise<{ list: Candidate[]; unlisted: Set<string> 
     if (d.format === 'epub' || linked.has(d.id) || (d.linked && inFolders.has(`${d.fileName}|${d.bytes}`))) continue;
     list.push({ key: `lib:${d.id}`, place: { kind: 'library', id: d.id }, name: d.fileName, size: d.bytes, modified: d.addedAt });
   }
-  return { list, unlisted };
+  return { list, unlisted, conflicts };
 }
 
 /* --------------------------------------------------------------- reading ---- */
+
+/** SHA-256 of a file's bytes, as hex. */
+export async function contentHash(bytes: ArrayBuffer): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 async function bytesOf(place: Place): Promise<ArrayBuffer> {
   if (place.kind === 'folder') return (await folders.read(place.root, place.entry as FolderEntry)).arrayBuffer();
@@ -147,12 +168,13 @@ async function read(c: Candidate): Promise<IndexedDoc | null> {
   const empty = { title: '', sender: '', type: '', tags: [] as string[], date: '', pages: [] as string[] };
   const bytes = await bytesOf(c.place).catch(() => null);
   if (!bytes) return null;
+  const hash = await contentHash(bytes);
   let handle;
   try {
     handle = await engine.open({ kind: 'bytes', bytes });
   } catch {
     // Damaged, protected, or gone: remembered as such until the file changes.
-    return { ...base, ...empty, failed: true };
+    return { ...base, ...empty, hash, failed: true };
   }
   try {
     const m = handle.metadata;
@@ -162,7 +184,7 @@ async function read(c: Candidate): Promise<IndexedDoc | null> {
       const runs = await handle.pageText(p).catch(() => []);
       pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ').slice(0, MAX_PAGE_CHARS));
     }
-    return { ...base, title: real(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
+    return { ...base, hash, title: real(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
   } finally {
     handle.close();
   }
@@ -210,7 +232,8 @@ export function schedule(ms = 3000) {
 async function run(): Promise<void> {
   await load();
   lastWalk = Date.now();
-  const { list, unlisted } = await candidates();
+  const { list, unlisted, conflicts } = await candidates();
+  useIndex.setState({ conflicts });
   const seen = new Set(list.map((c) => c.key));
   for (const key of [...docs.keys()]) {
     const root = key.startsWith('lib:') ? null : key.slice(0, key.indexOf(':'));
@@ -218,7 +241,8 @@ async function run(): Promise<void> {
   }
   const todo = list.filter((c) => {
     const known = docs.get(c.key);
-    return !known || known.size !== c.size || known.modified !== c.modified;
+    // Records from before content hashes are read again once.
+    return !known || known.size !== c.size || known.modified !== c.modified || !known.hash;
   });
   useIndex.setState({ running: todo.length > 0, done: 0, total: todo.length });
   for (const [i, c] of todo.entries()) {
@@ -229,7 +253,7 @@ async function run(): Promise<void> {
     // Let the app breathe between documents.
     await new Promise((r) => setTimeout(r, 30));
   }
-  useIndex.setState({ running: false });
+  useIndex.setState({ running: false, duplicates: duplicates([...docs.values()]).length });
 }
 
 /** Starts indexing a little after launch, and again when the app comes back after a while. */

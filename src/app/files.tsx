@@ -13,6 +13,7 @@ import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
 import { pickPdfs } from '@/lib/pick';
+import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { cachedThumb, cancelThumbs, thumb, type Thumb } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
 import { useClipboard } from '@/state/clipboard';
@@ -191,6 +192,8 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const [opening, setOpening] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Undo for the last move to the trash.
+  const [undo, setUndo] = useState<(() => void) | null>(null);
   const { importFiles, error, clearError, followFiles, forgetFiles } = useLibrary();
   const version = useClipboard((s) => s.version);
   const setClip = useClipboard((s) => s.set);
@@ -279,6 +282,16 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   };
   const remove = async () => {
     const list = picked;
+    // In the archive, deleting moves to its trash (undoable); elsewhere it is for good, so it asks first.
+    if (trashes(root)) {
+      await run(async () => {
+        const items = await moveToTrash(root, dir, list);
+        await forgetFiles(list.flatMap((e) => (e.uri ? [e.uri] : [])));
+        setUndo(() => () => void restore(root, items).then(changed, (e) => setMessage(opError(e))));
+        return t.trashedN(list.length);
+      });
+      return;
+    }
     const yes = await ask({ title: t.deleteTitle(list.length), body: t.deleteBody(list.length, list[0].name), confirm: t.delete, destructive: true });
     if (yes == null) return;
     await run(async () => {
@@ -382,7 +395,11 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       ) : (
         <PasteBar here={editable ? here : null} bottom={bottom} onDone={() => {}} onError={setMessage} onMessage={setMessage} />
       )}
-      <Toast message={message ?? error} onDismiss={() => (message ? setMessage(null) : clearError())} />
+      <Toast
+        message={message ?? error}
+        onDismiss={() => (message ? (setMessage(null), setUndo(null)) : clearError())}
+        action={undo && message ? { label: t.undo, onPress: () => (undo(), setMessage(null), setUndo(null)) } : undefined}
+      />
     </>
   );
 }

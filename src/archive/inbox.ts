@@ -6,7 +6,8 @@ import type { FolderEntry } from '@/lib/folderTypes';
 import type { PageWords } from '@/engine/types';
 import { describeWithAi, type AiSettings } from '@/scan/ai';
 import { usePrefs } from '@/state/prefs';
-import { schedule } from './indexer';
+import { allDocs, contentHash, schedule } from './indexer';
+import type { IndexedDoc } from './search';
 import { infoFor, parseTags, readTrailer, real, withInfo, type Details } from './pdfInfo';
 import { makeSearchable, pagesWithoutText, readPages, textOf } from './searchable';
 import { applyRules, DEFAULT_RULES, findDate, parseRules, pathFor, serializeRules, type Rules } from './rules';
@@ -78,7 +79,7 @@ export async function changeRules(archive: string, edit: (r: Rules) => Rules): P
  * A document in the inbox, read: its text, the details it has (with a date found in it), and those proposed.
  * `read`: an image-only document's first page as recognised on the device (it gets a text layer when filed).
  */
-export type Proposal = { entry: FolderEntry; text: string; own: Details; details: Details; read?: PageWords[] };
+export type Proposal = { entry: FolderEntry; text: string; own: Details; details: Details; read?: PageWords[]; duplicateOf?: IndexedDoc };
 
 /** The proposal again with (changed) rules. */
 export const withRules = (p: Proposal, rules: Rules): Proposal => ({ ...p, details: applyRules(`${p.text}\n${p.entry.name}`, p.own, rules.rules) });
@@ -88,6 +89,9 @@ const stem = (name: string) => name.replace(/\.pdf$/i, '');
 
 export async function propose(archive: string, entry: FolderEntry, rules: Rules): Promise<Proposal> {
   const bytes = await (await folders.read(archive, entry)).arrayBuffer();
+  // The same document already filed (same content, outside the inbox).
+  const hash = await contentHash(bytes);
+  const duplicateOf = (await allDocs()).find((d) => d.hash === hash && d.place.kind === 'folder' && d.place.root === archive && d.key !== `${archive}:${entry.id}`);
   const handle = await engine.open({ kind: 'bytes', bytes });
   try {
     const m = handle.metadata;
@@ -110,7 +114,7 @@ export async function propose(archive: string, entry: FolderEntry, rules: Rules)
       tags: parseTags(m.keywords),
       date: m.date || findDate(text),
     };
-    return withRules({ entry, text, own, details: own, read }, rules);
+    return withRules({ entry, text, own, details: own, read, duplicateOf }, rules);
   } finally {
     handle.close();
   }
