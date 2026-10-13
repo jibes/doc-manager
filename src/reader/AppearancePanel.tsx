@@ -231,16 +231,19 @@ export function AppearancePanel({
             </View>
 
             {onInvert && (
-              <Pressable testID="invert-toggle" role="switch" aria-checked={!!invert} onPress={onInvert} style={styles.switchRow}>
-                <Icon name="invert" size={20} color={p.inkSoft} />
-                <View style={{ flex: 1 }}>
-                  <T>{t.invertColours}</T>
-                  <T v="caption" color={p.muted}>
-                    {t.invertNote}
-                  </T>
-                </View>
-                <Switch value={!!invert} onValueChange={onInvert} trackColor={{ true: p.accent }} />
-              </Pressable>
+              <View testID="invert-toggle" style={styles.switchRow}>
+                {/* Label and switch side by side, not nested: a tap on a switch inside a pressable row reaches both. */}
+                <Pressable onPress={onInvert} importantForAccessibility="no-hide-descendants" aria-hidden style={styles.switchLabel}>
+                  <Icon name="invert" size={20} color={p.inkSoft} />
+                  <View style={{ flex: 1 }}>
+                    <T>{t.invertColours}</T>
+                    <T v="caption" color={p.muted}>
+                      {t.invertNote}
+                    </T>
+                  </View>
+                </Pressable>
+                <Switch value={!!invert} onValueChange={onInvert} accessibilityLabel={t.invertColours} trackColor={{ true: p.accent }} />
+              </View>
             )}
           </>
         )}
@@ -258,4 +261,5 @@ const styles = StyleSheet.create({
   zoom: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   zoomVal: { minWidth: 64, alignItems: 'center' },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  switchLabel: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.md },
 });

@@ -1299,6 +1299,16 @@ async function appearance() {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   check(/invert/.test(await filter()), 'appearance: Invert colours inverts the pages');
+  // The switch itself turns it back (the tap must not reach both the switch and its row).
+  await page.getByTestId('open-appearance').click();
+  const knob = page.getByTestId('invert-toggle').getByRole('switch');
+  await knob.click();
+  await page.waitForTimeout(300);
+  const off = await filter();
+  await knob.click();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check(!/invert/.test(off) && /invert/.test(await filter()), `appearance: the switch itself toggles Invert colours (${off || 'none'})`);
   // Reopened from the library (the static test server has no fallback for deep links).
   await page.goto(BASE);
   await page.getByTestId('recent-row').first().click();
