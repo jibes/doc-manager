@@ -69,6 +69,8 @@ export type FoldersApi = {
    * `create`: its ID as list() and create() take it (undefined: the place itself), or null when there is none.
    */
   dirAt(root: string, path: string[], create: boolean): Promise<string | undefined | null>;
+  /** The names of the files in the folder at `path` below a place (any kind, hidden ones too); [] when there is none. */
+  listNames(root: string, path: string[]): Promise<string[]>;
   /** A small text file at `path` below a place (the archive's .tessel/ settings); null when there is none. */
   readText(root: string, path: string[]): Promise<string | null>;
   /** Writes it, making the folders on the way and replacing what was there. */

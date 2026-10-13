@@ -10,15 +10,21 @@ import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { searchAll, useIndex } from './indexer';
-import type { Hit, IndexedDoc } from './search';
+import type { Hit, IndexedDoc, Place } from './search';
+
+/** A file of a folder in the library (opened in place where it can be). */
+export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>) {
+  const file = await folders.read(place.root, place.entry);
+  const [added] = await useLibrary.getState().importFiles([{ name: place.entry.name, size: place.entry.size || file.size, file, handle: place.entry.handle, link: place.entry.uri }]);
+  return added;
+}
 
 /** Opens a document at a page, with the query highlighted: a library document directly, a folder file via the library. */
 export async function openDoc(doc: IndexedDoc, page: number, query: string) {
   const params = { page: String(page), q: query.trim() };
   const { place } = doc;
   if (place.kind === 'library') return router.push({ pathname: '/read/[id]', params: { id: place.id, ...params } });
-  const file = await folders.read(place.root, place.entry);
-  const [added] = await useLibrary.getState().importFiles([{ name: place.entry.name, size: place.entry.size || file.size, file, handle: place.entry.handle, link: place.entry.uri }]);
+  const added = await importFromFolder(place);
   if (added) router.push({ pathname: '/read/[id]', params: { id: added.id, ...params } });
 }
 

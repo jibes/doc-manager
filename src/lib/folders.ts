@@ -26,6 +26,7 @@ export const folders: FoldersApi = {
     throw new Error('Unsupported');
   },
   dirAt: async () => null,
+  listNames: async () => [],
   readText: async () => null,
   writeText: async () => {
     throw new Error('Unsupported');

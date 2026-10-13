@@ -8,6 +8,7 @@ import { folders, type FolderRoot } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
 import { repo } from '@/storage';
 import { parseTags, real } from './pdfInfo';
+import { docKey } from './shared';
 import { createIndex, searchIndex, type Hit, type IndexedDoc, type Place } from './search';
 import { duplicates, parseConflict, syncTemporary, type ConflictName } from './sync';
 
@@ -169,12 +170,13 @@ async function read(c: Candidate): Promise<IndexedDoc | null> {
   const bytes = await bytesOf(c.place).catch(() => null);
   if (!bytes) return null;
   const hash = await contentHash(bytes);
+  const share = await docKey(bytes);
   let handle;
   try {
     handle = await engine.open({ kind: 'bytes', bytes });
   } catch {
     // Damaged, protected, or gone: remembered as such until the file changes.
-    return { ...base, ...empty, hash, failed: true };
+    return { ...base, ...empty, hash, share, failed: true };
   }
   try {
     const m = handle.metadata;
@@ -184,7 +186,7 @@ async function read(c: Candidate): Promise<IndexedDoc | null> {
       const runs = await handle.pageText(p).catch(() => []);
       pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ').slice(0, MAX_PAGE_CHARS));
     }
-    return { ...base, hash, title: real(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
+    return { ...base, hash, share, title: real(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
   } finally {
     handle.close();
   }
@@ -205,6 +207,7 @@ export function pauseIndexing(): () => void {
 const whileOpen = () => (paused ? new Promise<void>((r) => (waking = r)) : Promise.resolve());
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+let due = 0;
 let pass: Promise<void> | null = null;
 let again = false;
 let lastWalk = 0;
@@ -216,7 +219,10 @@ export function schedule(ms = 3000) {
     again = true;
     return;
   }
+  // A pass already due sooner stays as it is: asking again never postpones it.
+  if (timer && due <= Date.now() + ms) return;
   if (timer) clearTimeout(timer);
+  due = Date.now() + ms;
   timer = setTimeout(() => {
     timer = null;
     pass = run().finally(() => {
@@ -242,7 +248,7 @@ async function run(): Promise<void> {
   const todo = list.filter((c) => {
     const known = docs.get(c.key);
     // Records from before content hashes are read again once.
-    return !known || known.size !== c.size || known.modified !== c.modified || !known.hash;
+    return !known || known.size !== c.size || known.modified !== c.modified || !known.hash || !known.share;
   });
   useIndex.setState({ running: todo.length > 0, done: 0, total: todo.length });
   for (const [i, c] of todo.entries()) {

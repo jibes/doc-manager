@@ -31,6 +31,8 @@ export type DocRecord = {
   linked?: boolean;
   /** Absent for PDFs. Books have virtual pages (`pageCount`), about a printed page each. */
   format?: 'epub';
+  /** The same document on every device (archive/shared.ts docKey), for sharing reading between them. */
+  shareKey?: string;
 };
 
 /** A document in one of the user's folders, reached through the Android app (content:// or file:// URI). */

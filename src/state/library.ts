@@ -53,6 +53,8 @@ type LibraryState = {
   /** The details written into the file changed: the library shows its new title and sender. */
   setDetails(id: string, details: { title: string; author?: string }): void;
   markOpened(id: string): void;
+  /** Changes from elsewhere (another device's reading, a computed share key), saved as they are. */
+  patchDoc(id: string, changes: Partial<DocRecord>): void;
   /** Record facts that changed with the file itself (a linked file edited elsewhere). */
   updateFileInfo(id: string, info: { pageCount: number }): void;
   /** Point a linked document at a new location (after it was moved). */
@@ -278,6 +280,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
           ? d.bookmarks.filter((p) => p !== page)
           : [...d.bookmarks, page].sort((a, b) => a - b),
       })),
+
+    patchDoc: (id, changes) => patch(id, (d) => ({ ...d, ...changes })),
 
     markOpened: (id) => {
       patch(id, (d) => ({ ...d, openedAt: Date.now() }));

@@ -10,6 +10,7 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
+import { shareNow, useSharing } from '@/archive/sharing';
 import { setArchive } from '@/archive/views';
 import { AppearancePicker } from '@/reader/AppearancePanel';
 import { testAi, type AiApi } from '@/scan/ai';
@@ -161,6 +162,8 @@ function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (mes
   const p = usePalette();
   const archive = usePrefs((s) => s.archive);
   const inboxHere = usePrefs((s) => s.inboxHere);
+  const shareReading = usePrefs((s) => s.shareReading);
+  const sharedWith = useSharing((s) => s.devices);
   const setPrefs = usePrefs((s) => s.set);
   const choices = [{ id: null, name: t.archiveNone }, ...roots.filter((r) => r.kind === 'folder' || r.kind === 'app').map((r) => ({ id: r.id as string | null, name: r.name }))];
   const choose = (id: string | null) => setArchive(id).catch(() => onError(t.viewFailed));
@@ -221,6 +224,32 @@ function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (mes
           </Pressable>
           <T v="caption" color={p.muted} style={styles.note}>
             {t.inboxHereNote} {t.inboxOtherDevice}
+          </T>
+          <Pressable
+            testID="share-reading-switch"
+            accessibilityRole="switch"
+            accessibilityLabel={t.shareReading}
+            accessibilityState={{ checked: shareReading }}
+            aria-checked={shareReading}
+            onPress={() => {
+              setPrefs({ shareReading: !shareReading });
+              if (!shareReading) void shareNow();
+            }}
+            style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+              styles.card,
+              styles.row,
+              { marginTop: space.lg, backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
+            ]}
+          >
+            <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+              {t.shareReading}
+            </T>
+            <View style={[styles.track, { backgroundColor: shareReading ? p.accent : p.hairline }]}>
+              <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: shareReading ? 18 : 0 }] }]} />
+            </View>
+          </Pressable>
+          <T v="caption" color={p.muted} style={styles.note} testID="share-reading-note">
+            {t.shareReadingNote} {shareReading && sharedWith > 0 ? t.shareReadingWith(sharedWith) : ''}
           </T>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
             <Button testID="open-trash" kind="quiet" icon="trash" label={t.trashTitle} onPress={() => router.push('/trash')} />

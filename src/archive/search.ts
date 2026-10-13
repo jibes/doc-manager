@@ -29,6 +29,8 @@ export type IndexedDoc = {
   failed?: boolean;
   /** Content hash (SHA-256, hex), to find the same document filed twice. */
   hash?: string;
+  /** The document across edits and devices (shared.ts docKey), to share reading state. */
+  share?: string;
 };
 
 export type Hit = { doc: IndexedDoc; score: number; page: number; snippet: { before: string; match: string; after: string } | null };

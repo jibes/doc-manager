@@ -20,6 +20,7 @@ import { shell } from '@/lib/shell';
 import { useAmbientLight } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { schedule, startIndexing } from '@/archive/indexer';
+import { startSharing } from '@/archive/sharing';
 import { useLibrary } from '@/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -44,6 +45,7 @@ export default function RootLayout() {
   // Search across documents: the index is built in the background, and again when the library changes.
   useEffect(() => {
     startIndexing();
+    startSharing();
     return useLibrary.subscribe((s, prev) => {
       if (s.docs.length !== prev.docs.length) schedule();
     });
