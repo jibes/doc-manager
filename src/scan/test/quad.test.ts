@@ -12,6 +12,7 @@ import {
   plausibleQuad,
   quadArea,
   quadPageSize,
+  hintOnPhoto,
 } from '../engine/imaging/quad';
 
 /**
@@ -216,5 +217,35 @@ describe('fallbackQuad', () => {
   it('says neither crop measures the page', () => {
     expect(cropShapeUnknown(fallbackQuad(3000, 4000), 3000, 4000)).toBe(true);
     expect(cropShapeUnknown(fallbackQuad(3000, 4000, true), 3000, 4000)).toBe(true);
+  });
+});
+
+describe('the preview page on the photo', () => {
+  const quad = [
+    [0.25, 0.25],
+    [0.75, 0.25],
+    [0.75, 0.75],
+    [0.25, 0.75],
+  ] as unknown as Quad;
+
+  it('maps the same view directly', () => {
+    expect(hintOnPhoto({ quad, aspect: 0.75 }, 300, 400)).toEqual([
+      [75, 100],
+      [225, 100],
+      [225, 300],
+      [75, 300],
+    ]);
+  });
+
+  it('places a 9:16 video in the middle of a wider 3:4 photo', () => {
+    // The video spans the photo's height; its width is 400 * 9/16 = 225, centred: 37.5 to 262.5.
+    const q = hintOnPhoto({ quad, aspect: 9 / 16 }, 300, 400)!;
+    expect(q[0][0]).toBeCloseTo(37.5 + 0.25 * 225);
+    expect(q[0][1]).toBeCloseTo(100);
+    expect(q[2][0]).toBeCloseTo(37.5 + 0.75 * 225);
+  });
+
+  it('gives up when the photo is turned against the video', () => {
+    expect(hintOnPhoto({ quad, aspect: 0.75 }, 400, 300)).toBeNull();
   });
 });

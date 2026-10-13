@@ -48,7 +48,13 @@ export type ProcessorResponse =
 /* ------------------------------------------------------------- detector ---- */
 
 /** Where a still's page quad came from. */
-export type StillSource = 'model' | 'edges' | 'frame' | 'none';
+export type StillSource = 'model' | 'edges' | 'frame' | 'preview' | 'none';
+
+/**
+ * The page as the live preview showed it when the photo was taken: corners as fractions of the video frame, and
+ * the frame's width over height (the photo may show more around it).
+ */
+export type StillHint = { quad: Quad; aspect: number };
 
 export interface StillResult {
   /** In source pixel-edge coordinates, or null when no page was found. */
@@ -75,7 +81,7 @@ export type DetectorRequest =
   /** A video frame, already resized to the model's input size. */
   | { type: 'frame'; id: number; frame: ImageBitmap }
   /** A captured photo: detect, then refine against the full-resolution edges. */
-  | { type: 'still'; id: number; source: Blob };
+  | { type: 'still'; id: number; source: Blob; hint?: StillHint };
 
 export type DetectorResponse =
   | { type: 'ready'; backend: string }
