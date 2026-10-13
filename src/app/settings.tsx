@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -221,6 +222,10 @@ function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (mes
           <T v="caption" color={p.muted} style={styles.note}>
             {t.inboxHereNote} {t.inboxOtherDevice}
           </T>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+            <Button testID="open-trash" kind="quiet" icon="trash" label={t.trashTitle} onPress={() => router.push('/trash')} />
+            <Button testID="open-sync" kind="quiet" icon="copy" label={t.syncTitle} onPress={() => router.push('/sync')} />
+          </View>
         </>
       )}
     </>

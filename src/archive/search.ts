@@ -8,7 +8,8 @@ import type { FolderEntry } from '@/lib/folderTypes';
  */
 
 /** Where a document is: in the library (a copy, or linked), or a file in one of the user's folders. */
-export type Place = { kind: 'library'; id: string } | { kind: 'folder'; root: string; rootName: string; entry: FolderEntry };
+/** Where a document is: in the library, or a file in a folder (`dir`: its parent folder's ID, undefined at the top). */
+export type Place = { kind: 'library'; id: string } | { kind: 'folder'; root: string; rootName: string; dir?: string; entry: FolderEntry };
 
 export type IndexedDoc = {
   /** "lib:<id>" or "<root>:<entry id>". */
@@ -26,6 +27,8 @@ export type IndexedDoc = {
   pages: string[];
   /** Could not be read (damaged, protected): kept so it isn't tried again until it changes. */
   failed?: boolean;
+  /** Content hash (SHA-256, hex), to find the same document filed twice. */
+  hash?: string;
 };
 
 export type Hit = { doc: IndexedDoc; score: number; page: number; snippet: { before: string; match: string; after: string } | null };

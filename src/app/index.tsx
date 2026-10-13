@@ -54,6 +54,7 @@ export default function Home() {
   // Documents indexed for search across the library and folders.
   const indexed = useIndex((s) => s.count);
   const inboxShown = usePrefs((s) => !!s.archive && s.inboxHere);
+  const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
 
   useEffect(() => {
     load();
@@ -104,6 +105,20 @@ export default function Home() {
             {docs.length > 0 && <IconButton testID="add" icon="plus" label={t.addPdf} onPress={async () => add(await pickPdfs())} />}
           </AppHeader>
 
+          {syncIssues > 0 && (
+            <Pressable
+              testID="sync-banner"
+              accessibilityRole="button"
+              onPress={() => router.push('/sync')}
+              style={[styles.banner, { backgroundColor: p.mark, borderColor: p.markRing }]}
+            >
+              <Icon name="copy" size={18} color={p.ink} />
+              <T v="label" style={{ flex: 1 }}>
+                {t.syncBanner(syncIssues)}
+              </T>
+              <Icon name="chevronRight" size={18} color={p.ink} />
+            </Pressable>
+          )}
           {docs.length === 0 ? (
             <EmptyLibrary onAdd={async () => add(await pickPdfs())} onSample={async () => add([await sampleItem()])} />
           ) : (
@@ -329,6 +344,7 @@ function Row({
 }
 
 const styles = StyleSheet.create({
+  banner: { flexDirection: 'row', alignItems: 'center', gap: space.md, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.lg, paddingVertical: space.md, marginBottom: space.lg },
   section: { marginBottom: space.xxl },
   kicker: { marginBottom: space.md },
   continue: { flexDirection: 'row', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth },

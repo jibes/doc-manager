@@ -234,8 +234,53 @@ class Folders(private val context: Context) {
     /** Replaces a document's bytes with `source` (the reader saved form fields or annotations). */
     fun write(uri: Uri, source: File) {
         check(uri)
-        if (uri.scheme == "file") source.copyTo(File(uri.path!!), overwrite = true)
+        if (uri.scheme == "file") replace(File(uri.path!!)) { out -> source.inputStream().use { it.copyTo(out) } }
         else resolver.openOutputStream(uri, "wt")!!.use { out -> source.inputStream().use { it.copyTo(out) } }
+    }
+
+    /**
+     * Writes a file whole or not at all: into a hidden temporary file beside it, then renamed over it, so a sync
+     * tool (Syncthing) never picks up a half-written file. (Picked folders reached through the system's document
+     * providers can't rename over a file; there the bytes are staged first and copied in one go.)
+     */
+    private fun replace(target: File, write: (java.io.OutputStream) -> Unit) {
+        val temp = File(target.parentFile, ".${target.name}.tessel-tmp")
+        try {
+            FileOutputStream(temp).use { out ->
+                write(out)
+                out.fd.sync()
+            }
+            if (!temp.renameTo(target)) throw IllegalStateException("Can't replace ${target.name}")
+        } finally {
+            temp.delete()
+        }
+    }
+
+    /**
+     * The folder at `path` below a place, made where missing when `create`: its ID as list() and create() take it
+     * (a document ID in a picked folder, a path on the device), or null.
+     */
+    fun dirAt(root: String, path: List<String>, create: Boolean): String? {
+        require(path.none { it.isEmpty() || it == ".." || it.contains('/') }) { "Bad path" }
+        if (root == "device" || root == "app") {
+            val rel = path.joinToString(File.separator)
+            val base = if (root == "app") inAppFolder(appDir.absolutePath) else onDevice(storageRoot.absolutePath)
+            val f = File(base, rel)
+            if (!f.isDirectory && !(create && f.mkdirs())) return null
+            return (if (root == "app") inAppFolder(f.path) else onDevice(f.path)).absolutePath
+        }
+        if (root == "all") throw IllegalArgumentException("Not a folder")
+        val tree = tree(root)
+        var id = DocumentsContract.getTreeDocumentId(tree)
+        for (name in path) {
+            id = childNamed(tree, id, name) ?: run {
+                if (!create) return null
+                val made = DocumentsContract.createDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, id), Document.MIME_TYPE_DIR, name)
+                    ?: throw IllegalStateException("Can't create $name")
+                DocumentsContract.getDocumentId(made)
+            }
+        }
+        return id
     }
 
     /** Content URI another app can open (share): document URIs as they are, files through the FileProvider. */
@@ -296,7 +341,7 @@ class Folders(private val context: Context) {
     /** Writes a text file at `path` below a place, making the folders on the way and replacing what was there. */
     fun writeText(root: String, path: List<String>, text: String) {
         val uri = fileAt(root, path, create = true) ?: throw IllegalStateException("Can't write ${path.joinToString("/")}")
-        if (uri.scheme == "file") File(uri.path!!).writeText(text)
+        if (uri.scheme == "file") replace(File(uri.path!!)) { it.write(text.toByteArray()) }
         else resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }
     }
 
