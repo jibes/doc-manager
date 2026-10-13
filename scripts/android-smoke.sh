@@ -73,6 +73,8 @@ on_fail() {
 trap 'on_fail' ERR
 
 adb install -r "$APK"
+# AI reading needs the network: without this permission every request fails ("Failed to fetch").
+adb shell dumpsys package app.tessel.viewer | grep -q "android.permission.INTERNET: granted=true" || { echo "No internet permission"; exit 1; }
 adb logcat -c
 adb shell am start -W -n app.tessel.viewer/.MainActivity
 wait_for "Every document"
