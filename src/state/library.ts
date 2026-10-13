@@ -49,6 +49,7 @@ type LibraryState = {
   toggleBookmark(id: string, page: number): void;
   toggleReading(id: string): void;
   setView(id: string, view: 'page' | 'text'): void;
+  toggleInvert(id: string): void;
   markOpened(id: string): void;
   /** Record facts that changed with the file itself (a linked file edited elsewhere). */
   updateFileInfo(id: string, info: { pageCount: number }): void;
@@ -262,6 +263,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
       ),
 
     setView: (id, view) => patch(id, (d) => ({ ...d, view })),
+
+    toggleInvert: (id) => patch(id, (d) => ({ ...d, invert: d.invert ? undefined : true })),
 
     toggleReading: (id) => patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } })),
 

@@ -3,57 +3,56 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { t } from '@/i18n';
 import { IconButton, T, tick } from '@/components/primitives';
 import { fonts, palettes, radius, space, type Palette, type ThemeName } from '@/design/tokens';
-import { usePalette, usePrefs, type FitMode, type TextFont, type TextLeading, type TextWidth } from '@/state/prefs';
+import { usePalette, usePrefs, type Appearance, type FitMode, type TextFont, type TextLeading, type TextWidth } from '@/state/prefs';
 import { hasLightSensor } from '@/state/ambient';
 import { Panel } from './Panel';
 
-const PAGE_TINT: Record<ThemeName, string> = { paper: '#FFFFFF', sepia: '#F3E6CC', dusk: '#3A3A3C', night: '#1A1A1A' };
-const PAGE_INK: Record<ThemeName, string> = { paper: '#1B1A17', sepia: '#3A2E20', dusk: '#E2DED5', night: '#CFCAC0' };
-
-type Choice = ThemeName | 'ambient' | null;
-const LABEL = (c: Choice) => (c === 'ambient' ? t.themeAmbient : c ? t.themes[c] : t.themeAuto);
+type Choice = Appearance;
+const LABEL: Record<Choice, () => string> = { light: () => t.appearanceLight, dark: () => t.appearanceDark, auto: () => t.appearanceAuto };
+/** Ink on the preview page: printed black, dimmed with the page in Dark. */
+const PAGE_INK: Record<ThemeName, string> = { light: '#1B1A17', dark: '#26231F' };
 
 function Swatch({ name, selected, onPress }: { name: Choice; selected: boolean; onPress: () => void }) {
   const p = usePalette();
-  // Auto: light | dark; light sensor: the three steps it moves through.
-  const halves: ThemeName[] = name === 'ambient' ? ['paper', 'dusk', 'night'] : name ? [name] : ['paper', 'dusk'];
+  // Auto shows both halves: what it switches between.
+  const halves: ThemeName[] = name === 'auto' ? ['light', 'dark'] : [name];
   return (
     <Pressable
+      testID={`appearance-${name}`}
       accessibilityRole="radio"
       aria-checked={selected}
-      accessibilityLabel={name === 'ambient' ? t.themeAmbientA11y : name ? t.themes[name] : t.themeAutoA11y}
+      accessibilityLabel={name === 'auto' ? (hasLightSensor ? t.appearanceAutoSensorA11y : t.appearanceAutoA11y) : LABEL[name]()}
       onPress={() => {
         tick();
         onPress();
       }}
-      style={{ flex: 1, maxWidth: 64, alignItems: 'center', gap: 6 }}
+      style={{ flex: 1, maxWidth: 88, alignItems: 'center', gap: 6 }}
     >
       <View style={[styles.swatch, { borderColor: selected ? p.accent : p.hairline, borderWidth: selected ? 2 : 1 }]}>
         <View style={{ flex: 1, flexDirection: 'row', borderRadius: radius.sm - 2, overflow: 'hidden' }}>
           {halves.map((h) => (
             <View key={h} style={{ flex: 1, backgroundColor: palettes[h].canvas, alignItems: 'center', justifyContent: 'center' }}>
-              <View style={[styles.mini, { backgroundColor: PAGE_TINT[h] }]}>
-                {halves.length < 3 && <T style={{ fontFamily: fonts.serif, fontSize: 15, color: PAGE_INK[h] }}>Aa</T>}
+              <View style={[styles.mini, { backgroundColor: palettes[h].page.base }]}>
+                <T style={{ fontFamily: fonts.serif, fontSize: 15, color: PAGE_INK[h] }}>Aa</T>
               </View>
             </View>
           ))}
         </View>
       </View>
       <T v="caption" color={selected ? p.ink : p.muted} style={{ fontFamily: fonts.sansMedium }}>
-        {LABEL(name)}
+        {LABEL[name]()}
       </T>
     </Pressable>
   );
 }
 
-/** Theme choice: Auto (system), the four themes, and the light sensor where there is one. */
-export function ThemePicker() {
-  const { theme, set } = usePrefs();
-  const choices: Choice[] = [null, ...(hasLightSensor ? (['ambient'] as const) : []), 'paper', 'sepia', 'dusk', 'night'];
+/** Light, Dark or Auto (the system's mode, or the light sensor where there is one). */
+export function AppearancePicker() {
+  const { appearance, set } = usePrefs();
   return (
     <View style={styles.swatches} accessibilityRole="radiogroup">
-      {choices.map((n) => (
-        <Swatch key={n ?? 'auto'} name={n} selected={theme === n} onPress={() => set({ theme: n })} />
+      {(['light', 'dark', 'auto'] as const).map((n) => (
+        <Swatch key={n} name={n} selected={appearance === n} onPress={() => set({ appearance: n })} />
       ))}
     </View>
   );
@@ -170,7 +169,7 @@ export function AppearancePanel({
   return (
     <Panel title={t.appearance} onClose={onClose} compact testID="appearance-panel">
       <View style={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.xl }}>
-        <ThemePicker />
+        <AppearancePicker />
 
         {view === 'text' ? (
           <TextSettings p={p} />

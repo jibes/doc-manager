@@ -5,8 +5,9 @@ import type { ThemeName } from '@/design/tokens';
 import { shell } from '@/lib/shell';
 
 /**
- * The "light sensor" theme: Light in a bright room, Dark when it's dim, Black in the dark. Readings come from
- * the Android app (the phone's light sensor) or, where a browser offers one, the Ambient Light Sensor API.
+ * Auto appearance with a light sensor: Light in a lit room, Dark when it's dim. Readings come from the Android
+ * app (the phone's light sensor) or, where a browser offers one, the Ambient Light Sensor API. Without a
+ * sensor, Auto follows the system's light or dark mode instead.
  */
 
 type Reading = (lux: number) => void;
@@ -46,17 +47,18 @@ const source: Source | null = shell?.hasLightSensor?.()
       }
     : null;
 
-/** The light sensor theme can be offered here. */
+/** Auto follows the light here (not only the system's mode). */
 export const hasLightSensor = source != null;
 
 /** Darkest first. */
-const LEVELS: ThemeName[] = ['night', 'dusk', 'paper'];
+const LEVELS: ThemeName[] = ['dark', 'light'];
 /**
- * Lux where the theme steps down (darker) or up (lighter). The gap between them, and waiting for the light to
- * hold for a few seconds, keep it from flickering when a shadow passes or the phone tilts.
+ * Lux where Auto turns Dark (below) or Light again (above): an evening room with a lamp stays Light. The gap
+ * between them, and waiting for the light to hold for a few seconds, keep it from flickering when a shadow
+ * passes or the phone tilts.
  */
-const DOWN = [3, 25];
-const UP = [8, 60];
+const DOWN = [12];
+const UP = [40];
 const SETTLE_MS = 2500;
 
 /** The level the light calls for, starting from the current one (hysteresis). */
@@ -69,7 +71,7 @@ export function levelFor(lux: number, current: number): number {
 
 export const useAmbient = create<{ theme: ThemeName | null }>(() => ({ theme: null }));
 
-/** Follows the light while the light sensor theme is chosen; mounted once in the root layout. */
+/** Follows the light while Auto is chosen (where there is a sensor); mounted once in the root layout. */
 export function useAmbientLight(enabled: boolean) {
   useEffect(() => {
     if (!enabled || !source) return;
@@ -79,7 +81,7 @@ export function useAmbientLight(enabled: boolean) {
       if (!Number.isFinite(lux)) return;
       // The first reading applies at once; after that, a change has to hold for a moment.
       if (current < 0) {
-        current = levelFor(lux, lux < DOWN[1] ? 1 : 2);
+        current = lux < DOWN[0] ? 0 : 1;
         useAmbient.setState({ theme: LEVELS[current] });
         return;
       }

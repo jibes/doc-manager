@@ -9,7 +9,7 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
-import { ThemePicker } from '@/reader/AppearancePanel';
+import { AppearancePicker } from '@/reader/AppearancePanel';
 import { hasLightSensor } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
 
@@ -62,13 +62,11 @@ export default function Settings() {
           {t.appearanceTitle}
         </T>
         <View testID="settings-theme" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline, padding: space.lg }]}>
-          <ThemePicker />
+          <AppearancePicker />
         </View>
-        {hasLightSensor && (
-          <T v="caption" color={p.muted} style={styles.note}>
-            {t.themeNote}
-          </T>
-        )}
+        <T v="caption" color={p.muted} style={styles.note}>
+          {hasLightSensor ? t.appearanceNoteSensor : t.appearanceNoteSystem} {t.appearanceNote}
+        </T>
 
         <View style={{ height: space.xxl }} />
 

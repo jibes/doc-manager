@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 import type { DocHandle } from '@/engine/types';
 import { t } from '@/i18n';
+import { ask } from '@/state/ask';
 import type { Current } from '@/lib/fileActions';
 import { goBack } from '@/lib/nav';
 import { repo, type DocRecord } from '@/storage';
@@ -35,14 +36,7 @@ export function useEdits(doc: DocRecord, handle: DocHandle) {
 
   const leave = useCallback(() => {
     if (!dirty) return goBack();
-    if (Platform.OS === 'web') {
-      if (window.confirm(t.unsavedLeave)) goBack();
-    } else {
-      Alert.alert(t.saveShortcut, t.unsavedLeave, [
-        { text: t.cancel, style: 'cancel' },
-        { text: t.discard, style: 'destructive', onPress: goBack },
-      ]);
-    }
+    void ask({ title: t.unsavedTitle, body: t.unsavedLeave, confirm: t.discard, destructive: true }).then((answer) => answer !== null && goBack());
   }, [dirty]);
 
   // Closing the tab with unsaved edits: the browser's own "leave site?" prompt.

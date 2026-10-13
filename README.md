@@ -18,7 +18,7 @@ Live web app: https://jibes.github.io/doc-reader/
 | Home — acquire, organise, resume | Open/picker, drag-and-drop, OS "Open with" (PWA File Handling), Recent list, reading list with progress + Finished, filter, remove (keeps the original); **open in place** in Chromium (File System Access: the library links to your file, re-asks permission, finds moved files; copy elsewhere) | Open in place on native |
 | Viewer — render, navigate, find, act | Virtualised continuous scroll, fit width/page, zoom (buttons, ⌘±, trackpad/pinch), outline, page grid, scrubber with chapter marks, go-to-page, full-text search with persistent highlights and find bar, selectable text (web), internal + web links, password-protected PDFs (password kept for the session only), share / download / print (⌘S, ⌘P); **fill forms** (text, checkbox, radio, dropdown, list); **highlights and notes** from a text selection, listed under Notes, from any app; Save writes into the original (in place) or Tessel's copy | Text selection, links, forms and annotations on native (PDFium on all platforms); ink, shapes |
 | Reading | **EPUB books** (EPUB 2 and 3: contents, footnotes, inline formatting, images; straight onto the reading list); reading list, immersive chrome, progress, bookmarks; **text view** (reflow) with font, size, line spacing and width settings, position shared with page view; multi-column layouts, inline figures and tables, search highlights; on-device OCR for scans (web) | Text view and OCR on native |
-| Personalisation | Light, Sepia, Dark, Black, Auto; English and German (follows OS) | More languages |
+| Personalisation | Light, Dark, Auto; Invert colours per document; English and German (follows OS) | More languages |
 | Platform | Offline PWA, install button, IndexedDB / app-documents storage, keyboard map, a11y labels | EAS builds |
 
 ## Install on Android
@@ -31,7 +31,7 @@ The app is the web app bundled in a native shell (`shell/android`): every featur
 F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6:A6:F5:8E:E3:94
 ```
 
-**Light sensor theme.** Settings (and the reader's appearance panel) offer *Sensor*: the phone's light sensor picks Light in a bright room, Dark when it's dim and Black in the dark, switching only after the light has held for a few seconds. The sensor runs only while this theme is chosen and the app is in front. Browsers rarely expose a light sensor, so the web version shows the option only where one exists.
+**Appearance.** Light, Dark or Auto. Auto follows the system's light or dark mode; in the Android app it follows the phone's light sensor instead (Dark when the room is dim, switching only after the light has held for a few seconds; the sensor runs only while Auto is chosen and the app is in front). In Dark, PDF pages keep their printed colours but are shown slightly dimmed and warm, so a white page doesn't glare; text view follows the appearance. *Invert colours* (reader menu, page view) is remembered per document, for dark slides or long night reading.
 
 **Navigation.** Library and Files are tabs: along the bottom on phones (with Scan in the middle), in the header on wider windows (Scan on the right). Files also has “Other location…”, the system picker, for single files from anywhere.
 

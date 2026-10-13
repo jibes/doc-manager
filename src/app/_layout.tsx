@@ -23,7 +23,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const p = usePalette();
-  useAmbientLight(usePrefs((s) => s.theme) === 'ambient');
+  useAmbientLight(usePrefs((s) => s.appearance) === 'auto');
   const [loaded, error] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
