@@ -636,7 +636,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
             {wide && (
               <>
                 <IconButton icon="zoomOut" label={`${t.zoomOut} (⌘−)`} size={34} onPress={() => setZoom(zoom / 1.2)} />
-                <Pressable onPress={() => setZoom(1)} accessibilityLabel={t.resetZoom}>
+                <Pressable accessibilityRole="button" onPress={() => setZoom(1)} accessibilityLabel={t.resetZoom}>
                   <T v="numeral" color={p.muted} style={{ minWidth: 40, textAlign: 'center' }}>
                     {Math.round(zoom * 100)}%
                   </T>

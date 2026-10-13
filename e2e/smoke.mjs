@@ -116,6 +116,15 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('open-find').click();
   check((await page.getByTestId('contents-body').count()) === 1, `${name}: Find shows the contents under its search field`);
   check(await page.getByTestId('view-toggle').isVisible(), `${name}: Text view is in the bar`);
+  // A long press on a control (holding a button, a row) must not select its text; the document's text stays selectable.
+  const selectable = await page.evaluate(() => {
+    const labels = [...document.querySelectorAll('*')].filter(
+      (e) => e.offsetParent && getComputedStyle(e).cursor === 'pointer' && e.getAttribute('role') !== 'group' && e.closest('[role=link]') == null,
+    );
+    return labels.flatMap((e) => [e, ...e.querySelectorAll('*')]).filter((n) => [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim()) && getComputedStyle(n).userSelect !== 'none').map((n) => n.textContent.trim().slice(0, 24));
+  });
+  const docText = await page.evaluate(() => [...document.querySelectorAll('.tl span')].some((e) => getComputedStyle(e).userSelect !== 'none'));
+  check(selectable.length === 0 && docText, `${name}: controls don't select their text, the document's does (${selectable.slice(0, 3).join(' | ') || 'none'})`);
   await page.getByTestId('search-input').fill('tessel');
   await page.waitForFunction(() => document.body.innerText.match(/\d+ results?/), null, { timeout: 10000 });
   check((await page.getByTestId('contents-body').count()) === 0 && (await page.getByTestId('search-results').count()) === 1, `${name}: typing in Find replaces the contents with matches`);

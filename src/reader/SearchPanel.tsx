@@ -122,7 +122,7 @@ export function SearchResults({
           const post = item.snippet.slice(item.matchStart + item.matchLength).replace(/\s\S*$/, '…');
           const newPage = index === 0 || hits[index - 1].page !== item.page;
           return (
-            <Pressable
+            <Pressable accessibilityRole="button"
               onPress={() => onPick(index)}
               style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
                 styles.hit,

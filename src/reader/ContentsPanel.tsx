@@ -92,7 +92,7 @@ export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmark
             renderItem={({ item, index }) => {
               const current = index === currentIdx;
               return (
-                <Pressable
+                <Pressable accessibilityRole="button"
                   disabled={item.page < 0}
                   onPress={() => onGo(item.page)}
                   style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
@@ -139,7 +139,7 @@ export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmark
             renderItem={({ item }) => {
               const chapter = outline ? [...outline].reverse().find((o) => o.page >= 0 && o.page <= item) : undefined;
               return (
-                <Pressable
+                <Pressable accessibilityRole="button"
                   onPress={() => onGo(item)}
                   style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.bmRow, { backgroundColor: hovered ? p.hairline : 'transparent' }]}
                 >
@@ -173,7 +173,7 @@ export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmark
             contentContainerStyle={{ paddingBottom: space.xl }}
             renderItem={({ item: a }) => (
               <View style={[styles.noteRow, { borderColor: p.hairline }]} testID="note-row">
-                <Pressable onPress={() => onGo(a.page)} style={{ flex: 1, gap: 4 }}>
+                <Pressable accessibilityRole="button" onPress={() => onGo(a.page)} style={{ flex: 1, gap: 4 }}>
                   <View style={styles.noteHead}>
                     <View style={[styles.swatch, { backgroundColor: a.color ?? p.accent }]} />
                     <T v="caption" color={p.muted}>
@@ -235,7 +235,7 @@ function PagesGrid({ p, sizes, cache, page, onGo, bookmarks }: { p: Palette; siz
           windowSize={5}
           columnWrapperStyle={{ gap: space.md, paddingHorizontal: space.xl }}
           renderItem={({ item }) => (
-            <Pressable onPress={() => onGo(item)} style={{ width: cellW, height: rowH, alignItems: 'center', paddingTop: 4 }}>
+            <Pressable accessibilityRole="button" onPress={() => onGo(item)} style={{ width: cellW, height: rowH, alignItems: 'center', paddingTop: 4 }}>
               <View style={[{ borderRadius: 4, padding: 2, borderWidth: 2, borderColor: item === page ? p.accent : 'transparent' }]}>
                 <Thumb cache={cache} page={item} size={sizes[item]} width={cellW - 8} palette={p} />
               </View>
