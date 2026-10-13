@@ -28,6 +28,7 @@ import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 import { detailsOf, saveDetails } from '@/archive/details';
 import { invalidate, pauseIndexing } from '@/archive/indexer';
+import { makeSearchable, pagesWithoutText } from '@/archive/searchable';
 import type { Details } from '@/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
 import { DetailsPanel } from './DetailsPanel';
@@ -106,6 +107,39 @@ export function Reader({
       setReloaded(e instanceof Error && /encrypted/.test(e.message) ? t.detailsEncrypted : t.detailsFailed);
     } finally {
       setSavingDetails(false);
+    }
+  };
+
+  // An image-only PDF (no text on its first page) can get its text read and added.
+  const [textless, setTextless] = useState(false);
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || doc.format === 'epub') return;
+    let alive = true;
+    pagesWithoutText(handle, 1).then((pages) => alive && setTextless(pages.length > 0), () => {});
+    return () => {
+      alive = false;
+    };
+  }, [handle, doc.format]);
+  const addText = async () => {
+    if (reading) return;
+    setReading({ done: 0, total: 0 });
+    try {
+      if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
+      const bytes = await makeSearchable(handle, (done, total) => setReading({ done, total }));
+      if (typeof bytes === 'string') {
+        setReloaded(bytes === 'has-text' ? t.searchableNothing : t.searchableNone);
+        return;
+      }
+      await repo.writeFile(doc.id, bytes);
+      invalidate(doc.id);
+      afterReload = t.searchableDone;
+      if (onReload) onReload();
+      else setReloaded(t.searchableDone);
+    } catch (e) {
+      setReloaded(t.searchableFailed(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReading(null);
     }
   };
 
@@ -584,6 +618,7 @@ export function Reader({
   // Document actions; how it looks lives in Aa, how to find things in the bar.
   const menuItems: MenuItem[] = [
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
+    ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
     readingItem,
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
@@ -839,12 +874,20 @@ export function Reader({
       {panel === 'details' && (
         <DetailsPanel palette={p} initial={detailsOf(handle, doc.title)} busy={savingDetails} onSave={(d) => void writeDetails(d)} onClose={() => setPanel(null)} />
       )}
+      {reading && (
+        <View pointerEvents="none" testID="searchable-progress" style={[styles.reading, { top: insets.top + TOP_BAR + space.md, backgroundColor: p.glass, borderColor: p.hairline }]}>
+          <T v="caption" color={p.ink}>
+            {reading.total ? t.searchableProgress(reading.done, reading.total) : t.makeSearchable}
+          </T>
+        </View>
+      )}
       <Toast message={edits.notice ?? reloaded} onDismiss={() => (edits.clearNotice(), setReloaded(null))} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  reading: { position: 'absolute', alignSelf: 'center', paddingHorizontal: space.lg, paddingVertical: space.sm, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth },
   top: {
     position: 'absolute',
     top: 0,

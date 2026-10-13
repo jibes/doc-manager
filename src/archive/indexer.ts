@@ -7,7 +7,7 @@ import { engine } from '@/engine';
 import { folders, type FolderRoot } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
 import { repo } from '@/storage';
-import { parseTags } from './pdfInfo';
+import { parseTags, real } from './pdfInfo';
 import { createIndex, searchIndex, type Hit, type IndexedDoc, type Place } from './search';
 
 /**
@@ -162,7 +162,7 @@ async function read(c: Candidate): Promise<IndexedDoc | null> {
       const runs = await handle.pageText(p).catch(() => []);
       pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ').slice(0, MAX_PAGE_CHARS));
     }
-    return { ...base, title: m.title ?? '', sender: m.author ?? '', type: m.subject ?? '', tags: parseTags(m.keywords), date: m.date ?? '', pages };
+    return { ...base, title: real(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
   } finally {
     handle.close();
   }

@@ -150,6 +150,12 @@ function concat(...chunks: Uint8Array[]): Uint8Array<ArrayBuffer> {
 /* ------------------------------------------------------------ details ---- */
 
 /** What Tessel knows about a document, kept in its information dictionary. */
+/** A detail as written, unless it is a tool's placeholder ("untitled", "anonymous", "(unspecified)"). */
+export const real = (value: string | undefined) => {
+  const v = (value ?? '').trim();
+  return /^\(?(untitled|anonymous|unknown|unspecified|none|null|n\/a|-+)\)?$/i.test(v) ? '' : v;
+};
+
 export type Details = { title: string; sender: string; type: string; tags: string[]; date: string };
 
 /** Tags as written in Keywords: comma-separated (semicolons from other tools are read too). */

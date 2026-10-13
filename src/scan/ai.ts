@@ -1,3 +1,4 @@
+import { shell, shellRequest } from '@/lib/shell';
 import type { PdfWord } from './engine/pdf/writer';
 
 /**
@@ -109,6 +110,74 @@ export function parseResult(text: string, pageCount: number): AiResult {
   };
 }
 
+/**
+ * fetch, or in the Android app a request made by the app itself: the WebView's page is served from the app's
+ * own host, which an address's CORS rules (set up for the web app's address, or for none) don't allow.
+ */
+async function post(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
+  if (!shell) return fetch(url, { method: 'POST', ...init });
+  init.signal?.throwIfAborted();
+  const aborted = new Promise<never>((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true }));
+  const r = await Promise.race([shellRequest<{ status: number; body: string }>('http', { url, method: 'POST', headers: init.headers, body: init.body }), aborted]);
+  return new Response(r.body, { status: r.status });
+}
+
+const DECLINED = 'The model declined to read this document.';
+
+/** The data of each server-sent event ("data: …" lines), or null when the reply isn't a stream. */
+function events(raw: string): unknown[] | null {
+  const lines = raw.split(/\r?\n/).filter((l) => l.startsWith('data:'));
+  if (!lines.length) return null;
+  return lines
+    .map((l) => l.slice(5).trim())
+    .filter((d) => d && d !== '[DONE]')
+    .map((d) => {
+      try {
+        return JSON.parse(d) as unknown;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+/** The text of an Anthropic reply, streamed (as asked) or whole (a server that doesn't stream). */
+export function anthropicReply(raw: string): string {
+  type Event = { type: string; delta?: { type?: string; text?: string; stop_reason?: string }; error?: { message?: string } };
+  const stream = events(raw) as Event[] | null;
+  if (!stream) {
+    const message = JSON.parse(raw) as { content?: { type: string; text?: string }[]; stop_reason?: string };
+    if (message.stop_reason === 'refusal') throw new Error(DECLINED);
+    return (message.content ?? []).map((b) => (b.type === 'text' ? (b.text ?? '') : '')).join('');
+  }
+  let text = '';
+  for (const e of stream) {
+    if (e.type === 'error') throw new Error(e.error?.message ?? 'The model stopped with an error.');
+    if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') text += e.delta.text ?? '';
+    if (e.type === 'message_delta' && e.delta?.stop_reason === 'refusal') throw new Error(DECLINED);
+  }
+  return text;
+}
+
+/** The text of a Chat Completions reply, streamed or whole. */
+export function openAiReply(raw: string): string {
+  type Choice = { delta?: { content?: string | null; refusal?: string | null }; message?: { content?: string | null; refusal?: string | null } };
+  const stream = events(raw) as { choices?: Choice[]; error?: { message?: string } }[] | null;
+  if (!stream) {
+    const msg = (JSON.parse(raw) as { choices?: Choice[] }).choices?.[0]?.message;
+    if (msg?.refusal) throw new Error(DECLINED);
+    return msg?.content ?? '';
+  }
+  let text = '';
+  for (const e of stream) {
+    if (e.error) throw new Error(e.error.message ?? 'The model stopped with an error.');
+    const delta = e.choices?.[0]?.delta;
+    if (delta?.refusal) throw new Error(DECLINED);
+    text += delta?.content ?? '';
+  }
+  return text;
+}
+
 const trimSlash = (url: string) => url.trim().replace(/\/+$/, '');
 
 /**
@@ -124,6 +193,9 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
     JSON.stringify({
       model: s.model.trim(),
       max_tokens: 16000,
+      // Streamed: the reply starts at once, so a proxy on the way (Cloudflare gives up after ~100 s without a
+      // byte) doesn't cut off a long reading. The whole stream is read before it is used.
+      stream: true,
       messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
       ...(structured ? { output_config: { format: { type: 'json_schema', schema: req.schema } } } : {}),
     });
@@ -131,8 +203,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
   // A model or server without structured output gets the request again without it: the prompt asks for JSON anyway.
   for (const structured of [true, false]) {
     // With or without the /v1 that OpenAI-style addresses carry.
-    const res = await fetch(`${trimSlash(s.url).replace(/\/v1$/, '')}/v1/messages`, {
-      method: 'POST',
+    const res = await post(`${trimSlash(s.url).replace(/\/v1$/, '')}/v1/messages`, {
       headers: {
         'content-type': 'application/json',
         'anthropic-version': '2023-06-01',
@@ -142,11 +213,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
       body: body(structured),
       signal,
     });
-    if (res.ok) {
-      const message = (await res.json()) as { content?: { type: string; text?: string }[]; stop_reason?: string };
-      if (message.stop_reason === 'refusal') throw new Error('The model declined to read this document.');
-      return (message.content ?? []).map((b) => (b.type === 'text' ? (b.text ?? '') : '')).join('');
-    }
+    if (res.ok) return anthropicReply(await res.text());
     last = `${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`;
     if (res.status !== 400) break;
   }
@@ -159,23 +226,18 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
     JSON.stringify({
       model: s.model.trim(),
       messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
+      stream: true,
       ...(format ? { response_format: format } : {}),
     });
   const formats = [{ type: 'json_schema', json_schema: { name: 'document', strict: true, schema: req.schema } }, { type: 'json_object' }, null];
   let last = '';
   for (const format of formats) {
-    const res = await fetch(`${trimSlash(s.url)}/chat/completions`, {
-      method: 'POST',
+    const res = await post(`${trimSlash(s.url)}/chat/completions`, {
       headers: { 'content-type': 'application/json', ...(s.key ? { authorization: `Bearer ${s.key}` } : {}) },
       body: body(format),
       signal,
     });
-    if (res.ok) {
-      const json = (await res.json()) as { choices?: { message?: { content?: string | null; refusal?: string | null } }[] };
-      const msg = json.choices?.[0]?.message;
-      if (msg?.refusal) throw new Error('The model declined to read this document.');
-      return msg?.content ?? '';
-    }
+    if (res.ok) return openAiReply(await res.text());
     last = `${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`;
     // Only a rejected request format is worth another try.
     if (res.status !== 400 && res.status !== 422) break;

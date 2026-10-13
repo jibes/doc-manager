@@ -98,6 +98,7 @@ function handleFrom(r: OpenResult): DocHandle {
     setField: (page, index, value) => client.call('setField', { doc: r.doc, page, index, value }),
     save: () => client.call('save', { doc: r.doc }),
     bytes: () => client.call('bytes', { doc: r.doc }),
+    addTextLayer: (pages) => client.call('addText', { doc: r.doc, pages }),
     annotations: () => client.call('annots', { doc: r.doc }),
     addHighlight: (page, rects, color, contents) => client.call('addHighlight', { doc: r.doc, page, rects, color, contents }).then(() => {}),
     updateAnnotation: (page, index, patch) => client.call('updateAnnot', { doc: r.doc, page, index, ...patch }).then(() => {}),
