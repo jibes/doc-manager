@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Emulator smoke test for the Android app (CI): install, launch, open the sample, read the screen
 # through the accessibility tree, and fail on any error the web app logs (logcat tag "TesselWeb").
-set -euo pipefail
+set -Eeuo pipefail  # -E: the failure report below also runs when a helper fails
 APK="$1"
 OUT="${2:-android-smoke}"
 mkdir -p "$OUT"
