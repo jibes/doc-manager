@@ -118,7 +118,7 @@ function TextSettings({ p }: { p: Palette }) {
         </T>
         <View style={styles.zoom}>
           <IconButton icon="zoomOut" label={t.smaller} onPress={() => scale(-0.1)} disabled={textScale <= 0.75} testID="text-smaller" />
-          <Pressable onPress={() => set({ textScale: 1 })} accessibilityLabel={t.size} style={styles.zoomVal}>
+          <Pressable accessibilityRole="button" onPress={() => set({ textScale: 1 })} accessibilityLabel={t.size} style={styles.zoomVal}>
             <T v="numeral" style={{ fontSize: 15 }}>
               {Math.round(textScale * 100)}%
             </T>
@@ -205,7 +205,7 @@ export function AppearancePanel({
               </T>
               <View style={styles.zoom}>
                 <IconButton icon="zoomOut" label={t.zoomOut} onPress={() => onZoom(zoom / 1.2)} disabled={zoom <= 0.5} />
-                <Pressable onPress={() => onZoom(1)} accessibilityLabel={t.resetZoom} style={styles.zoomVal}>
+                <Pressable accessibilityRole="button" onPress={() => onZoom(1)} accessibilityLabel={t.resetZoom} style={styles.zoomVal}>
                   <T v="numeral" style={{ fontSize: 15 }}>
                     {Math.round(zoom * 100)}%
                   </T>
@@ -217,7 +217,7 @@ export function AppearancePanel({
             {onInvert && (
               <View testID="invert-toggle" style={styles.switchRow}>
                 {/* Label and switch side by side, not nested: inside a pressable row, the row takes the switch's tap. */}
-                <Pressable onPress={onInvert} importantForAccessibility="no-hide-descendants" aria-hidden style={styles.switchLabel}>
+                <Pressable accessibilityRole="button" onPress={onInvert} importantForAccessibility="no-hide-descendants" aria-hidden style={styles.switchLabel}>
                   <Icon name="invert" size={20} color={p.inkSoft} />
                   <View style={{ flex: 1 }}>
                     <T>{t.invertColours}</T>
