@@ -2,6 +2,7 @@ import { useColorScheme } from 'react-native';
 import { create } from 'zustand';
 
 import { palettes, type Palette } from '@/design/tokens';
+import { DEFAULT_AI, type AiSettings } from '@/scan/ai';
 import { DEFAULT_SCAN_SETTINGS, type ScanSettings } from '@/scan/types';
 import { loadPrefs, savePrefs } from '@/storage/prefs';
 import { useAmbient } from './ambient';
@@ -27,24 +28,27 @@ type Prefs = {
   scan: ScanSettings;
   /** Where scans are saved: a folder's id, or null for the library. */
   scanTo: string | null;
+  /** Reading scans with an AI model at an address the user gives (off until set up). */
+  ai: AiSettings;
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
   ...loadPrefs<Prefs>(),
   // Settings added in later versions get their defaults.
   scan: { ...DEFAULT_SCAN_SETTINGS, ...loadPrefs<Prefs>()?.scan },
+  ai: { ...DEFAULT_AI, ...loadPrefs<Prefs>()?.ai },
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai });
   },
 }));
 

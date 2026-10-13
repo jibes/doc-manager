@@ -189,11 +189,94 @@ export function detectionBoxes(
 }
 
 /**
+ * Reading order: the page is cut into blocks (columns, and bands between
+ * wide gaps), and each block is read line by line.
+ */
+export function readingOrder(boxes: TextBox[]): TextBox[] {
+  return blocks(boxes).flatMap(lineOrder);
+}
+
+/** A gutter between columns, and a gap between bands, in typical line heights. */
+const GUTTER = 1.2;
+const BAND_GAP = 0.75;
+/** Lines on the two sides of a gutter pairing into rows this well: a table or form, read across. */
+const ALIGNED = 0.6;
+
+/**
+ * Recursive XY cut. A vertical gutter splits the boxes into columns read one
+ * after the other, unless the two sides' lines run level (a form's labels and
+ * values, a table's cells): those are rows, read across. Otherwise the widest
+ * horizontal gap splits them into bands, top to bottom.
+ */
+export function blocks(boxes: TextBox[]): TextBox[][] {
+  if (boxes.length < 4) return [boxes];
+  const heights = boxes.map((b) => lineOf(b).height).sort((a, b) => a - b);
+  const h = heights[heights.length >> 1];
+  const cut = widestGap(boxes, 'x');
+  const band = widestGap(boxes, 'y');
+  const bands = () => [...blocks(boxes.filter((b) => b.y1 <= band!.at)), ...blocks(boxes.filter((b) => b.y0 >= band!.at))];
+  // The wider gap first: a section break across the page outranks a narrow gutter inside one section.
+  if (band && band.size >= BAND_GAP * h && band.size >= (cut?.size ?? 0)) return bands();
+  if (cut && cut.size >= GUTTER * h) {
+    const left = boxes.filter((b) => b.x1 <= cut.at);
+    const right = boxes.filter((b) => b.x0 >= cut.at);
+    if (left.length >= 2 && right.length >= 2 && levelShare(left, right) < ALIGNED) return [...blocks(left), ...blocks(right)];
+  }
+  if (band && band.size >= BAND_GAP * h) return bands();
+  return [boxes];
+}
+
+/** The widest stretch along an axis that no box covers, between the first box and the last. */
+export function widestGap(boxes: TextBox[], axis: 'x' | 'y'): { at: number; size: number } | null {
+  const spans = boxes.map((b) => (axis === 'x' ? [b.x0, b.x1] : [b.y0, b.y1])).sort((a, b) => a[0] - b[0]);
+  let end = spans[0][1];
+  let best: { at: number; size: number } | null = null;
+  for (const [s, e] of spans.slice(1)) {
+    if (s > end && (!best || s - end > best.size)) best = { at: (s + end) / 2, size: s - end };
+    end = Math.max(end, e);
+  }
+  return best;
+}
+
+/**
+ * How well two sides pair up into rows: lines matched one to one with a line
+ * level with them on the other side (centred within half a line, about
+ * the same size), as a share of the longer side. A form's labels and values,
+ * or a table's cells, pair up almost fully; two columns of text match only
+ * where their lines happen to line up, and one usually has more lines.
+ */
+export function levelShare(a: TextBox[], b: TextBox[]): number {
+  // A table row on one side can be several cells: compare lines, not boxes.
+  const span = (line: TextBox[]): TextBox => ({ ...line[0], y0: Math.min(...line.map((x) => x.y0)), y1: Math.max(...line.map((x) => x.y1)) });
+  const left = lineGroups(a).map(span);
+  const right = lineGroups(b).map(span);
+  const centre = (x: TextBox) => (x.y0 + x.y1) / 2;
+  const size = (x: TextBox) => x.y1 - x.y0;
+  const free = [...right];
+  let matched = 0;
+  for (const x of left) {
+    const i = free.findIndex(
+      (y) => Math.abs(centre(x) - centre(y)) < Math.min(size(x), size(y)) / 2 && Math.max(size(x), size(y)) < 1.3 * Math.min(size(x), size(y)),
+    );
+    if (i >= 0) {
+      matched++;
+      free.splice(i, 1);
+    }
+  }
+  return matched / Math.max(left.length, right.length);
+}
+
+/**
  * Top to bottom, then left to right within a line. Boxes are grouped into
  * lines first and each line sorted on its own: a pairwise "same line?"
  * comparator is not transitive, and sort() gives arbitrary orders for those.
  */
-export function readingOrder(boxes: TextBox[]): TextBox[] {
+function lineOrder(boxes: TextBox[]): TextBox[] {
+  return lineGroups(boxes).flatMap((line) => line.sort((a, b) => a.x0 - b.x0));
+}
+
+/** Boxes grouped into lines, top to bottom (each line in no particular order). */
+function lineGroups(boxes: TextBox[]): TextBox[][] {
   const centre = (b: TextBox) => (b.y0 + b.y1) / 2;
   // Ties broken on position, so the input order never matters.
   const byCentre = [...boxes].sort((a, b) => centre(a) - centre(b) || a.x0 - b.x0 || a.y0 - b.y0);
@@ -208,7 +291,7 @@ export function readingOrder(boxes: TextBox[]): TextBox[] {
     if (line && near) line.push(box);
     else lines.push([box]);
   }
-  return lines.flatMap((line) => line.sort((a, b) => a.x0 - b.x0));
+  return lines;
 }
 
 /**

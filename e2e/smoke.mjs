@@ -1199,6 +1199,90 @@ async function foldersShell() {
   await ctx.close();
 }
 
+// AI reading (Settings → address, key, model): a fake server stands in for the model. The scan's pages are sent with
+// the device's lines; the reply corrects them, adds handwriting, and names the file. A failing server still saves.
+async function aiReading() {
+  const ctx = await newContext({ viewport: { width: 412, height: 860 } });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`ai: ${e.message}`));
+  const reply = {
+    title: 'Rechnung 40217', date: '2026-10-02', sender: 'Musterwerke Zürich', type: 'Rechnung', keywords: ['Strom'],
+    pages: [{ lines: [{ id: '1.1', text: 'ACME Instruments GmbH' }], added: [{ text: 'bez zum 30.10.2026', box: [500, 900, 900, 950] }] }],
+  };
+  const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+  const sent = [];
+  let failing = false;
+  await ctx.route('https://ai.test/**', async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const body = req.postDataJSON();
+    sent.push({ url: req.url(), headers: req.headers(), body });
+    if (failing) return route.fulfill({ status: 500, headers: cors, body: 'down for maintenance' });
+    const text = JSON.stringify(reply);
+    if (req.url().endsWith('/v1/messages')) {
+      return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }) });
+    }
+    return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: text } }] }) });
+  });
+
+  await page.goto(BASE);
+  await vis('tab-files').click();
+  await vis('home-settings').click();
+  await vis('ai-api-anthropic').click();
+  await vis('ai-url').fill('https://ai.test');
+  await vis('ai-key').fill('sk-test');
+  await vis('ai-model').fill('test-model');
+  await vis('ai-test').click();
+  await page.getByText('It works.').waitFor({ timeout: 15000 }).then(() => check(true, 'ai: Test reaches the model'), () => check(false, 'ai: Test reaches the model'));
+  const probe = sent.at(-1);
+  check(probe?.headers['x-api-key'] === 'sk-test' && probe?.body.model === 'test-model' && probe?.body.output_config?.format?.type === 'json_schema', 'ai: Anthropic request carries key, model and the JSON schema');
+
+  // A scan read with AI: no title typed, so the model's names the file.
+  await page.goto(BASE);
+  await page.getByTestId('scan').click();
+  await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
+  await vis('scan-tile').first().waitFor({ timeout: 120000 });
+  await vis('scan-ai').click();
+  check((await vis('scan-ai').getAttribute('aria-checked')) === 'true' && (await page.getByText(/Sends the pages to ai\.test/).count()) > 0, 'ai: the scan offers AI reading, naming the host');
+  await vis('scan-save').click();
+  await page.waitForURL(/\/read\//, { timeout: 300000 });
+  const call = sent.at(-1);
+  const content = call?.body.messages?.[0]?.content ?? [];
+  check(content.some((c) => c.type === 'image' && c.source?.data?.length > 1000) && /1\.1\t/.test(content.at(-1)?.text ?? ''), 'ai: the page image and the device’s lines are sent');
+  await page.goto(BASE);
+  await page.getByTestId('recent-row').first().waitFor();
+  const row = await page.getByTestId('recent-row').first().innerText();
+  check(row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'), `ai: the model names the file (${row.split('\n')[0]})`);
+  await page.getByTestId('recent-row').first().click();
+  await switchView(page);
+  await page.waitForFunction(() => /bez zum 30\.10\.2026/.test(document.body.innerText) && /ACME Instruments GmbH/.test(document.body.innerText), null, { timeout: 30000 }).then(
+    () => check(true, 'ai: corrected and added text is in the PDF'),
+    () => check(false, 'ai: corrected and added text is in the PDF'),
+  );
+
+  // OpenAI-compatible, and the server fails: saved anyway, with the device's text, and the user is told.
+  await page.goto(BASE);
+  await vis('tab-files').click();
+  await vis('home-settings').click();
+  await vis('ai-api-openai').click();
+  await vis('ai-url').fill('https://ai.test/v1');
+  failing = true;
+  await page.goto(BASE);
+  await page.getByTestId('scan').click();
+  await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
+  await vis('scan-tile').first().waitFor({ timeout: 120000 });
+  await vis('scan-title').fill('Offline');
+  await vis('scan-save').click();
+  await page.getByText('AI reading failed').waitFor({ timeout: 300000 }).then(() => check(true, 'ai: a failure is reported'), () => check(false, 'ai: a failure is reported'));
+  const oa = sent.at(-1);
+  check(oa?.url === 'https://ai.test/v1/chat/completions' && oa?.headers.authorization === 'Bearer sk-test' && oa?.body.messages[0].content.some((c) => c.type === 'image_url'), 'ai: OpenAI-compatible request to /chat/completions with the image');
+  await page.getByTestId('ask-confirm').click();
+  await page.waitForURL(/\/read\//, { timeout: 30000 });
+  check(true, 'ai: the scan is saved anyway');
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -1378,6 +1462,7 @@ await step('tagged', tagged);
 await step('columns', columns);
 await step('scan', scan);
 await step('scanner', scanner);
+await step('ai', aiReading);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);
