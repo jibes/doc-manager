@@ -29,7 +29,7 @@ export default function ScanCamera() {
 
   if (Platform.OS !== 'web') return <Unsupported />;
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
+    <View style={{ flex: 1, backgroundColor: '#000', userSelect: 'none' } as object}>
       <Camera
         deviceId={scan.cameraDeviceId}
         autoCapture={scan.autoCapture}

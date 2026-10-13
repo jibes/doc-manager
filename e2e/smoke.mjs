@@ -1308,6 +1308,18 @@ async function scanner() {
   check(ratio > 1.2 && ratio < 1.6, `scanner: page found and straightened (aspect ${ratio?.toFixed(2)})`);
 
   await vis('scan-tile').first().click();
+  // Holding Original shows the photo for as long as it is held, past the browser's long-press time, and selects no text.
+  const compare = await vis('scan-compare').boundingBox();
+  await page.mouse.move(compare.x + compare.width / 2, compare.y + compare.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(1200);
+  const held = await page.evaluate(() => document.querySelectorAll('canvas').length);
+  const selected = await page.evaluate(() => String(getSelection()));
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => document.querySelectorAll('canvas').length);
+  check(held > after && !selected, `scanner: holding Original shows the photo until let go (${held} → ${after} pictures, selection "${selected}")`);
+  check((await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid=scan-compare]')).touchAction)) === 'none', 'scanner: Original takes the finger (no touch gestures on it)');
   await vis('scan-filter-bw').click();
   check((await vis('scan-filter-bw').getAttribute('aria-checked')) === 'true', 'scanner: filter chosen on the page');
   await vis('screen-back').click();
