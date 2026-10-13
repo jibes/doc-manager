@@ -109,6 +109,17 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # The emulator action downloads these once and fails on a broken download; fetch them with retries first.
+      - name: Install emulator and system image
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdk" --licenses > /dev/null || true
+          for i in 1 2 3; do
+            "$sdk" --install emulator 'system-images;android-34;google_apis;x86_64' > /dev/null || true
+            # A broken archive is only a warning, so check the image is really there.
+            [ -f "$ANDROID_HOME/system-images/android-34/google_apis/x86_64/system.img" ] && break
+            echo "Download failed (attempt $i), retrying"; sleep 15
+          done
       - name: Emulator smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
