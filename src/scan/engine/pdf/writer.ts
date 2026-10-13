@@ -34,6 +34,8 @@ export interface PdfInfo {
   author?: string;
   subject?: string;
   keywords?: string[];
+  /** The document's own date, YYYY-MM-DD (written as DocumentDate, as the app's Details do). */
+  date?: string;
   /** Defaults to now. */
   created?: Date;
 }
@@ -220,6 +222,7 @@ export function buildPdf(pages: PdfPage[], info: PdfInfo = {}): Blob {
   if (info.author) infoParts.push(`/Author ${pdfString(info.author)}`);
   if (info.subject) infoParts.push(`/Subject ${pdfString(info.subject)}`);
   if (info.keywords?.length) infoParts.push(`/Keywords ${pdfString(info.keywords.join(', '))}`);
+  if (info.date && /^\d{4}-\d{2}-\d{2}$/.test(info.date)) infoParts.push(`/DocumentDate ${pdfString(info.date)}`);
   object(3, `<< ${infoParts.join(' ')} >>`);
   object(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
 

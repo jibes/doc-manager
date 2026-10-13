@@ -1182,6 +1182,15 @@ async function foldersShell() {
   await page.waitForURL(/\/read\//, { timeout: 300000 });
   const created = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'Receipt.pdf'));
   check(created?.parent === 'root' && created.data.startsWith('%PDF-'), 'folders-shell: a scan is saved into the folder');
+  // Details written into the file in the folder (in place, through the app).
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('detail-sender').fill('ACME Instruments');
+  await page.getByTestId('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+  // What the app was asked to write back to the file (the fake app logs it).
+  const rewritten = await page.evaluate(() => Object.entries(window.__shell.written).find(([u]) => u.includes('/created/'))?.[1] ?? '');
+  check(rewritten.startsWith(created.data.slice(0, 200)) && /\/Author \(ACME Instruments\)/.test(rewritten) && rewritten.length > created.data.length, `folders-shell: details are appended to the file in its folder (${rewritten.length} bytes)`);
   await page.goto(BASE);
   await page.getByTestId('recent-row').first().waitFor();
   check((await page.getByTestId('recent-row').first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
@@ -1280,6 +1289,78 @@ async function aiReading() {
   await page.getByTestId('ask-confirm').click();
   await page.waitForURL(/\/read\//, { timeout: 30000 });
   check(true, 'ai: the scan is saved anyway');
+  await ctx.close();
+}
+
+// Details in the file: written by an incremental update (cross-reference table and stream), read back by PDFium
+// after the reopen; the library follows the new title. A protected PDF can't take them.
+async function details() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`details: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const open = async (fixture) => {
+    await page.goto(BASE);
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+    await fc.setFiles(new URL(`./fixtures/${fixture}`, import.meta.url).pathname);
+    await page.getByTestId('reader').waitFor();
+  };
+  const panel = async () => {
+    await page.getByTestId('open-more').click();
+    await page.getByTestId('menu-details').click();
+    await page.getByTestId('details-panel').waitFor();
+  };
+  for (const [fixture, kind] of [['xrefstream.pdf', 'stream'], ['columns.pdf', 'table']]) {
+    await open(fixture);
+    await panel();
+    if (kind === 'stream') check((await page.getByTestId('detail-title').inputValue()) === 'Old title', 'details: the PDF’s own title is shown');
+    await page.getByTestId('detail-title').fill(`Rechnung 40217 ${kind}`);
+    await page.getByTestId('detail-sender').fill('Musterwerke Zürich');
+    await page.getByTestId('detail-type').fill('Rechnung');
+    await page.getByTestId('detail-date').fill('2026-10-02');
+    await page.getByTestId('detail-tag-input').fill('Strom,');
+    await page.getByTestId('detail-tag-input').fill('Steuer 2026');
+    await page.getByTestId('details-save').click();
+    await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+    // Reopened from the file: what PDFium reads now is what was written.
+    await panel();
+    const got = {
+      title: await page.getByTestId('detail-title').inputValue(),
+      sender: await page.getByTestId('detail-sender').inputValue(),
+      type: await page.getByTestId('detail-type').inputValue(),
+      date: await page.getByTestId('detail-date').inputValue(),
+      tags: await page.getByTestId('detail-tag').allInnerTexts(),
+    };
+    check(
+      got.title === `Rechnung 40217 ${kind}` && got.sender === 'Musterwerke Zürich' && got.type === 'Rechnung' && got.date === '2026-10-02' && got.tags.join('|') === 'Strom|Steuer 2026',
+      `details: written into a PDF with a cross-reference ${kind} and read back (${JSON.stringify(got)})`,
+    );
+    await page.keyboard.press('Escape');
+    await page.goto(BASE);
+    await page.getByTestId('recent-row').first().waitFor();
+    check((await page.getByTestId('recent-row').first().innerText()).includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind})`);
+  }
+  // A bad date is caught before anything is written.
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('reader').waitFor();
+  await panel();
+  await page.getByTestId('detail-date').fill('2.10.2026');
+  await page.getByTestId('details-save').click();
+  check(await page.getByText('Write the date as YYYY-MM-DD.').isVisible(), 'details: a date not in YYYY-MM-DD is refused');
+  await page.keyboard.press('Escape');
+
+  // Protected PDF.
+  await page.goto(BASE);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/locked.pdf', import.meta.url).pathname);
+  await page.getByTestId('password-input').fill('tessel');
+  await page.getByTestId('password-submit').click();
+  await page.getByTestId('reader').waitFor();
+  await panel();
+  await page.getByTestId('detail-title').fill('Changed');
+  await page.getByTestId('details-save').click();
+  await page.getByText(/protected: its details/).waitFor({ timeout: 10000 }).then(() => check(true, 'details: a protected PDF says it can’t take them'), () => check(false, 'details: a protected PDF says it can’t take them'));
   await ctx.close();
 }
 
@@ -1475,6 +1556,7 @@ await step('columns', columns);
 await step('scan', scan);
 await step('scanner', scanner);
 await step('ai', aiReading);
+await step('details', details);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

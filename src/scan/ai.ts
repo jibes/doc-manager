@@ -127,7 +127,8 @@ async function viaAnthropic(s: AiSettings, pages: AiPage[], signal?: AbortSignal
   let last = '';
   // A model or server without structured output gets the request again without it: the prompt asks for JSON anyway.
   for (const structured of [true, false]) {
-    const res = await fetch(`${trimSlash(s.url)}/v1/messages`, {
+    // With or without the /v1 that OpenAI-style addresses carry.
+    const res = await fetch(`${trimSlash(s.url).replace(/\/v1$/, '')}/v1/messages`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

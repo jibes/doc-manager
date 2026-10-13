@@ -54,7 +54,7 @@ export async function saveScan(
             const reading = await readWithAi(ai, sent, signal);
             done.forEach(({ pdf }, i) => (pdf.words = applyReading(pdf.words ?? [], i, reading.pages[i], pdf.pixelWidth, pdf.pixelHeight)));
             found = aiTitle(reading);
-            return { author: reading.sender || undefined, subject: reading.type || undefined, keywords: reading.keywords };
+            return { author: reading.sender || undefined, subject: reading.type || undefined, keywords: reading.keywords, date: reading.date || undefined };
           } catch (e) {
             if (signal?.aborted) throw e;
             aiError = e instanceof Error ? e.message : String(e);
