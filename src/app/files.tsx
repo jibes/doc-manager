@@ -1,9 +1,9 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
+import { TAB_BAR_H, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
@@ -14,6 +14,7 @@ import { errorText, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
 import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
+import { setArchive } from '@/archive/views';
 import { cachedThumb, cancelThumbs, thumb, type Thumb } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
 import { useClipboard } from '@/state/clipboard';
@@ -26,7 +27,11 @@ const MAX_W = 1120;
  * Folder IDs are URIs and paths ("…/tree/primary%3ADocs", "100% done"): route params are decoded on the
  * way, which would change them. They travel base64url-encoded instead.
  */
-const pack = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const pack = (s: string) =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(s)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 function unpack(s: string | undefined): string | undefined {
   if (!s) return undefined;
   try {
@@ -40,7 +45,7 @@ type Params = { r?: string; rn?: string; d?: string; dn?: string };
 const go = (root: string, rootName: string, dir?: string, name?: string) =>
   router.push({ pathname: '/files', params: { r: pack(root), rn: pack(rootName), ...(dir ? { d: pack(dir), dn: pack(name ?? '') } : {}) } });
 
-/** Files: the user's folders, then a folder's PDFs and books as a grid of thumbnails, with file operations. */
+/** A folder's PDFs and books as a grid of thumbnails, with file operations. (The places are Documents → Folders.) */
 export default function Files() {
   const params = useLocalSearchParams<Params>();
   const root = unpack(params.r);
@@ -50,31 +55,27 @@ export default function Files() {
   const gutter = width < 600 ? space.xl - 4 : space.xxxl;
   const contentW = Math.min(width, MAX_W) - gutter * 2;
   const load = useLibrary((s) => s.load);
-  const tabBar = useTabBar();
   useEffect(() => {
     load();
   }, [load]);
 
+  if (!root) return <Redirect href={{ pathname: '/documents', params: { view: 'folders' } }} />;
   return (
     <View style={{ flex: 1, backgroundColor: p.canvas, alignItems: 'center', paddingTop: insets.top + space.lg }}>
       <View style={{ width: contentW, flex: 1 }}>
-        {root ? (
-          <FolderView root={root} rootName={unpack(params.rn) ?? ''} dir={unpack(params.d)} name={unpack(params.dn)} width={contentW} bottom={insets.bottom} />
-        ) : (
-          <Roots bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} />
-        )}
+        <FolderView root={root} rootName={unpack(params.rn) ?? ''} dir={unpack(params.d)} name={unpack(params.dn)} width={contentW} bottom={insets.bottom} />
       </View>
-      {!root && tabBar && <TabBar current="files" />}
     </View>
   );
 }
 
 const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', device: 'device', all: 'documents', app: 'pages' };
 
-/** The places to browse; adding a folder opens it. */
-function Roots({ bottom }: { bottom: number }) {
+/** The places to browse (the archive first), for Documents → Folders; adding a folder opens it. */
+export function Roots({ bottom }: { bottom: number }) {
   const p = usePalette();
   const showAll = usePrefs((s) => s.allFiles);
+  const archive = usePrefs((s) => s.archive);
   const tabBar = useTabBar();
   const [roots, setRoots] = useState<FolderRoot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,9 +83,10 @@ function Roots({ bottom }: { bottom: number }) {
   const refresh = useCallback(() => {
     folders
       .roots(showAll)
-      .then(setRoots)
+      // The archive (synced) first.
+      .then((list) => setRoots([...list.filter((r) => r.id === archive), ...list.filter((r) => r.id !== archive)]))
       .catch((e) => setError(opError(e)));
-  }, [showAll]);
+  }, [showAll, archive]);
   useEffect(refresh, [refresh]);
 
   const add = async () => {
@@ -105,7 +107,6 @@ function Roots({ bottom }: { bottom: number }) {
 
   return (
     <>
-      <AppHeader tab="files" />
       {!folders.supported ? (
         <T color={p.muted}>{t.foldersUnsupported}</T>
       ) : roots == null ? (
@@ -126,29 +127,57 @@ function Roots({ bottom }: { bottom: number }) {
         <View style={{ gap: space.lg, paddingBottom: bottom + space.xl }}>
           <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
             {roots.map((r, i) => (
-              <Pressable
-                key={r.id}
-                testID="folder-root"
-                accessibilityRole="button"
-                accessibilityLabel={r.name}
-                onPress={() => unlockAndOpen(r)}
-                style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-                  styles.rootRow,
-                  { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0, backgroundColor: hovered ? p.raised : 'transparent' },
-                ]}
-              >
-                <Icon name={rootIcon[r.kind]} color={r.kind === 'folder' ? p.accent : p.ink} />
-                <T v="label" numberOfLines={2} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20, paddingVertical: space.sm }}>
-                  {r.name}
-                </T>
-                {r.locked ? (
-                  <T v="caption" color={p.accent}>
-                    {t.allowAccess}
-                  </T>
-                ) : (
-                  <Icon name="chevronRight" size={18} color={p.muted} />
+              <View key={r.id}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0 }}>
+                  <Pressable
+                    testID="folder-root"
+                    accessibilityRole="button"
+                    accessibilityLabel={r.name}
+                    onPress={() => unlockAndOpen(r)}
+                    style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.rootRow, { flex: 1, backgroundColor: hovered ? p.raised : 'transparent' }]}
+                  >
+                    <Icon name={rootIcon[r.kind]} color={r.kind === 'folder' ? p.accent : p.ink} />
+                    <View style={{ flex: 1, paddingVertical: space.sm }}>
+                      <T v="label" numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20 }}>
+                        {r.name}
+                      </T>
+                      {r.id === archive && (
+                        <T v="caption" color={p.accent} testID="archive-mark">
+                          {t.archiveSynced}
+                        </T>
+                      )}
+                    </View>
+                    {r.locked ? (
+                      <T v="caption" color={p.accent}>
+                        {t.allowAccess}
+                      </T>
+                    ) : (
+                      <Icon name="chevronRight" size={18} color={p.muted} />
+                    )}
+                  </Pressable>
+                  {/* Beside the row, not in it (a button can't hold another). */}
+                  {!archive && r.kind === 'folder' && !r.locked && (
+                    <Button testID="use-archive" kind="quiet" label={t.useAsArchive} onPress={() => void setArchive(r.id).catch((e) => setError(opError(e)))} style={{ marginRight: space.md }} />
+                  )}
+                </View>
+                {r.id === archive && (
+                  <Pressable
+                    testID="folders-trash"
+                    accessibilityRole="button"
+                    onPress={() => router.push('/trash')}
+                    style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+                      styles.rootRow,
+                      { paddingLeft: space.xl + space.lg, borderColor: p.hairline, borderTopWidth: StyleSheet.hairlineWidth, backgroundColor: hovered ? p.raised : 'transparent' },
+                    ]}
+                  >
+                    <Icon name="trash" size={18} color={p.muted} />
+                    <T v="label" color={p.inkSoft} style={{ flex: 1, paddingVertical: space.sm }}>
+                      {t.trashTitle}
+                    </T>
+                    <Icon name="chevronRight" size={18} color={p.muted} />
+                  </Pressable>
                 )}
-              </Pressable>
+              </View>
             ))}
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
@@ -319,13 +348,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
             <TextInput value={query} onChangeText={setQuery} placeholder={t.filter} placeholderTextColor={p.muted} style={[styles.searchInput, { color: p.ink }]} />
           </View>
         )}
-        <IconButton
-          testID="sort"
-          icon="sort"
-          size={36}
-          label={sort === 'name' ? t.sortByDate : t.sortByName}
-          onPress={() => setSort((s) => (s === 'name' ? 'date' : 'name'))}
-        />
+        <IconButton testID="sort" icon="sort" size={36} label={sort === 'name' ? t.sortByDate : t.sortByName} onPress={() => setSort((s) => (s === 'name' ? 'date' : 'name'))} />
       </View>
     </View>
   );
@@ -405,19 +428,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
 }
 
 /** "Copy n items here" / "Move n items here" while items wait on the clipboard. */
-function PasteBar({
-  here,
-  bottom,
-  onDone,
-  onError,
-  onMessage,
-}: {
-  here: Place | null;
-  bottom: number;
-  onDone: () => void;
-  onError: (msg: string) => void;
-  onMessage?: (msg: string) => void;
-}) {
+function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | null; bottom: number; onDone: () => void; onError: (msg: string) => void; onMessage?: (msg: string) => void }) {
   const p = usePalette();
   const clip = useClipboard((s) => s.clip);
   const setClip = useClipboard((s) => s.set);
@@ -568,10 +579,7 @@ function Tile({
         )}
         {busy && <ActivityIndicator style={StyleSheet.absoluteFill} color={p.accent} />}
         {selected !== undefined && (
-          <View
-            pointerEvents="none"
-            style={[styles.check, checkAt, { backgroundColor: selected ? p.accent : p.surface, borderColor: selected ? p.accent : p.muted }, elevation(p.shadow, 1)]}
-          >
+          <View pointerEvents="none" style={[styles.check, checkAt, { backgroundColor: selected ? p.accent : p.surface, borderColor: selected ? p.accent : p.muted }, elevation(p.shadow, 1)]}>
             {selected && <Icon name="check" size={16} color={p.surface} strokeWidth={2.4} />}
           </View>
         )}

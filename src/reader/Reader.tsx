@@ -27,7 +27,10 @@ import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 import { detailsOf, saveDetails } from '@/archive/details';
-import { invalidate, pauseIndexing } from '@/archive/indexer';
+import { allDocs, invalidate, pauseIndexing, schedule } from '@/archive/indexer';
+import { inboxDir, refreshInboxCount } from '@/archive/inbox';
+import { docKey } from '@/archive/shared';
+import { folders } from '@/lib/folders';
 import { makeSearchable, pagesWithoutText } from '@/archive/searchable';
 import type { Details } from '@/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
@@ -107,6 +110,39 @@ export function Reader({
       setReloaded(e instanceof Error && /encrypted/.test(e.message) ? t.detailsEncrypted : t.detailsFailed);
     } finally {
       setSavingDetails(false);
+    }
+  };
+
+  // A document not in the archive yet (only on this device, or in another folder) can be kept there.
+  const archive = usePrefs((s) => s.archive);
+  const [outside, setOutside] = useState(false);
+  useEffect(() => {
+    if (!archive || Platform.OS !== 'web') return;
+    let alive = true;
+    (async () => {
+      const key = doc.shareKey ?? (await docKey(await handle.bytes()));
+      const docs = await allDocs();
+      if (alive) setOutside(!docs.some((d) => d.share === key && d.place.kind === 'folder' && d.place.root === archive));
+    })().catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [archive, doc.shareKey, handle]);
+  const keepInArchive = async () => {
+    if (!archive) return;
+    try {
+      const bytes = await handle.bytes();
+      const type = doc.format === 'epub' ? 'application/epub+zip' : 'application/pdf';
+      const entry = await folders.create({ root: archive, dir: await inboxDir(archive) }, doc.fileName, new Blob([bytes], { type }));
+      // This document is now the file in the archive: reading state, bookmarks and all stay with it.
+      await useLibrary.getState().linkTo(doc.id, { name: entry.name, size: bytes.byteLength, handle: entry.handle, link: entry.uri });
+      schedule(1000);
+      void refreshInboxCount();
+      afterReload = t.keptInArchive;
+      if (onReload) onReload();
+      else setReloaded(t.keptInArchive);
+    } catch (e) {
+      setReloaded(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -618,6 +654,7 @@ export function Reader({
   // Document actions; how it looks lives in Aa, how to find things in the bar.
   const menuItems: MenuItem[] = [
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
+    ...(outside && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
     readingItem,
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },

@@ -53,6 +53,8 @@ type LibraryState = {
   /** The details written into the file changed: the library shows its new title and sender. */
   setDetails(id: string, details: { title: string; author?: string }): void;
   markOpened(id: string): void;
+  /** The document is now this file (it was copied there): the library points at it, keeping everything else. */
+  linkTo(id: string, item: ImportItem): Promise<void>;
   /** Changes from elsewhere (another device's reading, a computed share key), saved as they are. */
   patchDoc(id: string, changes: Partial<DocRecord>): void;
   /** Record facts that changed with the file itself (a linked file edited elsewhere). */
@@ -280,6 +282,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
           ? d.bookmarks.filter((p) => p !== page)
           : [...d.bookmarks, page].sort((a, b) => a - b),
       })),
+
+    async linkTo(id, item) {
+      await repo.saveFile(id, fileData(item));
+      patch(id, (d) => ({ ...d, fileName: item.name, bytes: item.size, linked: isLinked(item) }));
+    },
 
     patchDoc: (id, changes) => patch(id, (d) => ({ ...d, ...changes })),
 

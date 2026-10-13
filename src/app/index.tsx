@@ -1,11 +1,9 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ArchiveResults } from '@/archive/Results';
-import { useIndex } from '@/archive/indexer';
-import { AppHeader, TAB_BAR_H, TabBar, useTabBar } from '@/components/AppNav';
+import { AppFrame, AppHeader, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
@@ -16,6 +14,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
+import { shell } from '@/lib/shell';
 import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { useLibrary, type ImportItem } from '@/state/library';
@@ -23,6 +22,12 @@ import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 
 const MAX_W = 1120;
+/** Opened as an app (the Android app, an installed web app): it opens where it was. A browser tab follows its URL. */
+const launchedAsApp = () => !!shell || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
+/** Set once the app has opened its first place (later visits here don't jump away). */
+let launched = false;
+/** Recently opened documents listed here; all of them are in Documents. */
+const RECENT = 20;
 /** AGPL §13: offer the source to network users. */
 const SOURCE_URL = 'https://github.com/jibes/doc-reader';
 
@@ -44,17 +49,20 @@ async function confirmRemove(doc: DocRecord, remove: (id: string) => void) {
 export default function Home() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const width = useMainWidth();
   const { docs, covers, loaded, importing, error, load, importFiles, remove, toggleReading, clearError } = useLibrary();
-  const [query, setQuery] = useState('');
   const [hint, setHint] = useState<string | null>(null);
   const [showFinished, setShowFinished] = useState(false);
   const { kind: installKind, install } = useInstall();
   const tabBar = useTabBar();
-  // Documents indexed for search across the library and folders.
-  const indexed = useIndex((s) => s.count);
-  const inboxShown = usePrefs((s) => !!s.archive && s.inboxHere);
-  const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
+
+  // The app opens where it was last used; from then on this is the place last used.
+  useEffect(() => {
+    const { lastTab, set } = usePrefs.getState();
+    if (!launched && lastTab === 'documents' && launchedAsApp()) router.replace('/documents');
+    else set({ lastTab: 'reading' });
+    launched = true;
+  }, []);
 
   useEffect(() => {
     load();
@@ -73,23 +81,22 @@ export default function Home() {
   const finished = useMemo(() => docs.filter((d) => d.reading?.finishedAt), [docs]);
   // Docs are sorted by last opened, so the first unfinished one is the one to continue.
   const [current, ...shelf] = reading;
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? docs.filter((d) => d.title.toLowerCase().includes(q) || d.author?.toLowerCase().includes(q)) : docs;
-  }, [docs, query]);
+  // Recently opened: the last few (every document is in Documents).
+  const recent = useMemo(() => docs.slice(0, RECENT), [docs]);
 
   if (!loaded) return <View style={{ flex: 1, backgroundColor: p.canvas }} />;
 
   const removeDoc = (d: DocRecord) => void confirmRemove(d, remove);
 
   return (
+    <AppFrame tab="reading">
     <DropZone onFiles={add}>
       <ScrollView
         style={{ flex: 1, backgroundColor: p.canvas }}
         contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0), alignItems: 'center', flexGrow: 1 }}
       >
         <View style={{ width: contentW, flexGrow: 1 }}>
-          <AppHeader tab="library">
+          <AppHeader tab="reading">
             {installKind && (
               <Button
                 testID="install"
@@ -99,31 +106,12 @@ export default function Home() {
                 onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
               />
             )}
-            {inboxShown && <IconButton testID="open-inbox" icon="inbox" label={t.inboxTitle} onPress={() => router.push('/inbox')} />}
-            {indexed > 0 && <IconButton testID="open-documents" icon="documents" label={t.documentsTitle} onPress={() => router.push('/documents')} />}
-            {/* Quiet: Files is where documents are found ("Other location…" there opens the system picker too). */}
-            {docs.length > 0 && <IconButton testID="add" icon="plus" label={t.addPdf} onPress={async () => add(await pickPdfs())} />}
           </AppHeader>
-
-          {syncIssues > 0 && (
-            <Pressable
-              testID="sync-banner"
-              accessibilityRole="button"
-              onPress={() => router.push('/sync')}
-              style={[styles.banner, { backgroundColor: p.mark, borderColor: p.markRing }]}
-            >
-              <Icon name="copy" size={18} color={p.ink} />
-              <T v="label" style={{ flex: 1 }}>
-                {t.syncBanner(syncIssues)}
-              </T>
-              <Icon name="chevronRight" size={18} color={p.ink} />
-            </Pressable>
-          )}
           {docs.length === 0 ? (
             <EmptyLibrary onAdd={async () => add(await pickPdfs())} onSample={async () => add([await sampleItem()])} />
           ) : (
             <>
-              {(reading.length > 0 || finished.length > 0) && !query && (
+              {(reading.length > 0 || finished.length > 0) && (
                 <View style={styles.section} testID="reading-list">
                   <T v="kicker" color={p.muted} style={styles.kicker}>
                     {reading.length ? t.readingListCount(reading.length) : t.readingList}
@@ -166,24 +154,10 @@ export default function Home() {
               <View style={styles.section}>
                 <View style={styles.sectionHead}>
                   <T v="kicker" color={p.muted}>
-                    {query ? t.found(filtered.length) : t.recentCount(docs.length)}
+                    {t.recentTitle}
                   </T>
-                  {(docs.length > 5 || indexed > 0) && (
-                    <View style={[styles.search, { backgroundColor: p.hairline }]}>
-                      <Icon name="search" size={15} color={p.muted} />
-                      <TextInput
-                        testID="library-search"
-                        value={query}
-                        onChangeText={setQuery}
-                        placeholder={indexed > 0 ? t.searchAll : t.filter}
-                        placeholderTextColor={p.muted}
-                        style={[styles.searchInput, { color: p.ink }]}
-                      />
-                    </View>
-                  )}
+                  <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                 </View>
-                {/* Searching with no match in the library: nothing to frame (matches in all documents follow). */}
-                {(filtered.length > 0 || importing.length > 0 || !query) && (
                 <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
                   {importing.map((name) => (
                     <View key={name} style={[styles.row, { borderColor: p.hairline }]}>
@@ -193,7 +167,7 @@ export default function Home() {
                       </T>
                     </View>
                   ))}
-                  {filtered.map((d, i) => (
+                  {recent.map((d, i) => (
                     <Row
                       key={d.id}
                       doc={d}
@@ -204,9 +178,7 @@ export default function Home() {
                     />
                   ))}
                 </View>
-                )}
               </View>
-              <ArchiveResults query={query} skip={new Set(filtered.map((d) => d.id))} />
             </>
           )}
         </View>
@@ -221,8 +193,8 @@ export default function Home() {
         </Pressable>
       </ScrollView>
       <Toast message={error ?? hint} onDismiss={() => (error ? clearError() : setHint(null))} above={tabBar ? TAB_BAR_H : 0} />
-      {tabBar && <TabBar current="library" />}
     </DropZone>
+    </AppFrame>
   );
 }
 

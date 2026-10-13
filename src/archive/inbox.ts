@@ -55,6 +55,18 @@ export async function inboxFiles(archive: string): Promise<{ dir: string | undef
   return { dir, files: files.sort((a, b) => a.modified - b.modified || a.name.localeCompare(b.name)) };
 }
 
+/** How many documents wait in the inbox (for the badge on Documents). */
+export const useInboxCount = create<{ count: number }>(() => ({ count: 0 }));
+
+/** Counts the inbox again (this device sorts it): on start, when the app comes back, after filing. */
+export async function refreshInboxCount(): Promise<void> {
+  const { archive, inboxHere } = usePrefs.getState();
+  if (!archive || !inboxHere) return useInboxCount.setState({ count: 0 });
+  const dir = await folders.dirAt(archive, [INBOX], false).catch(() => null);
+  const files = dir === null ? [] : await folders.list(archive, dir).catch(() => []);
+  useInboxCount.setState({ count: files.filter((e) => e.kind === 'pdf' && !e.name.startsWith('.')).length });
+}
+
 /* --------------------------------------------------------------- rules ---- */
 
 export const useRules = create<Rules>(() => DEFAULT_RULES);

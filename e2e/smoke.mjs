@@ -29,6 +29,22 @@ async function switchView(page) {
   await page.getByTestId('view-toggle').click();
 }
 
+/** Reading, where the app (which opens where it was last) may not have opened. */
+async function toReading(page) {
+  await page.waitForTimeout(300);
+  await page.getByTestId('tab-reading').locator('visible=true').click();
+}
+/** Documents (its tab, or the sidebar on wide windows). */
+async function openDocs(page) {
+  await page.getByTestId('tab-documents').locator('visible=true').click();
+  await page.getByTestId('docs-all').locator('visible=true').click().catch(() => {});
+}
+/** Documents → Folders: the places (archive, picked folders, the device). */
+async function openFolders(page) {
+  await page.getByTestId('tab-documents').locator('visible=true').click();
+  await page.getByTestId('docs-folders').locator('visible=true').click();
+}
+
 function check(cond, msg) {
   console.log(`${cond ? '✓' : '✗'} ${msg}`);
   if (!cond) failures++;
@@ -888,7 +904,7 @@ async function foldersDesktop() {
     },
     [['columns.pdf', fixture('columns.pdf')], ['notes.txt', btoa('not a document')], ['Books/book.epub', fixture('book.epub')], ['form.pdf', fixture('form.pdf')]],
   );
-  await page.getByTestId('tab-files').locator('visible=true').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   const docs = vis('folder-doc');
@@ -914,7 +930,7 @@ async function foldersDesktop() {
   await page.getByTestId('recent-row').first().waitFor();
   check((await page.getByTestId('recent-row').first().innerText()).includes('In place'), 'folders: opened documents stay where they are (in place)');
   // Thumbnails are kept: on return they come from the cache, without reading the files again.
-  await page.getByTestId('tab-files').locator('visible=true').click();
+  await openFolders(page);
   await vis('folder-root').click();
   await vis('folder-grid').waitFor();
   await page.waitForTimeout(400);
@@ -1135,8 +1151,9 @@ async function foldersShell() {
   const names = async () => (await vis('folder-grid').innerText()).split('\n');
   const shownThumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length);
   await page.goto(BASE);
+  await toReading(page);
   await page.getByText('Every document').waitFor();
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor({ timeout: 10000 }).catch(() => {});
   check((await vis('folder-grid').count()) === 1, 'folders-shell: a picked folder opens (its ID survives the route)');
@@ -1206,6 +1223,7 @@ async function foldersShell() {
   await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
   check((await names()).includes('two columns'), 'folders-shell: a document can be renamed');
   await page.goto(BASE);
+  await toReading(page);
   await page.getByTestId('recent-row').first().waitFor();
   const rows = await page.getByTestId('recent-row').allInnerTexts();
   const row = page.getByTestId('recent-row').filter({ hasText: 'Orderly Notes' });
@@ -1217,7 +1235,8 @@ async function foldersShell() {
 
   // Copy back to the top folder, share, then delete the copy (and its library entry with it).
   await page.goto(BASE);
-  await vis('tab-files').click();
+  await toReading(page);
+  await openFolders(page);
   await vis('folder-root').filter({ hasText: 'Docs' }).click();
   await text('Archive').click();
   await vis('select').click();
@@ -1240,12 +1259,13 @@ async function foldersShell() {
   await page.waitForTimeout(500);
   check(!(await names()).includes('two columns'), 'folders-shell: a document can be deleted');
   await page.goto(BASE);
+  await toReading(page);
   await page.getByTestId('recent-row').first().waitFor();
   const left = await page.getByTestId('recent-row').allInnerTexts();
   check(!left.some((r) => r.includes('Orderly Notes')), `folders-shell: a deleted document leaves the library (${left.length} left)`);
 
   // All files access (Settings): every document on the device, and internal storage.
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('home-settings').click();
   await vis('all-files').click();
   await page.waitForTimeout(300);
@@ -1261,6 +1281,7 @@ async function foldersShell() {
 
   // A scan saved into a folder through the app.
   await page.goto(BASE);
+  await toReading(page);
   await page.getByTestId('scan').click();
   await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
   await vis('scan-tile').first().waitFor({ timeout: 120000 });
@@ -1281,6 +1302,7 @@ async function foldersShell() {
   const rewritten = await page.evaluate(() => Object.entries(window.__shell.written).find(([u]) => u.includes('/created/'))?.[1] ?? '');
   check(rewritten.startsWith(created.data.slice(0, 200)) && /\/Author \(ACME Instruments\)/.test(rewritten) && rewritten.length > created.data.length, `folders-shell: details are appended to the file in its folder (${rewritten.length} bytes)`);
   await page.goto(BASE);
+  await toReading(page);
   await page.getByTestId('recent-row').first().waitFor();
   check((await page.getByTestId('recent-row').first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
 
@@ -1291,7 +1313,8 @@ async function foldersShell() {
   const kept = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'tagged.pdf'));
   check(kept?.parent === 'app', 'folders-shell: a file opened from elsewhere is kept in the Tessel folder');
   await page.goto(BASE);
-  await vis('tab-files').click();
+  await toReading(page);
+  await openFolders(page);
   const first = await vis('folder-root').first().innerText();
   check(first.startsWith('Tessel'), `folders-shell: the Tessel folder is the first place in Files (${first.split('\n')[0]})`);
 
@@ -1354,7 +1377,7 @@ async function aiReading() {
   });
 
   await page.goto(BASE);
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('home-settings').click();
   await vis('ai-api-anthropic').click();
   await vis('ai-url').fill('https://ai.test');
@@ -1390,7 +1413,7 @@ async function aiReading() {
 
   // OpenAI-compatible, and the server fails: saved anyway, with the device's text, and the user is told.
   await page.goto(BASE);
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('home-settings').click();
   await vis('ai-api-openai').click();
   await vis('ai-url').fill('https://ai.test/v1');
@@ -1511,7 +1534,7 @@ async function searchArchive() {
     },
     [['2026/columns.pdf', fixture('columns.pdf')], ['.stversions/old.pdf', fixture('tagged.pdf')]],
   );
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   // One document in the library too.
@@ -1520,10 +1543,10 @@ async function searchArchive() {
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await page.goto(BASE);
-  // The search field appears once something is indexed.
-  await vis('library-search').waitFor({ timeout: 30000 });
+  // One search, in Documents: library documents and folder files alike.
+  await openDocs(page);
   const hits = async (q) => {
-    await vis('library-search').fill(q);
+    await vis('docs-search').fill(q);
     await page.waitForTimeout(600);
     return vis('archive-hit').allInnerTexts();
   };
@@ -1531,7 +1554,7 @@ async function searchArchive() {
   let found = [];
   for (let i = 0; i < 30 && !found.length; i++) found = await hits('Orderly');
   check(found.length === 1 && /Archive/.test(found[0]), `search: a document in a folder's subfolder is found by its text (${found.map((x) => x.split('\n')[0])})`);
-  check((await hits('Old title')).length === 0, 'search: a library document already listed above is not repeated');
+  check((await hits('Old title')).length === 1, 'search: a library document is found by its title, once');
   // "Cross references" in the folder's document matches too.
   let inLibrary = [];
   for (let i = 0; i < 30 && !inLibrary.some((x) => x.startsWith('Old title')); i++) inLibrary = await hits('cross-reference');
@@ -1558,12 +1581,10 @@ async function searchArchive() {
   await page.getByTestId('details-save').click();
   await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
   await page.goto(BASE);
-  await vis('library-search').waitFor({ timeout: 30000 });
-  // It is in the library, so it shows there (by its sender); search the text it was indexed with plus the new sender.
+  await openDocs(page);
   let byDetails = [];
   for (let i = 0; i < 20 && !byDetails.length; i++) byDetails = await hits('Haferflocken Stream');
-  const listed = await page.getByTestId('recent-row').filter({ hasText: 'Old title' }).count();
-  check(byDetails.length === 1 || listed === 1, `search: details saved in a document are found (${byDetails.length} in all documents, ${listed} in the library)`);
+  check(byDetails.length === 1, `search: details saved in a document are found (${byDetails.length})`);
   // The same file opened from the folder isn't counted twice.
   check((await hits('Orderly')).length === 1, 'search: a folder file opened into the library is listed once');
   await ctx.close();
@@ -1588,7 +1609,7 @@ async function documentsScreen() {
     await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     await w.close();
   }, fixture);
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   // A library document with details.
@@ -1607,8 +1628,7 @@ async function documentsScreen() {
   await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
 
   await page.goto(BASE);
-  await vis('open-documents').waitFor({ timeout: 30000 });
-  await vis('open-documents').click();
+  await openDocs(page);
   const count = () => vis('docs-count').innerText();
   // Both documents, the library one with its new details (indexing may still be going).
   let rows = [];
@@ -1629,7 +1649,6 @@ async function documentsScreen() {
   await page.getByTestId('ask-confirm').click();
   await page.getByText('“Invoices” saved.').waitFor();
   check((await vis('view-chip').allInnerTexts()).join() === 'Invoices', 'documents: a view is saved and shown');
-  await vis('screen-back').click();
   await vis('home-settings').click();
   await vis('archive-root').click();
   await page.waitForTimeout(500);
@@ -1653,7 +1672,7 @@ async function documentsScreen() {
     await w.close();
   });
   await vis('screen-back').click();
-  await vis('open-documents').click();
+  await openDocs(page);
   await vis('docs-count').waitFor();
   // Read from the file as the screen opens.
   await page.getByTestId('view-chip').filter({ hasText: 'Columns' }).waitFor({ timeout: 5000 }).catch(() => {});
@@ -1696,7 +1715,7 @@ async function inbox() {
     },
     [['scan-1.pdf', fixture('xrefstream.pdf')], ['notes.pdf', fixture('columns.pdf')]],
   );
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   await page.goto(BASE);
@@ -1705,7 +1724,8 @@ async function inbox() {
   await vis('inbox-here-switch').click();
   check((await vis('inbox-here-switch').getAttribute('aria-checked')) === 'true', 'inbox: this device sorts the inbox');
   await vis('screen-back').click();
-  await vis('open-inbox').click();
+  await openDocs(page);
+  await vis('docs-inbox').click();
   const card = (name) => page.getByTestId('inbox-item').filter({ hasText: name });
   await card('scan-1.pdf').waitFor({ timeout: 20000 });
   await card('notes.pdf').waitFor({ timeout: 20000 });
@@ -1785,7 +1805,7 @@ async function searchable() {
     await w.close();
   }, b64);
   await page.goto(BASE);
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   await page.goto(BASE);
@@ -1793,7 +1813,8 @@ async function searchable() {
   await vis('archive-root').click();
   await vis('inbox-here-switch').click();
   await vis('screen-back').click();
-  await vis('open-inbox').click();
+  await openDocs(page);
+  await vis('docs-inbox').click();
   const card = page.getByTestId('inbox-item').filter({ hasText: 'letter.pdf' });
   await card.getByTestId('inbox-no-text').waitFor({ timeout: 120000 });
   check(true, 'inbox: an image-only document is marked to be made searchable');
@@ -1810,11 +1831,11 @@ async function searchable() {
   await page.getByText(/^Filed: /).waitFor({ timeout: 180000 });
   // Found by the words in its picture, in all documents.
   await page.goto(BASE);
-  await vis('library-search').waitFor({ timeout: 30000 });
+  await openDocs(page);
   let hits = [];
   for (let i = 0; i < 40 && !hits.some((h) => /Fox Ltd/.test(h)); i++) {
-    await vis('library-search').fill('');
-    await vis('library-search').fill('continues page');
+    await vis('docs-search').fill('');
+    await vis('docs-search').fill('continues page');
     await page.waitForTimeout(800);
     hits = await vis('archive-hit').allInnerTexts();
   }
@@ -1876,7 +1897,7 @@ async function syncSafety() {
       return (await (await dir.getFileHandle(parts.at(-1))).getFile()).size;
     }, path);
 
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   await page.goto(BASE);
@@ -1885,7 +1906,7 @@ async function syncSafety() {
   await vis('screen-back').click();
 
   // Deleting in the archive: to its trash, without asking, and undoable.
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('folder-root').filter({ hasText: 'Archive' }).click();
   await vis('folder-grid').waitFor();
   await text('keepme.pdf').click({ button: 'right' });
@@ -1896,8 +1917,9 @@ async function syncSafety() {
   await page.waitForTimeout(800);
   check((await names('')).includes('keepme.pdf') && !(await names('.tessel/trash')).includes('keepme.pdf'), 'sync: and Undo puts it back');
 
-  // Conflicts and duplicates, once the archive is read.
+  // Conflicts and duplicates, once the archive is read: noted at the top of Documents.
   await page.goto(BASE);
+  await openDocs(page);
   await vis('sync-banner').waitFor({ timeout: 60000 }).catch(() => {});
   for (let i = 0; i < 40 && !/2 sync issues/.test(await vis('sync-banner').innerText().catch(() => '')); i++) await page.waitForTimeout(500);
   const banner = await vis('sync-banner').innerText().catch(() => '');
@@ -1917,10 +1939,11 @@ async function syncSafety() {
   const left = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
   check(left.length === 1, `sync: keeping one duplicate trashes the others (${left})`);
 
-  // The trash: restore one, delete one for good.
+  // The trash (Documents → Folders, under the archive): restore one, delete one for good.
   await vis('screen-back').click();
-  await vis('home-settings').click();
-  await vis('open-trash').click();
+  await openFolders(page);
+  check(/synced/i.test(await vis('archive-mark').innerText()), 'sync: the archive is marked as synced, first in Folders');
+  await vis('folders-trash').click();
   await vis('trash-item').first().waitFor();
   const before = await vis('trash-item').count();
   await vis('trash-item').filter({ hasText: 'dup' }).getByTestId('trash-restore').click();
@@ -1945,9 +1968,11 @@ async function syncSafety() {
     await w.close();
   }, fixture('tagged.pdf'));
   await vis('screen-back').click();
+  await vis('home-settings').click();
   await vis('inbox-here-switch').click();
   await vis('screen-back').click();
-  await vis('open-inbox').click();
+  await openDocs(page);
+  await vis('docs-inbox').click();
   await vis('inbox-duplicate').waitFor({ timeout: 30000 }).catch(() => {});
   check(/Already in the archive: dup-/.test(await vis('inbox-duplicate').innerText().catch(() => '')), 'inbox: a document already filed is pointed out');
   await vis('inbox-discard').click();
@@ -1976,7 +2001,7 @@ async function sharedReading() {
     await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     await w.close();
   }, fixture('columns.pdf'));
-  await vis('tab-files').click();
+  await openFolders(page);
   await vis('add-folder').click();
   await vis('folder-grid').waitFor();
   await page.goto(BASE);
@@ -2004,8 +2029,10 @@ async function sharedReading() {
       return out;
     });
   const nudge = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  // Written once a pass has seen both the list and the bookmark.
+  const complete = (m) => !!m && Object.values(m[1].docs).some((d) => d.reading?.v?.since && d.bookmarks?.v?.length === 1);
   let mine = null;
-  for (let i = 0; i < 30 && !mine; i++) {
+  for (let i = 0; i < 40 && !complete(mine); i++) {
     await nudge();
     await page.waitForTimeout(500);
     mine = Object.entries(await states()).find(([n]) => n !== 'other.json');
@@ -2043,6 +2070,77 @@ async function sharedReading() {
   check(after?.bookmarks?.v?.length === 0 && after?.bookmarks?.at === later, 'shared: a newer change from another device wins (bookmark removed there)');
   await vis('home-settings').click();
   check(/Shared with 1 other device/.test(await vis('share-reading-note').innerText()), 'shared: Settings says with how many devices');
+  await ctx.close();
+}
+
+// Places: a document only on this device can be kept in the archive (its Inbox), the inbox shows as a badge,
+// Documents filters by place.
+async function places() {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`places: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  await page.evaluate(async (b64) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+    const w = await (await (await root.getDirectoryHandle('2026', { create: true })).getFileHandle('notes.pdf', { create: true })).createWritable();
+    await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    await w.close();
+  }, readFileSync(new URL('./fixtures/columns.pdf', import.meta.url)).toString('base64'));
+  await openFolders(page);
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await openFolders(page);
+  await vis('use-archive').click();
+  await vis('archive-mark').waitFor();
+  check(true, 'places: a folder is made the archive from Folders');
+  await vis('home-settings').click();
+  await vis('inbox-here-switch').click();
+  await vis('screen-back').click();
+
+  // A document from elsewhere: only on this device, until kept in the archive.
+  await page.goto(BASE);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(1500);
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-reading').click();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-keep-archive').click();
+  await page.getByText('Kept in the archive’s Inbox: it syncs to your other devices.').waitFor({ timeout: 15000 });
+  const inbox = await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    const out = [];
+    for await (const name of (await root.getDirectoryHandle('Inbox')).keys()) out.push(name);
+    return out;
+  });
+  check(inbox.join() === 'xrefstream.pdf', `places: kept in the archive's Inbox (${inbox})`);
+  await page.goto(BASE);
+  await vis('reading-list').waitFor();
+  const rows = await page.getByTestId('recent-row').count();
+  check(rows === 1 && (await vis('reading-list').count()) === 1, `places: the library has it once, still on the reading list (${rows})`);
+  await page.waitForTimeout(500);
+  check((await vis('inbox-badge').innerText().catch(() => '')) === '1', 'places: Documents shows the inbox count');
+
+  // Documents: by place.
+  await openDocs(page);
+  check((await vis('docs-inbox').innerText()).includes('1'), 'places: the inbox is the first row of Documents');
+  let all = 0;
+  for (let i = 0; i < 40 && all < 2; i++) all = await page.waitForTimeout(500).then(() => vis('archive-hit').count());
+  await vis('facet-place').click();
+  await page.getByTestId('action-place-archive').click();
+  const archived = await vis('archive-hit').count();
+  check(all === 2 && archived === 2, `places: both are in the archive now (${all}, ${archived})`);
+  await vis('facet-place').click();
+  await page.getByTestId('action-place-device').click();
+  check((await vis('archive-hit').count()) === 0, 'places: nothing left only on this device');
   await ctx.close();
 }
 
@@ -2166,15 +2264,18 @@ async function tabs() {
     const vis = (id) => page.getByTestId(id).locator('visible=true');
     page.on('pageerror', (e) => errors.push(`tabs: ${e.message}`));
     await page.goto(BASE);
-    check((await vis('tab-library').getAttribute('aria-selected')) === 'true', `tabs (${name}): Library is the current tab`);
-    await vis('tab-files').click();
+    check((await vis('tab-reading').getAttribute('aria-selected')) === 'true', `tabs (${name}): Reading is the current place`);
+    await openDocs(page);
+    await vis('docs-search').waitFor();
+    check((await vis('tab-documents').getAttribute('aria-selected')) === 'true', `tabs (${name}): Documents opens from its tab, with search first`);
+    await vis('docs-folders').click();
     await vis('add-folder').first().waitFor();
-    check((await vis('tab-files').getAttribute('aria-selected')) === 'true', `tabs (${name}): Files opens from its tab`);
-    check((await vis('open-other').count()) === 1, `tabs (${name}): Files offers other locations (system picker)`);
-    await vis('tab-library').click();
+    check((await vis('open-other').count()) === 1, `tabs (${name}): Folders offers adding folders and other locations`);
+    if (name === 'wide') check((await vis('side-folders').getAttribute('aria-selected').catch(() => null)) !== null || (await vis('side-folders').count()) === 1, 'tabs (wide): a sidebar has the places');
+    await vis('tab-reading').click();
     await page.getByText('Open sample').waitFor();
-    // Switching back returns to the library rather than stacking it over Files (stacked screens stay mounted).
-    check((await page.getByTestId('open-other').count()) === 0, `tabs (${name}): switching tabs does not stack screens`);
+    // Switching back returns to Reading rather than stacking it over Documents (stacked screens stay mounted).
+    check((await page.getByTestId('open-other').count()) === 0, `tabs (${name}): switching places does not stack screens`);
     await vis('scan').click();
     await page.waitForURL(/\/scan/);
     check(true, `tabs (${name}): Scan opens the camera`);
@@ -2245,6 +2346,7 @@ await step('inbox', inbox);
 await step('searchable', searchable);
 await step('sync', syncSafety);
 await step('shared', sharedReading);
+await step('places', places);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

@@ -21,6 +21,7 @@ import { useAmbientLight } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { schedule, startIndexing } from '@/archive/indexer';
 import { startSharing } from '@/archive/sharing';
+import { refreshInboxCount } from '@/archive/inbox';
 import { useLibrary } from '@/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -46,6 +47,8 @@ export default function RootLayout() {
   useEffect(() => {
     startIndexing();
     startSharing();
+    void refreshInboxCount();
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void refreshInboxCount());
     return useLibrary.subscribe((s, prev) => {
       if (s.docs.length !== prev.docs.length) schedule();
     });

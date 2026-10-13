@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,13 +10,16 @@ import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
-import { ScreenHeader } from '@/components/ScreenHeader';
+import { AppFrame, AppHeader, TAB_BAR_H, useDocsView, useTabBar } from '@/components/AppNav';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
-import { usePalette } from '@/state/prefs';
+import { usePalette, usePrefs } from '@/state/prefs';
+import { folders } from '@/lib/folders';
+import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
+import { Roots } from './files';
 
 const MAX_W = 820;
 /** Rows shown at first, and added by "Show more". */
@@ -37,7 +40,20 @@ const sameView = (v: SavedView, query: string, filter: Filter, sort: Sort) =>
 export default function Documents() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ q?: string }>();
+  const params = useLocalSearchParams<{ q?: string; view?: string }>();
+  const view = useDocsView((s) => s.view);
+  const archive = usePrefs((s) => s.archive);
+  const inboxHere = usePrefs((s) => s.inboxHere);
+  const inboxCount = useInboxCount((s) => s.count);
+  const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
+  const tabBar = useTabBar();
+  const [place, setPlace] = useState<Place | undefined>(undefined);
+  // Opened on Folders (from an old Files link), then counted and remembered as the place last used.
+  useEffect(() => {
+    if (params.view === 'folders') useDocsView.setState({ view: 'folders' });
+    usePrefs.getState().set({ lastTab: 'documents' });
+    void refreshInboxCount();
+  }, [params.view]);
   const [query, setQuery] = useState(params.q ?? '');
   const [filter, setFilter] = useState<Filter>({});
   const [sort, setSort] = useState<Sort>('date');
@@ -77,7 +93,10 @@ export default function Documents() {
   }, [q, done]);
 
   // With a query, best matches first; without, every document by date or name.
-  const base = useMemo(() => (searching ? (found?.query === q ? found.hits : []) : sortDocs(all, sort).map(asHit)), [searching, found, q, all, sort]);
+  const base = useMemo(() => {
+    const hits = searching ? (found?.query === q ? found.hits : []) : sortDocs(all, sort).map(asHit);
+    return place ? hits.filter((h) => placeOf(h.doc, archive) === place) : hits;
+  }, [searching, found, q, all, sort, place, archive]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -122,19 +141,50 @@ export default function Documents() {
       { key: 'view-remove', icon: 'trash', label: t.viewRemove, destructive: true, onPress: () => void removeView(v.id).catch(() => setNotice(t.viewFailed)) },
     ]);
 
+  const choosePlace = () =>
+    showActions(t.placeFacet, [
+      { key: 'place-any', icon: place ? 'close' : 'check', label: t.facetAny, onPress: () => setPlace(undefined) },
+      ...PLACES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
+    ]);
+  const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0);
+
   return (
-    <View style={{ flex: 1, backgroundColor: p.canvas }}>
+    <AppFrame tab="documents">
       <ScrollView
         style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}
+        contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
-          <ScreenHeader title={t.documentsTitle}>
-            {!searching && (
+          <AppHeader tab="documents">
+            {view === 'all' && !searching && (
               <IconButton testID="docs-sort" icon="sort" label={sort === 'date' ? t.sortName : t.sortDate} onPress={() => setSort(sort === 'date' ? 'name' : 'date')} />
             )}
-          </ScreenHeader>
+          </AppHeader>
+
+          {folders.supported && (
+            <View accessibilityRole="tablist" style={[styles.segments, { backgroundColor: p.hairline }]}>
+              {(['all', 'folders'] as const).map((v) => (
+                <Pressable
+                  key={v}
+                  testID={`docs-${v}`}
+                  role="tab"
+                  aria-selected={view === v}
+                  onPress={() => useDocsView.setState({ view: v })}
+                  style={[styles.segment, view === v && { backgroundColor: p.raised }]}
+                >
+                  <T v="label" color={view === v ? p.ink : p.muted}>
+                    {v === 'all' ? t.allView : t.foldersView}
+                  </T>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {view === 'folders' ? (
+            <Roots bottom={0} />
+          ) : (
+          <>
 
           <View style={[styles.search, { backgroundColor: p.hairline }]}>
             <Icon name="search" size={16} color={p.muted} />
@@ -151,6 +201,11 @@ export default function Documents() {
             />
             {!!query && <IconButton icon="close" size={32} label={t.cancel} onPress={() => setQuery('')} />}
           </View>
+
+          {archive && inboxHere && (
+            <Row testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />
+          )}
+          {syncIssues > 0 && <Row testID="sync-banner" icon="copy" label={t.syncBanner(syncIssues)} warn onPress={() => router.push('/sync')} />}
 
           {(views.length > 0 || canSave) && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
@@ -184,6 +239,18 @@ export default function Documents() {
           )}
 
           <View style={styles.chips}>
+            <Pressable
+              testID="facet-place"
+              accessibilityRole="button"
+              accessibilityLabel={place ? `${t.placeFacet}: ${placeName(place)}` : t.placeFacet}
+              onPress={choosePlace}
+              style={[styles.chip, { backgroundColor: place ? p.mark : 'transparent', borderColor: place ? p.markRing : p.hairline }]}
+            >
+              <T v="label" color={place ? p.ink : p.inkSoft}>
+                {place ? placeName(place) : t.placeFacet}
+              </T>
+              <Icon name="chevronDown" size={14} color={p.muted} />
+            </Pressable>
             {FACETS.map((f) => {
               const value = filter[f];
               return (
@@ -221,14 +288,53 @@ export default function Documents() {
               <Button testID="show-more" kind="quiet" label={t.showMore} onPress={() => setLimit(limit + PAGE)} />
             </View>
           )}
+          </>
+          )}
         </View>
       </ScrollView>
-      <Toast message={notice} onDismiss={() => setNotice(null)} />
-    </View>
+      <Toast message={notice} onDismiss={() => setNotice(null)} above={tabBar ? TAB_BAR_H : 0} />
+    </AppFrame>
   );
 }
 
+/** A row leading somewhere (the inbox, sync issues). */
+function Row({ testID, icon, label, count, warn, onPress }: { testID: string; icon: IconName; label: string; count?: number; warn?: boolean; onPress: () => void }) {
+  const p = usePalette();
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.row,
+        { backgroundColor: warn ? p.mark : hovered ? p.raised : p.surface, borderColor: warn ? p.markRing : p.hairline },
+      ]}
+    >
+      <Icon name={icon} size={18} color={p.ink} />
+      <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium }}>
+        {label}
+      </T>
+      {!!count && (
+        <T v="label" color={p.accent} style={{ fontFamily: fonts.sansSemi }}>
+          {count}
+        </T>
+      )}
+      <Icon name="chevronRight" size={18} color={p.muted} />
+    </Pressable>
+  );
+}
+
+type Place = 'archive' | 'folders' | 'device';
+const PLACES: Place[] = ['archive', 'folders', 'device'];
+const placeIcon: Record<Place, IconName> = { archive: 'folder', folders: 'folder', device: 'device' };
+const placeName = (pl: Place) => (pl === 'archive' ? t.placeArchive : pl === 'folders' ? t.placeFolders : t.placeDevice);
+/** Where a document is: the archive (synced), another folder, or only on this device. */
+const placeOf = (d: IndexedDoc, archive: string | null): Place => (d.place.kind === 'library' ? 'device' : d.place.root === archive ? 'archive' : 'folders');
+
 const styles = StyleSheet.create({
+  segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },
+  segment: { height: 34, justifyContent: 'center', paddingHorizontal: space.lg, borderRadius: radius.pill },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.lg, minHeight: 48, marginTop: space.md },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingLeft: space.md, minHeight: 44 },
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 16, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },

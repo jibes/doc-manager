@@ -44,13 +44,15 @@ type Prefs = {
   shareReading: boolean;
   /** This device's name for that ("<random>.json" in .tessel/state). */
   deviceId: string;
+  /** The place last used: the app opens there. */
+  lastTab: 'reading' | 'documents';
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, shareReading: true, deviceId: '' };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, shareReading: true, deviceId: '', lastTab: 'reading' };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -61,8 +63,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId, lastTab } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId, lastTab });
   },
 }));
 
