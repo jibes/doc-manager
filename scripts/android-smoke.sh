@@ -165,13 +165,13 @@ for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
 adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
 wait_for "Settings"
 tap "Settings"
-wait_for "Auto: follows the light around you"
+wait_for "Auto: follows dark mode and the light around you"
 tap "Light"
 sleep 2
 # Connections to the light sensor with Light and with Auto (the report doesn't name apps).
 light_users() { { adb shell dumpsys sensorservice | grep -Eo 'Light sensor \(handle=[^,]+, connections=[0-9]+' | grep -Eo '[0-9]+$' | head -1; } || true; }
 before=$(light_users); before=${before:-0}
-tap "Auto: follows the light around you"
+tap "Auto: follows dark mode and the light around you"
 sleep 3
 after=$(light_users); after=${after:-0}
 echo "light sensor connections: $before with Light, $after with Auto"

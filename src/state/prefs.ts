@@ -13,7 +13,7 @@ export type TextLeading = 'compact' | 'normal' | 'relaxed';
 export type TextWidth = 'narrow' | 'medium' | 'wide';
 
 type Prefs = {
-  /** Auto: the light sensor where there is one (Android app), else the system's light or dark mode. */
+  /** Auto: the system's dark mode, and in its light mode the light sensor where there is one (Android app). */
   appearance: Appearance;
   fit: FitMode;
   /** Text view typography. */
@@ -59,7 +59,7 @@ export function usePalette(): Palette {
   const appearance = usePrefs((s) => s.appearance);
   const sensed = useAmbient((s) => s.theme);
   const scheme = useColorScheme();
-  // Until the sensor's first reading (or without one), Auto follows the system.
-  const auto = sensed ?? (scheme === 'dark' ? 'dark' : 'light');
+  // The system's dark mode always wins; in its light mode the sensor (where there is one) turns Dark in a dim room.
+  const auto = scheme === 'dark' ? 'dark' : (sensed ?? 'light');
   return palettes[appearance === 'auto' ? auto : appearance];
 }

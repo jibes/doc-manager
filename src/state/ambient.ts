@@ -5,9 +5,9 @@ import type { ThemeName } from '@/design/tokens';
 import { shell } from '@/lib/shell';
 
 /**
- * Auto appearance with a light sensor: Light in a lit room, Dark when it's dim. Readings come from the Android
- * app (the phone's light sensor) or, where a browser offers one, the Ambient Light Sensor API. Without a
- * sensor, Auto follows the system's light or dark mode instead.
+ * Auto appearance with a light sensor: while the system is in light mode, Light in a lit room and Dark when
+ * it's dim (the system's dark mode always wins). Readings come from the Android app (the phone's light sensor)
+ * or, where a browser offers one, the Ambient Light Sensor API.
  */
 
 type Reading = (lux: number) => void;
@@ -47,7 +47,7 @@ const source: Source | null = shell?.hasLightSensor?.()
       }
     : null;
 
-/** Auto follows the light here (not only the system's mode). */
+/** Auto also follows the light here (not only the system's mode). */
 export const hasLightSensor = source != null;
 
 /** Darkest first. */
