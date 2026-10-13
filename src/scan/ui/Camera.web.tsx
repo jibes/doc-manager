@@ -332,14 +332,17 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
       l.lastCaptured = l.raw;
       l.armed = false;
       setSteady(0);
+      // The page as the preview shows it now: the photo is cropped to it if the stricter search on the photo fails.
+      const v = video.current;
+      const hint = l.quad && v.videoWidth && v.videoHeight ? { quad: l.quad, aspect: v.videoWidth / v.videoHeight } : undefined;
       try {
-        const still = await captureStill(l.track, video.current);
+        const still = await captureStill(l.track, v);
         // The flash and buzz mean "done, you can move": only once the photo is actually taken.
         setExposing(false);
         setFlash(true);
         setTimeout(() => setFlash(false), 180);
         haptic('capture');
-        const { id, found, blurred, offFrame } = await addPhoto(l.detector, still, { filter: defaultFilter, retakeId });
+        const { id, found, blurred, offFrame } = await addPhoto(l.detector, still, { filter: defaultFilter, retakeId, hint });
         if (l.detector.dead) setDetectorState('failed');
         if (!mounted) return;
         if (!retakeId) {

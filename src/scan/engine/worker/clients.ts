@@ -12,8 +12,7 @@ import type {
   ProcessorRequest,
   ProcessorResponse,
   RenderJob,
-  StillResult,
-} from './protocol';
+  StillResult, StillHint } from './protocol';
 
 const workerUrl = (name: ScanWorker) => `${BASE}/engine/${workerFile(name)}`;
 
@@ -285,8 +284,8 @@ export class DetectorClient extends WorkerClient<DetectorResponse> {
     return response;
   }
 
-  async still(source: Blob): Promise<StillResult> {
-    const response = await this.request({ type: 'still', source }, { timeoutMs: STILL_TIMEOUT_MS });
+  async still(source: Blob, hint?: StillHint): Promise<StillResult> {
+    const response = await this.request({ type: 'still', source, hint }, { timeoutMs: STILL_TIMEOUT_MS });
     if (response.type !== 'still') throw new Error('Unexpected detector response');
     return response;
   }

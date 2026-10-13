@@ -302,3 +302,15 @@ export function fitLongEdge(
     height: Math.max(1, Math.round(size.height * scale)),
   };
 }
+
+/**
+ * The preview's page on the photo: the video frame is the middle of the photo, as wide or as tall as it (a photo
+ * often shows more of the sensor than the video). Null when they don't share an orientation.
+ */
+export function hintOnPhoto(hint: { quad: Quad; aspect: number }, w: number, h: number): Quad | null {
+  const photo = w / h;
+  if (hint.aspect > 1 !== photo > 1 && Math.abs(hint.aspect - 1) > 0.05) return null;
+  const fw = photo > hint.aspect ? h * hint.aspect : w;
+  const fh = photo > hint.aspect ? h : w / hint.aspect;
+  return hint.quad.map(([x, y]) => [(w - fw) / 2 + x * fw, (h - fh) / 2 + y * fh]) as unknown as Quad;
+}

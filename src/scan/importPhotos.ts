@@ -1,3 +1,4 @@
+import type { StillHint } from './engine/worker/protocol';
 import type { FilterId } from './engine/imaging/filters';
 import type { Quad } from './engine/imaging/image';
 import { fallbackQuad } from './engine/imaging/quad';
@@ -23,12 +24,12 @@ export interface AddedPhoto {
 export async function addPhoto(
   detector: DetectorClient,
   source: Blob,
-  options: { filter: FilterId; imported?: boolean; retakeId?: string | null },
+  options: { filter: FilterId; imported?: boolean; retakeId?: string | null; hint?: StillHint },
 ): Promise<AddedPhoto> {
-  const { filter, imported = false, retakeId = null } = options;
+  const { filter, imported = false, retakeId = null, hint } = options;
   let result: { quad: Quad | null; width: number; height: number; sharpness: number | null; offFrame: boolean };
   try {
-    result = await detector.still(source);
+    result = await detector.still(source, hint);
   } catch {
     const bitmap = await createImageBitmap(source);
     result = { quad: null, width: bitmap.width, height: bitmap.height, sharpness: null, offFrame: false };

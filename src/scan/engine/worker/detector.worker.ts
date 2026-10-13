@@ -11,11 +11,11 @@ import {
   searchQuad,
 } from '../detect/quadSearch';
 import { toLuma, type FloatImage, type Quad, type RGBAImage } from '../imaging/image';
-import { clampQuad, plausibleQuad, quadArea, scaleQuad } from '../imaging/quad';
+import { clampQuad, hintOnPhoto, plausibleQuad, quadArea, scaleQuad } from '../imaging/quad';
 import { refineQuad } from '../imaging/refine';
 import { sharpness } from '../imaging/sharpness';
 import { MODEL_INPUT } from '../detect/model';
-import type { DetectorRequest, DetectorResponse, StillResult, StillSource } from './protocol';
+import type { DetectorRequest, DetectorResponse, StillHint, StillResult, StillSource } from './protocol';
 
 declare const self: {
   onmessage: ((event: MessageEvent<DetectorRequest>) => void) | null;
@@ -222,7 +222,7 @@ function onBorder(q: Quad, w: number, h: number): boolean {
   return q.some(([x, y]) => x <= 0.5 || y <= 0.5 || x >= w - 0.5 || y >= h - 0.5);
 }
 
-async function detectStill(source: Blob): Promise<StillResult> {
+async function detectStill(source: Blob, hint?: StillHint): Promise<StillResult> {
   // Decode once; the model, the refinement and the blur check all draw from
   // this bitmap.
   const full = await createImageBitmap(source, { imageOrientation: 'from-image' });
@@ -241,7 +241,15 @@ async function detectStill(source: Blob): Promise<StillResult> {
     const rgba = { data: ctx.getImageData(0, 0, w, h).data, width: w, height: h };
     const luma = toLuma(rgba);
 
-    const found = findPage(rgba, luma, detection);
+    let found = findPage(rgba, luma, detection);
+    // The live preview showed the page and the photo was taken for it: when the stricter search on the photo finds
+    // nothing, that page (snapped to the photo's edges) is a better crop than the whole photo.
+    const shown = !found && hint ? hintOnPhoto(hint, w, h) : null;
+    if (shown && plausibleQuad(shown, w, h)) {
+      const snapped = refineQuad(luma, clampQuad(shown, w, h));
+      const fitted = fitFrame(plausibleQuad(snapped, w, h) ? snapped : clampQuad(shown, w, h), w, h);
+      found = { quad: fitted.quad, confidence: 0.5, source: 'preview', offFrame: fitted.offFrame };
+    }
     if (!found) {
       return {
         quad: null,
@@ -293,7 +301,7 @@ async function handle(request: DetectorRequest): Promise<void> {
       self.postMessage({ type: 'frame', id, detection, ms: performance.now() - start });
       return;
     }
-    const result = await detectStill(request.source);
+    const result = await detectStill(request.source, request.hint);
     self.postMessage({ type: 'still', id, ...result });
   } catch (error) {
     self.postMessage({
