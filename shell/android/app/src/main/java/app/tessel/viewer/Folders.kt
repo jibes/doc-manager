@@ -285,6 +285,62 @@ class Folders(private val context: Context) {
         return JSONObject().put("uri", uri.toString()).put("name", created)
     }
 
+    // ---------- small text files (the archive's .tessel/ settings) ----------
+
+    /** A text file at `path` below a place (picked folder, internal storage or the app folder); null if there is none. */
+    fun readText(root: String, path: List<String>): String? {
+        val uri = fileAt(root, path, create = false) ?: return null
+        return if (uri.scheme == "file") File(uri.path!!).readText() else resolver.openInputStream(uri)?.use { it.reader().readText() }
+    }
+
+    /** Writes a text file at `path` below a place, making the folders on the way and replacing what was there. */
+    fun writeText(root: String, path: List<String>, text: String) {
+        val uri = fileAt(root, path, create = true) ?: throw IllegalStateException("Can't write ${path.joinToString("/")}")
+        if (uri.scheme == "file") File(uri.path!!).writeText(text)
+        else resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }
+    }
+
+    private fun fileAt(root: String, path: List<String>, create: Boolean): Uri? {
+        require(path.isNotEmpty() && path.none { it.isEmpty() || it == ".." || it.contains('/') }) { "Bad path" }
+        if (root == "device" || root == "app") {
+            val rel = path.joinToString(File.separator)
+            val f = if (root == "app") inAppFolder(File(appDir, rel).path) else onDevice(File(storageRoot, rel).path)
+            if (!f.exists()) {
+                if (!create) return null
+                f.parentFile?.mkdirs()
+                if (!f.createNewFile()) throw IllegalStateException("Can't create ${f.name}")
+            }
+            return Uri.fromFile(f)
+        }
+        if (root == "all") throw IllegalArgumentException("Not a folder")
+        val tree = tree(root)
+        var parent = DocumentsContract.getTreeDocumentId(tree)
+        for ((i, name) in path.withIndex()) {
+            val last = i == path.size - 1
+            val id = childNamed(tree, parent, name) ?: run {
+                if (!create) return null
+                val made = DocumentsContract.createDocument(
+                    resolver,
+                    DocumentsContract.buildDocumentUriUsingTree(tree, parent),
+                    if (last) "application/json" else Document.MIME_TYPE_DIR,
+                    name,
+                ) ?: throw IllegalStateException("Can't create $name")
+                DocumentsContract.getDocumentId(made)
+            }
+            if (last) return DocumentsContract.buildDocumentUriUsingTree(tree, id)
+            parent = id
+        }
+        return null
+    }
+
+    private fun childNamed(tree: Uri, parent: String, name: String): String? {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent)
+        resolver.query(children, arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { c ->
+            while (c.moveToNext()) if (c.getString(1) == name) return c.getString(0)
+        }
+        return null
+    }
+
     /** Returns the renamed item's URI (providers may give it a new one). */
     fun rename(uri: Uri, name: String): String {
         check(uri)

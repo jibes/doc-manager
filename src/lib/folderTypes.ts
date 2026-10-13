@@ -64,6 +64,10 @@ export type FoldersApi = {
   /** Copies or moves items into a folder; returns old → new URIs (Android app). */
   transfer(from: Place, entries: FolderEntry[], to: Place, move: boolean): Promise<{ from: string; to: string }[]>;
   share(root: string, entries: FolderEntry[]): Promise<void>;
+  /** A small text file at `path` below a place (the archive's .tessel/ settings); null when there is none. */
+  readText(root: string, path: string[]): Promise<string | null>;
+  /** Writes it, making the folders on the way and replacing what was there. */
+  writeText(root: string, path: string[], text: string): Promise<void>;
   /** Whether all files access is granted. */
   allFiles(): Promise<boolean>;
   /** Shows Android's screen for it; resolves with the outcome. */

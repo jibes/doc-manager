@@ -1,0 +1,237 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { FACETS, facetCounts, matches, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/archive/facets';
+import { allDocs, searchAll, useIndex } from '@/archive/indexer';
+import { HitRow } from '@/archive/Results';
+import type { Hit, IndexedDoc } from '@/archive/search';
+import { loadViews, removeView, saveView, useViews } from '@/archive/views';
+import { Icon, type IconName } from '@/components/Icon';
+import { Button, IconButton, T } from '@/components/primitives';
+import { ScreenHeader } from '@/components/ScreenHeader';
+import { Toast } from '@/components/Toast';
+import { fonts, radius, space } from '@/design/tokens';
+import { t } from '@/i18n';
+import { showActions } from '@/state/actions';
+import { ask } from '@/state/ask';
+import { usePalette } from '@/state/prefs';
+
+const MAX_W = 820;
+/** Rows shown at first, and added by "Show more". */
+const PAGE = 100;
+
+const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
+const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'documents', type: 'pages', year: 'sort' };
+
+const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
+const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
+const sameView = (v: SavedView, query: string, filter: Filter, sort: Sort) =>
+  v.query === query.trim() && v.sort === sort && FACETS.every((k) => (v.filter[k] ?? '') === (filter[k] ?? ''));
+
+/**
+ * Every document in the library and the folders: searched, narrowed by tag, sender, type and year, sorted, and
+ * kept as named views (in the archive folder, so the other devices have them too).
+ */
+export default function Documents() {
+  const p = usePalette();
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(params.q ?? '');
+  const [filter, setFilter] = useState<Filter>({});
+  const [sort, setSort] = useState<Sort>('date');
+  const [limit, setLimit] = useState(PAGE);
+  const [notice, setNotice] = useState<string | null>(null);
+  const { count, done } = useIndex();
+  const views = useViews((s) => s.views);
+
+  const [all, setAll] = useState<IndexedDoc[]>([]);
+  useEffect(() => {
+    let alive = true;
+    allDocs().then((d) => alive && setAll(d.filter((x) => !x.failed)));
+    return () => {
+      alive = false;
+    };
+    // Read again as indexing adds documents.
+  }, [count, done]);
+
+  useEffect(() => {
+    loadViews().catch(() => {});
+  }, []);
+
+  // Search results, kept with the query they answer (so an older answer never shows for a newer query).
+  const [found, setFound] = useState<{ query: string; hits: Hit[] } | null>(null);
+  const q = query.trim();
+  const searching = q.length >= 2;
+  useEffect(() => {
+    if (q.length < 2) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      searchAll(q).then((hits) => alive && setFound({ query: q, hits }), () => alive && setFound({ query: q, hits: [] }));
+    }, 180);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [q, done]);
+
+  // With a query, best matches first; without, every document by date or name.
+  const base = useMemo(() => (searching ? (found?.query === q ? found.hits : []) : sortDocs(all, sort).map(asHit)), [searching, found, q, all, sort]);
+  const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
+  const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
+
+  const choose = (facet: Facet) => {
+    const chosen = filter[facet];
+    showActions(facetName[facet], [
+      { key: 'any', icon: chosen ? 'close' : 'check', label: t.facetAny, onPress: () => setFilter({ ...filter, [facet]: undefined }) },
+      ...counts[facet].map((c, i) => ({
+        key: `value-${i}`,
+        icon: (chosen?.toLocaleLowerCase() === c.value.toLocaleLowerCase() ? 'check' : facetIcon[facet]) as IconName,
+        label: t.facetCount(c.value, c.count),
+        onPress: () => {
+          setFilter({ ...filter, [facet]: c.value });
+          setLimit(PAGE);
+        },
+      })),
+    ]);
+  };
+
+  const apply = (v: SavedView) => {
+    setQuery(v.query);
+    setFilter(v.filter);
+    setSort(v.sort);
+    setLimit(PAGE);
+  };
+  const current = views.find((v) => sameView(v, query, filter, sort));
+  const canSave = !current && (!!q || !isEmpty(filter));
+
+  const save = async () => {
+    const suggested = [...FACETS.map((f) => filter[f]).filter(Boolean), q].filter(Boolean).join(' · ');
+    const name = (await ask({ title: t.saveView, input: suggested, placeholder: t.viewName, confirm: t.saveView }))?.trim();
+    if (!name) return;
+    const view: SavedView = { id: `v-${Date.now().toString(36)}`, name, query: q, filter, sort };
+    saveView(view).then(
+      () => setNotice(t.viewSaved(name)),
+      () => setNotice(t.viewFailed),
+    );
+  };
+  const viewActions = (v: SavedView) =>
+    showActions(v.name, [
+      { key: 'view-open', icon: 'check', label: t.viewOpen, onPress: () => apply(v) },
+      { key: 'view-remove', icon: 'trash', label: t.viewRemove, destructive: true, onPress: () => void removeView(v.id).catch(() => setNotice(t.viewFailed)) },
+    ]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: p.canvas }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}
+      >
+        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
+          <ScreenHeader title={t.documentsTitle}>
+            {!searching && (
+              <IconButton testID="docs-sort" icon="sort" label={sort === 'date' ? t.sortName : t.sortDate} onPress={() => setSort(sort === 'date' ? 'name' : 'date')} />
+            )}
+          </ScreenHeader>
+
+          <View style={[styles.search, { backgroundColor: p.hairline }]}>
+            <Icon name="search" size={16} color={p.muted} />
+            <TextInput
+              testID="docs-search"
+              value={query}
+              onChangeText={(text) => {
+                setQuery(text);
+                setLimit(PAGE);
+              }}
+              placeholder={t.documentsSearch}
+              placeholderTextColor={p.muted}
+              style={[styles.searchInput, { color: p.ink }]}
+            />
+            {!!query && <IconButton icon="close" size={32} label={t.cancel} onPress={() => setQuery('')} />}
+          </View>
+
+          {(views.length > 0 || canSave) && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
+              {views.map((v) => {
+                const on = v === current;
+                return (
+                  <Pressable
+                    key={v.id}
+                    testID="view-chip"
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    onPress={() => (on ? viewActions(v) : apply(v))}
+                    onLongPress={() => viewActions(v)}
+                    style={[styles.chip, { backgroundColor: on ? p.ink : p.surface, borderColor: on ? p.ink : p.hairline }]}
+                  >
+                    <T v="label" color={on ? p.canvas : p.ink}>
+                      {v.name}
+                    </T>
+                  </Pressable>
+                );
+              })}
+              {canSave && (
+                <Pressable testID="save-view" accessibilityRole="button" onPress={save} style={[styles.chip, { borderColor: p.hairline, borderStyle: 'dashed' }]}>
+                  <Icon name="plus" size={15} color={p.accent} />
+                  <T v="label" color={p.accent}>
+                    {t.saveView}
+                  </T>
+                </Pressable>
+              )}
+            </ScrollView>
+          )}
+
+          <View style={styles.chips}>
+            {FACETS.map((f) => {
+              const value = filter[f];
+              return (
+                <Pressable
+                  key={f}
+                  testID={`facet-${f}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={value ? `${facetName[f]}: ${value}` : facetName[f]}
+                  onPress={() => choose(f)}
+                  style={[styles.chip, { backgroundColor: value ? p.mark : 'transparent', borderColor: value ? p.markRing : p.hairline }]}
+                >
+                  <T v="label" color={value ? p.ink : p.inkSoft} numberOfLines={1} style={{ maxWidth: 200 }}>
+                    {value ?? facetName[f]}
+                  </T>
+                  <Icon name="chevronDown" size={14} color={p.muted} />
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <T v="kicker" color={p.muted} style={{ marginTop: space.lg, marginBottom: space.sm }} testID="docs-count">
+            {t.documentsCount(shown.length)}
+          </T>
+          {shown.length > 0 ? (
+            <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+              {shown.slice(0, limit).map((h, i) => (
+                <HitRow key={h.doc.key} hit={h} query={searching ? q : ''} first={i === 0} onError={setNotice} />
+              ))}
+            </View>
+          ) : (
+            <T color={p.muted}>{all.length || searching ? t.documentsEmpty : t.documentsNone}</T>
+          )}
+          {shown.length > limit && (
+            <View style={{ flexDirection: 'row', marginTop: space.md }}>
+              <Button testID="show-more" kind="quiet" label={t.showMore} onPress={() => setLimit(limit + PAGE)} />
+            </View>
+          )}
+        </View>
+      </ScrollView>
+      <Toast message={notice} onDismiss={() => setNotice(null)} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingLeft: space.md, minHeight: 44 },
+  searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 16, paddingVertical: space.sm, outlineStyle: 'none' } as object,
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36 },
+  list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+});

@@ -990,6 +990,8 @@ async function foldersShell() {
           return { from: uri, to: uriOf(reId(id)) };
         }),
       share: ({ uris }) => ((log.shared = uris), null),
+      readText: ({ root, path }) => (state.texts ?? {})[`${root}|${path.join('/')}`] ?? null,
+      writeText: ({ root, path, text }) => (((state.texts ??= {})[`${root}|${path.join('/')}`] = text), null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
       create: ({ root, dir, name, token }) => {
         const id = newId();
@@ -1454,6 +1456,105 @@ async function searchArchive() {
   await ctx.close();
 }
 
+// Documents screen: narrow by details, save a view, keep it in the archive folder.
+async function documentsScreen() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`documents: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url)).toString('base64');
+  await page.evaluate(async (b64) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+    const w = await (await (await root.getDirectoryHandle('2026', { create: true })).getFileHandle('columns.pdf', { create: true })).createWritable();
+    await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    await w.close();
+  }, fixture);
+  await vis('tab-files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  // A library document with details.
+  await page.goto(BASE);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('detail-sender').fill('KoRo');
+  await page.getByTestId('detail-type').fill('Rechnung');
+  await page.getByTestId('detail-date').fill('2026-09-28');
+  await page.getByTestId('detail-tag-input').fill('Steuer');
+  await page.getByTestId('detail-tag-input').press('Enter');
+  await page.getByTestId('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+
+  await page.goto(BASE);
+  await vis('open-documents').waitFor({ timeout: 30000 });
+  await vis('open-documents').click();
+  const count = () => vis('docs-count').innerText();
+  // Both documents, the library one with its new details (indexing may still be going).
+  let rows = [];
+  for (let i = 0; i < 60 && !(rows.length === 2 && rows.some((r) => /KoRo/.test(r))); i++) rows = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
+  check(rows.length === 2 && rows.some((r) => /KoRo · 2026-09-28/.test(r)), `documents: every document is listed with its details (${rows.map((r) => r.replace(/\n/g, ' / '))})`);
+
+  await vis('facet-type').click();
+  await page.getByTestId('action-sheet').getByText('Rechnung · 1').click();
+  check((await count()) === '1 DOCUMENT' && /Old title/.test(await vis('archive-hit').first().innerText()), 'documents: choosing a type narrows the list');
+  await vis('facet-tag').click();
+  const tagged = await page.getByTestId('action-sheet').getByText('Steuer · 1').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  await page.getByTestId('action-any').click();
+  check(tagged, 'documents: tags are counted within the chosen type');
+
+  // Save the view (this device only), then choose the archive folder: it moves into Archive/.tessel.
+  await vis('save-view').click();
+  await page.getByTestId('ask-input').fill('Invoices');
+  await page.getByTestId('ask-confirm').click();
+  await page.getByText('“Invoices” saved.').waitFor();
+  check((await vis('view-chip').allInnerTexts()).join() === 'Invoices', 'documents: a view is saved and shown');
+  await page.goto(`${BASE}/settings`);
+  await vis('archive-root').click();
+  await page.waitForTimeout(500);
+  const stored = await page.evaluate(async () => {
+    try {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      return await (await (await (await root.getDirectoryHandle('.tessel')).getFileHandle('views.json')).getFile()).text();
+    } catch (e) {
+      return String(e);
+    }
+  });
+  check(/"name": "Invoices"/.test(stored) && /"type": "Rechnung"/.test(stored), `documents: views are kept in the archive folder (${stored.slice(0, 80)})`);
+  // Another device's view in the same file shows up.
+  await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    const h = await (await root.getDirectoryHandle('.tessel')).getFileHandle('views.json');
+    const data = JSON.parse(await (await h.getFile()).text());
+    data.views.push({ id: 'other', name: 'Columns', query: 'Orderly', filter: {}, sort: 'name' });
+    const w = await h.createWritable();
+    await w.write(JSON.stringify(data));
+    await w.close();
+  });
+  await page.goto(`${BASE}/documents`);
+  await vis('docs-count').waitFor();
+  check((await vis('view-chip').allInnerTexts()).join() === 'Invoices,Columns', `documents: views from the archive folder are listed (${await vis('view-chip').allInnerTexts()})`);
+  await vis('view-chip').filter({ hasText: 'Columns' }).click();
+  let byText = '';
+  for (let i = 0; i < 10 && byText !== '1 DOCUMENT'; i++) byText = await page.waitForTimeout(300).then(count);
+  check(byText === '1 DOCUMENT' && (await vis('docs-search').inputValue()) === 'Orderly', 'documents: a view brings back its search');
+  await vis('view-chip').filter({ hasText: 'Invoices' }).click();
+  check((await count()) === '1 DOCUMENT' && (await vis('docs-search').inputValue()) === '', 'documents: and its filter');
+  // Removing a view rewrites the file.
+  await vis('view-chip').filter({ hasText: 'Invoices' }).click();
+  await page.getByTestId('action-view-remove').click();
+  await page.waitForTimeout(500);
+  check((await vis('view-chip').allInnerTexts()).join() === 'Columns', 'documents: a view can be removed');
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -1648,6 +1749,7 @@ await step('scanner', scanner);
 await step('ai', aiReading);
 await step('details', details);
 await step('search', searchArchive);
+await step('documents', documentsScreen);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

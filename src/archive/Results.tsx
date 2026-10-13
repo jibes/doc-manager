@@ -10,16 +10,16 @@ import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { searchAll, useIndex } from './indexer';
-import type { Hit } from './search';
+import type { Hit, IndexedDoc } from './search';
 
-/** Opens a hit at its page, with the query highlighted: a library document directly, a folder file via the library. */
-async function openHit(hit: Hit, query: string) {
-  const params = { page: String(hit.page), q: query.trim() };
-  const { place } = hit.doc;
+/** Opens a document at a page, with the query highlighted: a library document directly, a folder file via the library. */
+export async function openDoc(doc: IndexedDoc, page: number, query: string) {
+  const params = { page: String(page), q: query.trim() };
+  const { place } = doc;
   if (place.kind === 'library') return router.push({ pathname: '/read/[id]', params: { id: place.id, ...params } });
   const file = await folders.read(place.root, place.entry);
-  const [doc] = await useLibrary.getState().importFiles([{ name: place.entry.name, size: place.entry.size || file.size, file, handle: place.entry.handle, link: place.entry.uri }]);
-  if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id, ...params } });
+  const [added] = await useLibrary.getState().importFiles([{ name: place.entry.name, size: place.entry.size || file.size, file, handle: place.entry.handle, link: place.entry.uri }]);
+  if (added) router.push({ pathname: '/read/[id]', params: { id: added.id, ...params } });
 }
 
 /** "In all documents": matches in every indexed document's text and details. `skip`: library documents already listed. */
@@ -46,9 +46,17 @@ export function ArchiveResults({ query, skip }: { query: string; skip: Set<strin
 
   return (
     <View style={styles.section} testID="archive-results">
-      <T v="kicker" color={p.muted}>
-        {t.inAllDocuments(shown.length)}
-      </T>
+      <View style={styles.head}>
+        <T v="kicker" color={p.muted}>
+          {t.inAllDocuments(shown.length)}
+        </T>
+        {/* The same search on the Documents screen, to narrow by tag, sender, type and year. */}
+        <Pressable testID="archive-more" accessibilityRole="link" onPress={() => router.push({ pathname: '/documents', params: { q: query.trim() } })}>
+          <T v="label" color={p.accent}>
+            {t.filterResults}
+          </T>
+        </Pressable>
+      </View>
       {running && (
         <T v="caption" color={p.muted} testID="indexing">
           {t.indexing(done, total)}
@@ -61,52 +69,61 @@ export function ArchiveResults({ query, skip }: { query: string; skip: Set<strin
       )}
       {shown.length > 0 && (
         <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-          {shown.map((h, i) => {
-            const meta = [h.doc.sender, h.doc.date, h.doc.place.kind === 'folder' ? h.doc.place.rootName : t.library].filter(Boolean).join(' · ');
-            return (
-              <Pressable
-                key={h.doc.key}
-                testID="archive-hit"
-                accessibilityRole="button"
-                onPress={() => openHit(h, query).catch((e) => setFailed(e instanceof Error ? e.message : String(e)))}
-                style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.row, { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0, backgroundColor: hovered ? p.hairline : 'transparent' }]}
-              >
-                <Icon name="documents" size={20} color={p.muted} />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <T numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
-                    {h.doc.title || h.doc.name.replace(/\.pdf$/i, '')}
-                  </T>
-                  {!!meta && (
-                    <T v="caption" color={p.muted} numberOfLines={1}>
-                      {meta}
-                    </T>
-                  )}
-                  {h.snippet && (
-                    <T v="caption" color={p.inkSoft} numberOfLines={2}>
-                      {h.snippet.before}
-                      <T v="caption" style={{ backgroundColor: p.mark, color: p.ink, fontFamily: fonts.sansSemi }}>
-                        {h.snippet.match}
-                      </T>
-                      {h.snippet.after}
-                    </T>
-                  )}
-                </View>
-                {h.snippet && (
-                  <T v="numeral" color={p.muted}>
-                    {t.pageShort(h.page + 1)}
-                  </T>
-                )}
-              </Pressable>
-            );
-          })}
+          {shown.map((h, i) => (
+            <HitRow key={h.doc.key} hit={h} query={query} first={i === 0} onError={setFailed} />
+          ))}
         </View>
       )}
     </View>
   );
 }
 
+/** One document found: title, sender, date and place, and the words around the match with its page. */
+export function HitRow({ hit: h, query, first, onError }: { hit: Hit; query: string; first: boolean; onError: (message: string) => void }) {
+  const p = usePalette();
+  const meta = [h.doc.sender, h.doc.date, h.doc.place.kind === 'folder' ? h.doc.place.rootName : t.library].filter(Boolean).join(' · ');
+  return (
+    <Pressable
+      testID="archive-hit"
+      accessibilityRole="button"
+      onPress={() => openDoc(h.doc, h.page, query).catch((e) => onError(e instanceof Error ? e.message : String(e)))}
+      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.row,
+        { borderColor: p.hairline, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth, backgroundColor: hovered ? p.hairline : 'transparent' },
+      ]}
+    >
+      <Icon name="documents" size={20} color={p.muted} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <T numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
+          {h.doc.title || h.doc.name.replace(/\.pdf$/i, '')}
+        </T>
+        {!!meta && (
+          <T v="caption" color={p.muted} numberOfLines={1}>
+            {meta}
+          </T>
+        )}
+        {h.snippet && (
+          <T v="caption" color={p.inkSoft} numberOfLines={2}>
+            {h.snippet.before}
+            <T v="caption" style={{ backgroundColor: p.mark, color: p.ink, fontFamily: fonts.sansSemi }}>
+              {h.snippet.match}
+            </T>
+            {h.snippet.after}
+          </T>
+        )}
+      </View>
+      {h.snippet && (
+        <T v="numeral" color={p.muted}>
+          {t.pageShort(h.page + 1)}
+        </T>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   section: { marginTop: space.xxl, gap: space.sm },
+  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
 });

@@ -131,6 +131,8 @@ class Bridge(private val activity: MainActivity) {
                         "forgetFolder" -> folders.forget(Uri.parse(a.getString("uri"))).let { null }
                         "list" -> folders.list(a.getString("root"), a.optString("dir").ifEmpty { null })
                         "access" -> JSONObject().put("allFiles", folders.allFilesGranted()).put("app", folders.appFolderUsable())
+                        "readText" -> a.getJSONArray("path").let { p -> folders.readText(a.getString("root"), (0 until p.length()).map { p.getString(it) }) }
+                        "writeText" -> a.getJSONArray("path").let { p -> folders.writeText(a.getString("root"), (0 until p.length()).map { p.getString(it) }, a.getString("text")) }.let { null }
                         "mkdir" -> folders.mkdir(a.getString("root"), a.optString("dir").ifEmpty { null }, a.getString("name"))
                         "rename" -> folders.rename(Uri.parse(a.getString("uri")), a.getString("name"))
                         "delete" -> a.getJSONArray("uris").let { list -> for (i in 0 until list.length()) folders.delete(Uri.parse(list.getString(i))) }.let { null }

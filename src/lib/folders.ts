@@ -25,6 +25,10 @@ export const folders: FoldersApi = {
   read: async () => {
     throw new Error('Unsupported');
   },
+  readText: async () => null,
+  writeText: async () => {
+    throw new Error('Unsupported');
+  },
   allFiles: async () => false,
   requestAllFiles: async () => false,
 };

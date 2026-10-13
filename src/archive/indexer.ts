@@ -66,6 +66,13 @@ export async function searchAll(query: string): Promise<Hit[]> {
   return searchIndex(index!, docs, query);
 }
 
+/** Every indexed document (for the Documents screen's filters). */
+export async function allDocs(): Promise<IndexedDoc[]> {
+  if (Platform.OS !== 'web') return [];
+  await load();
+  return [...docs.values()];
+}
+
 /** Tessel wrote to a library document (details, saved forms): read it again on the next pass. */
 export function invalidate(docId: string) {
   if (Platform.OS !== 'web') return;
