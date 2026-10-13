@@ -80,3 +80,29 @@ export function scrollYFor(l: PageLayout, page: number, offset = 0): number {
   const b = band(l, Math.min(Math.max(0, page), l.offsets.length - 1));
   return b.start + offset * b.len;
 }
+
+/** Scrolled content width: the viewport, or the widest page and its margins when zoomed past it. */
+export const contentWidth = (l: PageLayout, viewportW: number) => Math.max(viewportW, l.maxWidth + l.gutter * 2);
+
+/** A point of the document: a page and where on it (0..1 across and down; outside in the margins and gaps). */
+export type Anchor = { page: number; u: number; v: number };
+
+/** The document point under a viewport point, at a scroll position. Pages are centred across the content. */
+export function anchorAt(l: PageLayout, viewportW: number, scroll: { x: number; y: number }, at: { x: number; y: number }): Anchor {
+  const y = scroll.y + at.y;
+  const page = pageAt(l, y);
+  const left = (contentWidth(l, viewportW) - l.widths[page]) / 2;
+  return { page, u: (scroll.x + at.x - left) / l.widths[page], v: (y - l.offsets[page]) / l.heights[page] };
+}
+
+/** The scroll position that puts a document point under a viewport point (inverse of anchorAt, within the scroll range). */
+export function scrollForAnchor(l: PageLayout, viewport: { width: number; height: number }, a: Anchor, at: { x: number; y: number }) {
+  const page = Math.min(Math.max(0, a.page), l.offsets.length - 1);
+  const cw = contentWidth(l, viewport.width);
+  const left = (cw - l.widths[page]) / 2;
+  const clamp = (n: number, max: number) => Math.min(Math.max(0, n), Math.max(0, max));
+  return {
+    x: clamp(left + a.u * l.widths[page] - at.x, cw - viewport.width),
+    y: clamp(l.offsets[page] + a.v * l.heights[page] - at.y, l.total - viewport.height),
+  };
+}
