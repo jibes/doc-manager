@@ -33,6 +33,12 @@ type ScanState = {
   /** Removes a page; returns a function that puts it back where it was. */
   remove(id: string): () => void;
   move(id: string, delta: number): void;
+  /** Puts a page at this position (dragged in the grid). */
+  moveTo(id: string, index: number): void;
+  /** Bulk edits on selected pages; each returns a function that undoes it (later edits to other pages stay). */
+  moveMany(ids: string[], where: 'start' | 'end'): () => void;
+  removeMany(ids: string[]): () => void;
+  updateMany(ids: string[], spec: (current: PageSpec) => Partial<PageSpec>): () => void;
   /** Gives every page this filter; returns a function that puts each page's previous filter back. */
   applyToAll(filter: FilterId): () => void;
   setTitle(title: string): void;
@@ -64,6 +70,27 @@ export const useScan = create<ScanState>((setState, getState) => {
   const setPages = (pages: Page[]) => {
     setState({ pages });
     save();
+  };
+  /**
+   * Undo for a bulk edit: the order before it, pages it removed put back, and (for `specs`) those pages'
+   * settings as they were. Pages added since stay, at the end.
+   */
+  const undoTo = (before: Page[], specs?: Set<string>) => {
+    const gen = generation;
+    return () => {
+      if (gen !== generation) return;
+      const now = new Map(getState().pages.map((p) => [p.id, p]));
+      const pages = before.map((old) => {
+        const cur = now.get(old.id);
+        if (!cur) {
+          savePhoto(old);
+          return old;
+        }
+        return specs?.has(old.id) ? { ...cur, spec: old.spec } : cur;
+      });
+      const kept = new Set(before.map((p) => p.id));
+      setPages([...pages, ...getState().pages.filter((p) => !kept.has(p.id))]);
+    };
   };
   const forget = (page: Page) => {
     forgetPage(page.id);
@@ -154,6 +181,44 @@ export const useScan = create<ScanState>((setState, getState) => {
       if (from < 0 || to < 0 || to >= next.length) return;
       next.splice(to, 0, ...next.splice(from, 1));
       setPages(next);
+    },
+
+    moveTo(id, index) {
+      const next = [...getState().pages];
+      const from = next.findIndex((p) => p.id === id);
+      if (from < 0 || from === index) return;
+      next.splice(Math.max(0, Math.min(index, next.length - 1)), 0, ...next.splice(from, 1));
+      setPages(next);
+    },
+
+    moveMany(ids, where) {
+      const before = getState().pages;
+      const picked = new Set(ids);
+      const moved = before.filter((p) => picked.has(p.id));
+      const rest = before.filter((p) => !picked.has(p.id));
+      setPages(where === 'start' ? [...moved, ...rest] : [...rest, ...moved]);
+      return undoTo(before);
+    },
+
+    removeMany(ids) {
+      const before = getState().pages;
+      const picked = new Set(ids);
+      setPages(before.filter((p) => !picked.has(p.id)));
+      delMany(ids.map(photoKey), store()).catch(() => {});
+      return undoTo(before);
+    },
+
+    updateMany(ids, spec) {
+      const before = getState().pages;
+      const picked = new Set(ids);
+      setPages(
+        before.map((p) => {
+          if (!picked.has(p.id)) return p;
+          const change = spec(p.spec);
+          return { ...p, spec: { ...p.spec, ...change, ...('rotation' in change ? { oriented: true } : {}) } };
+        }),
+      );
+      return undoTo(before, picked);
     },
 
     applyToAll(filter) {

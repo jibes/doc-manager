@@ -7,8 +7,18 @@ import { elevation, radius, space } from '@/design/tokens';
 import { usePalette } from '@/state/prefs';
 import { T } from './primitives';
 
-/** `above`: room to leave at the bottom (a tab bar). */
-export function Toast({ message, onDismiss, above = 0 }: { message: string | null; onDismiss: () => void; above?: number }) {
+/** `above`: room to leave at the bottom (a tab bar). `action`: one button, such as Undo. */
+export function Toast({
+  message,
+  onDismiss,
+  above = 0,
+  action,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+  above?: number;
+  action?: { label: string; onPress: () => void };
+}) {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   useEffect(() => {
@@ -20,7 +30,24 @@ export function Toast({ message, onDismiss, above = 0 }: { message: string | nul
   return (
     <Animated.View entering={FadeInDown.duration(220)} exiting={FadeOutDown.duration(160)} style={[styles.wrap, { bottom: insets.bottom + space.xl + above }]}>
       <Pressable accessibilityRole="alert" onPress={onDismiss} style={[styles.toast, { backgroundColor: p.ink }, elevation(p.shadow, 3)]}>
-        <T v="label" color={p.canvas}>{message}</T>
+        <T v="label" color={p.canvas} style={{ flexShrink: 1 }}>
+          {message}
+        </T>
+        {action && (
+          <Pressable
+            testID="toast-action"
+            accessibilityRole="button"
+            onPress={() => {
+              action.onPress();
+              onDismiss();
+            }}
+            hitSlop={8}
+          >
+            <T v="label" color={p.canvas} style={{ fontWeight: '700', textDecorationLine: 'underline' }}>
+              {action.label}
+            </T>
+          </Pressable>
+        )}
       </Pressable>
     </Animated.View>
   );
@@ -28,5 +55,5 @@ export function Toast({ message, onDismiss, above = 0 }: { message: string | nul
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: space.lg },
-  toast: { maxWidth: 520, borderRadius: radius.md, paddingHorizontal: space.lg, paddingVertical: space.md },
+  toast: { maxWidth: 520, flexDirection: 'row', alignItems: 'center', gap: space.lg, borderRadius: radius.md, paddingHorizontal: space.lg, paddingVertical: space.md },
 });
