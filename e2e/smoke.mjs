@@ -1234,6 +1234,47 @@ async function scanner() {
   await vis('scan-tile').first().waitFor({ timeout: 30000 });
   check((await vis('scan-filter-bw').getAttribute('aria-checked')) === 'true', 'scanner: draft and filter survive a reload');
 
+  // Order and select mode: a second page, turned so it can be told apart, then moved around.
+  await vis('scan-add').click();
+  await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
+  // An imported photo takes the camera back to the document by itself.
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=scan-tile]')].filter((t) => t.offsetParent).length === 2, null, { timeout: 60000 });
+  // Height over width of each tile's page, once drawn: below 1 is a turned (landscape) page.
+  const shapes = () =>
+    page.waitForFunction(() => {
+      const tiles = [...document.querySelectorAll('[data-testid=scan-tile]')].filter((t) => t.offsetParent);
+      const r = tiles.map((t) => t.querySelector('canvas[data-rendered]')).map((c) => c && c.height / c.width);
+      return r.every(Boolean) && r.map((x) => (x < 1 ? 'L' : 'P')).join('');
+    }, null, { timeout: 60000 }).then((h) => h.jsonValue());
+  await vis('scan-select').click();
+  await vis('scan-tile').nth(1).click();
+  check((await vis('scan-selected').innerText()).includes('1 page'), 'scanner: select mode picks pages');
+  await vis('bulk-rotate').click();
+  await page.waitForTimeout(800);
+  check((await shapes()) === 'PL', 'scanner: selected pages turn together');
+  await vis('toast-action').click();
+  await page.waitForTimeout(800);
+  check((await shapes()) === 'PP', 'scanner: a bulk action can be undone');
+  await vis('bulk-rotate').click();
+  await vis('bulk-start').click();
+  await page.waitForTimeout(800);
+  check((await shapes()) === 'LP', 'scanner: selected pages move to the start');
+  await vis('scan-select').click();
+  // Drag the first page onto the second (a mouse drags straight away; a finger holds first).
+  const box = async (i) => vis('scan-tile').nth(i).boundingBox();
+  const [a, b] = [await box(0), await box(1)];
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) await page.mouse.move(a.x + a.width / 2 + ((b.x - a.x) * i) / 10, a.y + a.height / 2 + ((b.y - a.y) * i) / 10);
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  check((await shapes()) === 'PL' && /\/scan\/review/.test(page.url()), `scanner: a page can be dragged to a new place (${page.url().split('/').pop()})`);
+  await vis('scan-select').click();
+  await vis('scan-tile').nth(1).click();
+  await vis('bulk-delete').click();
+  await page.waitForTimeout(500);
+  check((await vis('scan-tile').count()) === 1, 'scanner: selected pages can be deleted');
+
   await vis('scan-title').fill('Invoice ACME');
   await vis('scan-destination').click();
   await page.getByText(/^Other folder/).click();
