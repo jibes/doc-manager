@@ -80,7 +80,7 @@ export default function ScanCrop() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#000' },
+  screen: { flex: 1, backgroundColor: '#000', userSelect: 'none' } as object,
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.lg, paddingBottom: space.sm },
   text: { paddingVertical: space.sm, paddingRight: space.md },
   done: { backgroundColor: '#fff', borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: space.sm },

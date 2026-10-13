@@ -12,6 +12,7 @@ import { t } from '@/i18n';
 import { isBlurred } from '@/scan/engine/imaging/sharpness';
 import { useScan } from '@/scan/session';
 import { FilterChips } from '@/scan/ui/FilterChips';
+import { HoldButton } from '@/scan/ui/HoldButton';
 import { PageImage } from '@/scan/ui/PageImage';
 import { Unsupported } from '@/scan/ui/Unsupported';
 
@@ -102,17 +103,11 @@ export default function ScanPage() {
             </T>
           </View>
         )}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t.scanCompare}
-          onPressIn={() => setComparing(true)}
-          onPressOut={() => setComparing(false)}
-          style={styles.compare}
-        >
+        <HoldButton testID="scan-compare" label={t.scanCompare} onHold={setComparing} style={styles.compare}>
           <T v="label" color="#fff">
             {t.scanOriginal}
           </T>
-        </Pressable>
+        </HoldButton>
       </View>
 
       <View style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
@@ -155,7 +150,8 @@ function Action({ icon, label, onPress, testID }: { icon: IconName; label: strin
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#111' },
+  // A photo editor: nothing on it is text to select, and a long press anywhere must not start a selection.
+  screen: { flex: 1, backgroundColor: '#111', userSelect: 'none' } as object,
   top: { flexDirection: 'row', alignItems: 'center', gap: space.xs, paddingHorizontal: space.md, paddingBottom: space.sm },
   banner: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginHorizontal: space.lg, padding: space.md, borderRadius: radius.md, backgroundColor: 'rgba(200,120,20,0.35)' },
   preview: { flex: 1, margin: space.lg },
