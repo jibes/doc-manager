@@ -693,6 +693,14 @@ async function shellBridge() {
   await page.waitForTimeout(200);
   const off = (await page.evaluate(() => window.__shell.calls)).filter((c) => c[0] === 'light').at(-1);
   check(off?.[1] === false, 'shell: the sensor stops when Light is chosen');
+  // The system's dark mode wins over a bright room.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.getByTestId('appearance-auto').locator('visible=true').click();
+  for (let i = 0; i < 8; i++) {
+    await lux(800);
+    await page.waitForTimeout(400);
+  }
+  check((await bg()) === dark, `shell: Auto stays Dark in system dark mode, however bright the room (${await bg()})`);
   await ctx.close();
 }
 
