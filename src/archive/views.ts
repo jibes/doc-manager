@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import { folders } from '@/lib/folders';
-import { usePrefs } from '@/state/prefs';
+import { INBOX_TARGET, usePrefs } from '@/state/prefs';
 import { parseViews, serializeViews, type SavedView } from './facets';
 
 /** Where saved views are kept in the archive folder: synced with the documents, so every device has them. */
@@ -41,8 +41,9 @@ export const removeView = (id: string) => change((views) => views.filter((v) => 
 
 /** Chooses the archive folder; views saved on this device so far move there. */
 export async function setArchive(archive: string | null): Promise<void> {
-  const { views, archive: before, set } = usePrefs.getState();
-  set({ archive });
+  const { views, archive: before, scanTo, set } = usePrefs.getState();
+  // Scans go to its inbox unless they were already going somewhere chosen.
+  set({ archive, ...(archive && !scanTo ? { scanTo: INBOX_TARGET } : !archive && scanTo === INBOX_TARGET ? { scanTo: null } : {}) });
   if (archive && views.length) {
     try {
       await change((stored) => views.reduce(withView, stored));

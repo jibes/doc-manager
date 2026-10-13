@@ -1601,6 +1601,8 @@ async function documentsScreen() {
   await vis('screen-back').click();
   await vis('open-documents').click();
   await vis('docs-count').waitFor();
+  // Read from the file as the screen opens.
+  await page.getByTestId('view-chip').filter({ hasText: 'Columns' }).waitFor({ timeout: 5000 }).catch(() => {});
   check((await vis('view-chip').allInnerTexts()).join() === 'Invoices,Columns', `documents: views from the archive folder are listed (${await vis('view-chip').allInnerTexts()})`);
   await vis('view-chip').filter({ hasText: 'Columns' }).click();
   let byText = '';
@@ -1613,6 +1615,86 @@ async function documentsScreen() {
   await page.getByTestId('action-view-remove').click();
   await page.waitForTimeout(500);
   check((await vis('view-chip').allInnerTexts()).join() === 'Columns', 'documents: a view can be removed');
+  await ctx.close();
+}
+
+// Inbox: rules fill in details, the template places the file, filing writes the details and moves it.
+async function inbox() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`inbox: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  await page.evaluate(
+    async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+      const inbox = await root.getDirectoryHandle('Inbox', { create: true });
+      for (const [name, b64] of files) {
+        const w = await (await inbox.getFileHandle(name, { create: true })).createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+      }
+    },
+    [['scan-1.pdf', fixture('xrefstream.pdf')], ['notes.pdf', fixture('columns.pdf')]],
+  );
+  await vis('tab-files').click();
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('inbox-here-switch').click();
+  check((await vis('inbox-here-switch').getAttribute('aria-checked')) === 'true', 'inbox: this device sorts the inbox');
+  await vis('screen-back').click();
+  await vis('open-inbox').click();
+  const card = (name) => page.getByTestId('inbox-item').filter({ hasText: name });
+  await card('scan-1.pdf').waitFor({ timeout: 20000 });
+  await card('notes.pdf').waitFor({ timeout: 20000 });
+  check((await card('scan-1.pdf').getByTestId('inbox-title').inputValue()) === 'Old title', 'inbox: a document keeps its own title');
+
+  // A rule: its words in the text give the sender, type and tags.
+  await vis('rule-match').fill('stream cross-reference');
+  await vis('rule-sender').fill('Stream Co');
+  await vis('rule-type').fill('Letter');
+  await vis('rule-tags').fill('Test, Demo');
+  await vis('rule-add').click();
+  await page.getByTestId('rule').first().waitFor();
+  const sender = await card('scan-1.pdf').getByTestId('inbox-sender').inputValue();
+  const other = await card('notes.pdf').getByTestId('inbox-sender').inputValue();
+  check(sender === 'Stream Co' && other !== 'Stream Co', `inbox: a rule fills in the documents it matches (${sender} / ${other})`);
+  const stored = await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    return (await (await (await root.getDirectoryHandle('.tessel')).getFileHandle('rules.json')).getFile()).text();
+  });
+  check(/"match": "stream cross-reference"/.test(stored), 'inbox: rules are kept in the archive folder');
+
+  // The destination follows the details; a bad date blocks filing.
+  await card('scan-1.pdf').getByTestId('inbox-date').fill('28.09');
+  check((await card('scan-1.pdf').getByTestId('inbox-file').getAttribute('aria-disabled')) === 'true', 'inbox: a date that is not YYYY-MM-DD blocks filing');
+  await card('scan-1.pdf').getByTestId('inbox-date').fill('2026-09-28');
+  const dest = await card('scan-1.pdf').getByTestId('inbox-dest').innerText();
+  check(dest === '→ 2026 / Stream Co / 2026-09-28 Old title.pdf', `inbox: the template places it (${dest})`);
+  await card('scan-1.pdf').getByTestId('inbox-file').click();
+  await page.getByText('Filed: 2026/Stream Co/2026-09-28 Old title.pdf').waitFor({ timeout: 15000 });
+  const filed = await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    const dir = await (await root.getDirectoryHandle('2026')).getDirectoryHandle('Stream Co');
+    const bytes = new Uint8Array(await (await (await dir.getFileHandle('2026-09-28 Old title.pdf')).getFile()).arrayBuffer());
+    const inbox = [];
+    for await (const name of (await root.getDirectoryHandle('Inbox')).keys()) inbox.push(name);
+    return { tail: new TextDecoder('latin1').decode(bytes.slice(-1500)), inbox };
+  });
+  check(
+    /\/Author \(Stream Co\)/.test(filed.tail) && /\/Keywords \(Test, Demo\)/.test(filed.tail) && /\/DocumentDate \(2026-09-28\)/.test(filed.tail),
+    'inbox: filing writes the details into the PDF',
+  );
+  check(filed.inbox.join() === 'notes.pdf', `inbox: and takes it out of the inbox (${filed.inbox})`);
+  check((await page.getByTestId('inbox-item').count()) === 1, 'inbox: the filed document leaves the list');
   await ctx.close();
 }
 
@@ -1811,6 +1893,7 @@ await step('ai', aiReading);
 await step('details', details);
 await step('search', searchArchive);
 await step('documents', documentsScreen);
+await step('inbox', inbox);
 await step('tabs', tabs);
 await step('appearance', appearance);
 await step('regressions', regressions);

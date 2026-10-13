@@ -159,6 +159,8 @@ export default function Settings() {
 function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (message: string) => void }) {
   const p = usePalette();
   const archive = usePrefs((s) => s.archive);
+  const inboxHere = usePrefs((s) => s.inboxHere);
+  const setPrefs = usePrefs((s) => s.set);
   const choices = [{ id: null, name: t.archiveNone }, ...roots.filter((r) => r.kind === 'folder' || r.kind === 'app').map((r) => ({ id: r.id as string | null, name: r.name }))];
   const choose = (id: string | null) => setArchive(id).catch(() => onError(t.viewFailed));
   return (
@@ -194,6 +196,33 @@ function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (mes
       <T v="caption" color={p.muted} style={styles.note}>
         {choices.length > 1 ? t.archiveNote : t.archivePickFirst}
       </T>
+      {!!archive && (
+        <>
+          <Pressable
+            testID="inbox-here-switch"
+            accessibilityRole="switch"
+            accessibilityLabel={t.inboxHere}
+            accessibilityState={{ checked: inboxHere }}
+            aria-checked={inboxHere}
+            onPress={() => setPrefs({ inboxHere: !inboxHere })}
+            style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+              styles.card,
+              styles.row,
+              { marginTop: space.lg, backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
+            ]}
+          >
+            <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+              {t.inboxHere}
+            </T>
+            <View style={[styles.track, { backgroundColor: inboxHere ? p.accent : p.hairline }]}>
+              <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: inboxHere ? 18 : 0 }] }]} />
+            </View>
+          </Pressable>
+          <T v="caption" color={p.muted} style={styles.note}>
+            {t.inboxHereNote} {t.inboxOtherDevice}
+          </T>
+        </>
+      )}
     </>
   );
 }
