@@ -27,7 +27,8 @@ import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
 import { AppearancePanel } from './AppearancePanel';
-import { ContentsPanel, flattenOutline, type FlatOutline } from './ContentsPanel';
+import { flattenOutline, type FlatOutline } from './ContentsPanel';
+import { FindPanel } from './FindPanel';
 import { FindBar } from './FindBar';
 import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
 import { PageView } from './PageView';
@@ -39,9 +40,8 @@ import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Scrubber } from './Scrubber';
-import { SearchPanel } from './SearchPanel';
 
-type PanelName = 'contents' | 'search' | 'appearance' | null;
+type PanelName = 'find' | 'appearance' | null;
 
 const TOP_BAR = 56;
 const BOTTOM_BAR = 64;
@@ -68,6 +68,12 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const [page, setPage] = useState(doc.position?.page ?? 0);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
+  // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
+  const [findFocus, setFindFocus] = useState(false);
+  const openFind = (focus: boolean) => {
+    setFindFocus(focus);
+    setPanel('find');
+  };
   const [outline, setOutline] = useState<FlatOutline | null>(null);
   const [editingPage, setEditingPage] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -207,7 +213,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
   const [annotVersion, setAnnotVersion] = useState(0);
   const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
   useEffect(() => {
-    if (panel !== 'contents') return;
+    if (panel !== 'find') return;
     let alive = true;
     handle.annotations().then((a) => alive && setAnnots(a), () => alive && setAnnots([]));
     return () => {
@@ -371,7 +377,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
       if (mod && e.key === 'f') {
         e.preventDefault();
         setChrome(true);
-        return setPanel('search');
+        return openFind(true);
       }
       if (mod && (e.key === '=' || e.key === '+')) return e.preventDefault(), setZoom(zoom * 1.2);
       if (mod && e.key === '-') return e.preventDefault(), setZoom(zoom / 1.2);
@@ -396,7 +402,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         End: () => (view === 'text' ? goToPage(handle.pageCount - 1) : scrollTo(Number.MAX_SAFE_INTEGER, false)),
         b: () => toggleBookmark(doc.id, page),
         v: () => switchView(view === 'page' ? 'text' : 'page'),
-        t: () => setPanel((x) => (x === 'contents' ? null : 'contents')),
+        t: () => (panel === 'find' ? setPanel(null) : openFind(false)),
       };
       const fn = keys[e.key];
       if (fn) {
@@ -470,8 +476,6 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
 
   const mac = Platform.OS === 'web' && /Mac|iPhone|iPad/.test(navigator.platform);
   const key = (k: string) => (Platform.OS === 'web' ? `${mac ? '⌘' : 'Ctrl+'}${k}` : undefined);
-  // Narrow screens: the reading-list toggle moves into the menu to keep the title readable.
-  const narrow = winW < 520;
   const readingItem: MenuItem = {
     key: 'reading',
     icon: readingMode ? 'readingOn' : 'readingAdd',
@@ -582,17 +586,15 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           {edits.dirty && (
             <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginRight: space.sm }} />
           )}
-          {/* Phones: the view switch is at the top of Aa (and V on a keyboard). */}
-          {!narrow && (
-            <IconButton
-              icon={view === 'page' ? 'textView' : 'pageView'}
-              label={`${view === 'page' ? t.textView : t.pageView} (V)`}
-              onPress={() => switchView(view === 'page' ? 'text' : 'page')}
-              testID="view-toggle"
-            />
-          )}
-          <IconButton icon="search" label={t.searchShortcut} active={panel === 'search'} onPress={() => togglePanel('search')} testID="open-search" />
-          <IconButton icon="contents" label={t.contentsShortcut} active={panel === 'contents'} onPress={() => togglePanel('contents')} testID="open-contents" />
+          {/* One button per kind: find your way, the form you read in, how it looks, the file itself. */}
+          <IconButton icon="search" label={t.findShortcut} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
+          <IconButton
+            icon="textView"
+            label={`${t.textView} (V)`}
+            active={view === 'text'}
+            onPress={() => switchView(view === 'page' ? 'text' : 'page')}
+            testID="view-toggle"
+          />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
           <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
         </View>
@@ -667,7 +669,7 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         </View>
       </View>
 
-      {searchActive && panel !== 'search' && (
+      {searchActive && panel !== 'find' && (
         <FindBar
           palette={p}
           query={query.trim()}
@@ -676,38 +678,36 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
           searching={searching}
           // Fixed below the top bar: moving with the chrome would shift it out from under a pointer.
           top={insets.top + TOP_BAR + space.sm}
-          onOpen={() => setPanel('search')}
+          onOpen={() => openFind(true)}
           onStep={stepHit}
           onClear={() => onQuery('')}
         />
       )}
 
-      {panel === 'contents' && (
-        <ContentsPanel
-          palette={pageP}
-          outline={outline}
-          page={page}
-          sizes={handle.pageSizes}
-          cache={cache}
-          bookmarks={doc.bookmarks}
-          annotations={annots}
-          onEditNote={onEditNote}
-          onDeleteNote={onDeleteNote}
-          onGo={(n) => {
-            goToPage(n);
-            if (!wide) setPanel(null);
-          }}
-          onClose={() => setPanel(null)}
-        />
-      )}
-      {panel === 'search' && (
-        <SearchPanel
+      {panel === 'find' && (
+        <FindPanel
           palette={p}
+          contents={{
+            palette: pageP,
+            outline,
+            page,
+            sizes: handle.pageSizes,
+            cache,
+            bookmarks: doc.bookmarks,
+            annotations: annots,
+            onEditNote,
+            onDeleteNote,
+            onGo: (n) => {
+              goToPage(n);
+              if (!wide) setPanel(null);
+            },
+          }}
           query={query}
           onQuery={onQuery}
           hits={hits}
           active={active}
           searching={searching}
+          focus={findFocus}
           onPick={(i) => {
             goToHit(i);
             if (!wide) setPanel(null);
@@ -721,7 +721,6 @@ export function Reader({ doc, handle, cache }: { doc: DocRecord; handle: DocHand
         <AppearancePanel
           palette={p}
           view={view}
-          onView={switchView}
           invert={!!doc.invert}
           onInvert={() => toggleInvert(doc.id)}
           zoom={zoom}

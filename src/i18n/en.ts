@@ -182,6 +182,8 @@ export const en = {
   close: 'Close',
   // Navigate panel
   navigate: 'Navigate',
+  find: 'Find',
+  findShortcut: 'Search and contents (⌘F)',
   contents: 'Contents',
   pagesTab: 'Pages',
   bookmarks: 'Bookmarks',

@@ -31,9 +31,9 @@ The app is the web app bundled in a native shell (`shell/android`): every featur
 F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6:A6:F5:8E:E3:94
 ```
 
-**Appearance.** Light, Dark or Auto. Auto follows the system's light or dark mode; in the Android app, while the system is light, the phone's light sensor also turns it Dark when the room is dim (switching only after the light has held for a few seconds; the sensor runs only while Auto is chosen and the app is in front). In Dark, PDF pages keep their printed colours but are shown slightly dimmed and warm, so a white page doesn't glare; text view follows the appearance. *Invert colours* (reader menu, page view) is remembered per document, for dark slides or long night reading.
+**Appearance.** Light, Dark or Auto. Auto follows the system's light or dark mode; in the Android app, while the system is light, the phone's light sensor also turns it Dark when the room is dim (switching only after the light has held for a few seconds; the sensor runs only while Auto is chosen and the app is in front). In Dark, PDF pages keep their printed colours but are shown slightly dimmed and warm, so a white page doesn't glare; text view follows the appearance. *Invert colours* (Aa, page view) is remembered per document, for dark slides or long night reading.
 
-**Navigation.** Library and Files are tabs: along the bottom on phones (with Scan in the middle), in the header on wider windows (Scan on the right). Files also has “Other location…”, the system picker, for single files from anywhere.
+**Navigation.** Library and Files are tabs: along the bottom on phones (with Scan in the middle), in the header on wider windows (Scan on the right). Files also has “Other location…”, the system picker, for single files from anywhere. The reader's bar has one button per kind of action: **Find** (a search field over the contents, pages, bookmarks and notes; ⌘F or T), **Text view** (lit while on; V), **Aa** (how it looks) and **⋯** (reading list, share, download, print).
 
 **Where documents live.** In the Android app every document is a real file: scans and files opened from other apps go to **Documents/Tessel** (first in Files), and the library links to them. Browsers without folder access keep a copy in browser storage instead (“This browser only”).
 

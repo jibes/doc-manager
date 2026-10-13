@@ -155,7 +155,6 @@ function TextSettings({ p }: { p: Palette }) {
 export function AppearancePanel({
   palette: p,
   view,
-  onView,
   invert,
   onInvert,
   zoom,
@@ -164,8 +163,6 @@ export function AppearancePanel({
 }: {
   palette: Palette;
   view: 'page' | 'text';
-  /** PDFs: switch between page and text view (books have text only). */
-  onView?: (v: 'page' | 'text') => void;
   /** This document's "Invert colours" (page view). */
   invert?: boolean;
   onInvert?: () => void;
@@ -181,19 +178,6 @@ export function AppearancePanel({
   return (
     <Panel title={t.appearance} onClose={onClose} compact testID="appearance-panel">
       <View style={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.xl }}>
-        {/* How to read first: the page as printed, or its text reflowed (V). */}
-        {onView && (
-          <Segment<'page' | 'text'>
-            p={p}
-            value={view}
-            options={[
-              ['page', t.pageView],
-              ['text', t.textView],
-            ]}
-            onChange={onView}
-            testID="view-segment"
-          />
-        )}
         <AppearancePicker />
 
         {view === 'text' ? (
@@ -232,7 +216,7 @@ export function AppearancePanel({
 
             {onInvert && (
               <View testID="invert-toggle" style={styles.switchRow}>
-                {/* Label and switch side by side, not nested: a tap on a switch inside a pressable row reaches both. */}
+                {/* Label and switch side by side, not nested: inside a pressable row, the row takes the switch's tap. */}
                 <Pressable onPress={onInvert} importantForAccessibility="no-hide-descendants" aria-hidden style={styles.switchLabel}>
                   <Icon name="invert" size={20} color={p.inkSoft} />
                   <View style={{ flex: 1 }}>
