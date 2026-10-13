@@ -34,7 +34,7 @@ import { DetailsPanel } from './DetailsPanel';
 import { flattenOutline, type FlatOutline } from './ContentsPanel';
 import { FindPanel } from './FindPanel';
 import { FindBar } from './FindBar';
-import { computeLayout, positionAt, readingPage, scrollYFor } from './layout';
+import { anchorAt, computeLayout, contentWidth, positionAt, readingPage, scrollForAnchor, scrollYFor, type PageLayout } from './layout';
 import { PageView } from './PageView';
 import { ReflowView, type ReflowApi } from './ReflowView';
 import { NoteDialog, type NoteRequest } from './NoteDialog';
@@ -111,7 +111,9 @@ export function Reader({
 
   const list = useRef<FlatList<number>>(null);
   const [vp, setVp] = useState<{ w: number; h: number } | null>(null);
-  const [zoom, setZoomRaw] = useState(1);
+  // The zoom, and the viewport point it was last changed about (null: the centre).
+  const [zoomed, setZoomed] = useState<{ zoom: number; at: { x: number; y: number } | null }>({ zoom: 1, at: null });
+  const zoom = zoomed.zoom;
   const [page, setPage] = useState(start?.page ?? 0);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
@@ -138,6 +140,10 @@ export function Reader({
     [doc.id, setView, page],
   );
   const scrollY = useRef(0);
+  const scrollX = useRef(0);
+  const across = useRef<ScrollView>(null);
+  // The geometry and zoom the pages were last placed with: a zoom is anchored in the old geometry.
+  const placed = useRef<{ layout: PageLayout; zoomed: typeof zoomed } | null>(null);
   const restored = useRef(false);
   const lastDir = useRef({ y: 0, acc: 0 });
 
@@ -153,7 +159,7 @@ export function Reader({
     [vp, handle.pageSizes, insets.top, insets.bottom, fit, zoom],
   );
   const pages = useMemo(() => handle.pageSizes.map((_, i) => i), [handle.pageSizes]);
-  const contentW = vp && layout ? Math.max(vp.w, layout.maxWidth + layout.gutter * 2) : 0;
+  const contentW = vp && layout ? contentWidth(layout, vp.w) : 0;
 
   useEffect(() => {
     markOpened(doc.id);
@@ -162,23 +168,53 @@ export function Reader({
     handle.outline().then((o) => setOutline(flattenOutline(o)), () => setOutline([]));
   }, [doc.id, handle, markOpened, updateFileInfo]);
 
-  // Re-anchor to the saved position whenever geometry changes (first layout, zoom, fit, rotation).
+  // Re-anchor whenever geometry changes (first layout, zoom, fit, rotation): after a zoom, the document point
+  // zoomed about stays where it was on screen; otherwise the saved position goes back to the top.
   useLayoutEffect(() => {
-    if (!layout || view !== 'page') return;
-    const y = scrollYFor(layout, posRef.current.page, posRef.current.offset);
+    if (!layout || !vp || view !== 'page') return;
+    const before = placed.current;
+    placed.current = { layout, zoomed };
+    let to: { x: number; y: number } | null = null;
+    if (before && before.zoomed !== zoomed && before.layout !== layout) {
+      const at = zoomed.at ?? { x: vp.w / 2, y: vp.h / 2 };
+      const anchor = anchorAt(before.layout, vp.w, { x: scrollX.current, y: scrollY.current }, at);
+      to = scrollForAnchor(layout, { width: vp.w, height: vp.h }, anchor, at);
+    }
+    if (to) posRef.current = positionAt(layout, to.y);
+    const y = to ? to.y : scrollYFor(layout, posRef.current.page, posRef.current.offset);
+    const x = to ? to.x : Math.min(scrollX.current, contentWidth(layout, vp.w) - vp.w);
     cache.setFocus(posRef.current.page);
-    const go = () => list.current?.scrollToOffset({ offset: y, animated: false });
+    const go = () => {
+      list.current?.scrollToOffset({ offset: y, animated: false });
+      across.current?.scrollTo({ x: Math.max(0, x), animated: false });
+    };
+    // Scroll events are ignored until then: the next zoom (a pinch is several) must start from here.
+    scrollY.current = y;
+    scrollX.current = Math.max(0, x);
     // Ignore scroll events emitted while content resizes; they'd corrupt the anchor.
     restored.current = false;
     go();
-    const raf = requestAnimationFrame(() => {
+    // Again once the new size is laid out (across it can take a second frame).
+    let raf = requestAnimationFrame(() => {
       go();
-      restored.current = true;
+      raf = requestAnimationFrame(() => {
+        go();
+        restored.current = true;
+      });
     });
     return () => cancelAnimationFrame(raf);
-  }, [layout, cache, view]);
+    // `zoomed` changes with `layout`; listed so a zoom's point is the one read.
+  }, [layout, vp, cache, view, zoomed]);
 
-  const setZoom = useCallback((z: number) => setZoomRaw((old) => (Math.abs(clampZoom(z) - old) < 0.001 ? old : clampZoom(z))), []);
+  /** Zooms about a viewport point (the viewport's centre by default): what is under it stays under it. */
+  const setZoom = useCallback(
+    (next: number, at?: { x: number; y: number }) =>
+      setZoomed((old) => {
+        const z = clampZoom(next);
+        return Math.abs(z - old.zoom) < 0.001 ? old : { zoom: z, at: at ?? null };
+      }),
+    [],
+  );
 
   // Long animated jumps mount every page in between and delay the target's render; jump instantly instead.
   const scrollTo = useCallback(
@@ -459,14 +495,16 @@ export function Reader({
     };
     let pending = 1;
     let raf = 0;
+    let cursor = { x: 0, y: 0 };
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault(); // trackpad pinch arrives as ctrl+wheel
       pending *= Math.exp(-e.deltaY * 0.01);
+      cursor = { x: e.clientX, y: e.clientY };
       if (!raf)
         raf = requestAnimationFrame(() => {
           raf = 0;
-          setZoomRaw((z) => clampZoom(z * pending));
+          setZoom(zoom * pending, cursor);
           pending = 1;
         });
     };
@@ -485,21 +523,35 @@ export function Reader({
   }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, menu]);
 
   // ---------- pinch (native) ----------
+  // The pages scale about where the fingers started; on release the zoom keeps that point there.
   const pinchScale = useSharedValue(1);
+  const focalX = useSharedValue(0);
+  const focalY = useSharedValue(0);
   const pinch = useMemo(
     () =>
       Gesture.Pinch()
         .runOnJS(true)
+        .onStart((e) => {
+          focalX.set(e.focalX);
+          focalY.set(e.focalY);
+        })
         .onUpdate((e) => {
           pinchScale.set(Math.min(4 / zoom, Math.max(0.5 / zoom, e.scale)));
         })
-        .onEnd((e) => {
+        .onEnd(() => {
+          const scale = pinchScale.get();
           pinchScale.set(1);
-          setZoom(zoom * e.scale);
+          setZoom(zoom * scale, { x: focalX.get(), y: focalY.get() });
         }),
-    [zoom, pinchScale, setZoom],
+    [zoom, pinchScale, focalX, focalY, setZoom],
   );
-  const pinchStyle = useAnimatedStyle(() => ({ transform: [{ scale: pinchScale.value }] }));
+  const pinchStyle = useAnimatedStyle(() => {
+    if (!vp) return {};
+    // Scaling about the focal point: move it to the centre, scale, move it back.
+    const dx = focalX.value - vp.w / 2;
+    const dy = focalY.value - vp.h / 2;
+    return { transform: [{ translateX: dx }, { translateY: dy }, { scale: pinchScale.value }, { translateX: -dx }, { translateY: -dy }] };
+  });
 
   // ---------- chrome animation ----------
   const chromeShown = chrome || panel != null || !readingMode;
@@ -575,8 +627,14 @@ export function Reader({
         <GestureDetector gesture={pinch}>
           <Animated.View style={[{ flex: 1 }, pinchStyle]}>
             <ScrollView
+              ref={across}
               horizontal
               scrollEnabled={contentW > vp.w}
+              onScroll={(e) => {
+                // As down the pages: not while content resizes (clamped offsets would move the next zoom's anchor).
+                if (restored.current) scrollX.current = e.nativeEvent.contentOffset.x;
+              }}
+              scrollEventThrottle={16}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ width: contentW }}
             >

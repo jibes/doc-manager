@@ -62,6 +62,37 @@ async function run(name, viewport, isMobile) {
   // Plain viewer: the toolbar never hides.
   check(await page.getByTestId('open-find').isVisible(), `${name}: viewer keeps toolbar visible after scrolling`);
 
+  if (isMobile) {
+    // Pinch: the spot between the fingers stays there while pinching and after letting go.
+    const spot = { x: 280, y: 420 };
+    const under = () =>
+      page.evaluate(({ x, y }) => {
+        const el = document.elementsFromPoint(x, y).find((e) => e.getAttribute('role') === 'group' && /^Page/.test(e.getAttribute('aria-label') ?? ''));
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { page: el.getAttribute('aria-label'), u: +((x - r.left) / r.width).toFixed(3), v: +((y - r.top) / r.height).toFixed(3) };
+      }, spot);
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, d) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: spot.x - d, y: spot.y, id: 1 }, { x: spot.x + d, y: spot.y, id: 2 }] });
+    const before = await under();
+    await touch('touchStart', 30);
+    for (let d = 30; d <= 90; d += 5) {
+      await touch('touchMove', d);
+      await page.waitForTimeout(16);
+    }
+    const during = await under();
+    await touch('touchEnd', 0);
+    await page.waitForTimeout(800);
+    const after = await under();
+    const same = (a, b) => !!a && !!b && a.page === b.page && Math.abs(a.u - b.u) < 0.01 && Math.abs(a.v - b.v) < 0.01;
+    check(same(before, during) && same(before, after), `${name}: pinch keeps the point between the fingers (${JSON.stringify([before, during, after])})`);
+    // Back to 100% for the steps that follow.
+    await page.getByTestId('open-appearance').click();
+    await page.getByTestId('appearance-panel').getByLabel('Reset zoom').click();
+    await page.getByLabel('Close').first().click();
+  }
+
   if (!isMobile) {
     // Text layer: drag-select a heading and read the selection back.
     await page.waitForSelector('[data-testid=text-layer] span', { timeout: 10000 });
@@ -93,6 +124,34 @@ async function run(name, viewport, isMobile) {
     await page.keyboard.press('Control+p');
     const frame = await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some((f) => f.src.startsWith('blob:')), null, { timeout: 5000 }).then(() => true, () => false);
     check(frame, `${name}: print loads the PDF into a print frame`);
+    await page.keyboard.press('Home');
+
+    // Zooming (trackpad pinch: ctrl+wheel) keeps the spot under the cursor where it was (once the page is wider
+    // than the window: until then it stays centred). ⌘+ zooms about the middle first.
+    for (let i = 0; i < 4; i++) await page.keyboard.press('Control+=');
+    await page.waitForTimeout(600);
+    const spot = { x: 900, y: 420 };
+    const under = () =>
+      page.evaluate(({ x, y }) => {
+        const el = document.elementsFromPoint(x, y).find((e) => e.getAttribute('role') === 'group' && /^Page/.test(e.getAttribute('aria-label') ?? ''));
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { page: el.getAttribute('aria-label'), u: (x - r.left) / r.width, v: (y - r.top) / r.height };
+      }, spot);
+    const before = await under();
+    await page.mouse.move(spot.x, spot.y);
+    await page.keyboard.down('Control');
+    for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -60);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(700);
+    const after = await under();
+    const zoomed = await page.getByText(/^\d+%$/).first().innerText().catch(() => '');
+    check(
+      !!before && !!after && before.page === after.page && Math.abs(before.u - after.u) < 0.02 && Math.abs(before.v - after.v) < 0.02 && zoomed !== '100%',
+      `${name}: zoom keeps the point under the cursor (${JSON.stringify(before)} → ${JSON.stringify(after)}, ${zoomed})`,
+    );
+    await page.keyboard.press('Control+0');
+    await page.waitForTimeout(300);
     await page.keyboard.press('Home');
   }
 
@@ -1516,7 +1575,8 @@ async function documentsScreen() {
   await page.getByTestId('ask-confirm').click();
   await page.getByText('“Invoices” saved.').waitFor();
   check((await vis('view-chip').allInnerTexts()).join() === 'Invoices', 'documents: a view is saved and shown');
-  await page.goto(`${BASE}/settings`);
+  await vis('screen-back').click();
+  await vis('home-settings').click();
   await vis('archive-root').click();
   await page.waitForTimeout(500);
   const stored = await page.evaluate(async () => {
@@ -1538,7 +1598,8 @@ async function documentsScreen() {
     await w.write(JSON.stringify(data));
     await w.close();
   });
-  await page.goto(`${BASE}/documents`);
+  await vis('screen-back').click();
+  await vis('open-documents').click();
   await vis('docs-count').waitFor();
   check((await vis('view-chip').allInnerTexts()).join() === 'Invoices,Columns', `documents: views from the archive folder are listed (${await vis('view-chip').allInnerTexts()})`);
   await vis('view-chip').filter({ hasText: 'Columns' }).click();

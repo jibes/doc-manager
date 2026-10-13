@@ -101,8 +101,6 @@ export default function Settings() {
           </>
         )}
 
-        {folders.supported && picked && <ArchiveSection roots={picked} onError={setError} />}
-
         {folders.allFilesSupported && (
           <>
             <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
@@ -147,6 +145,8 @@ export default function Settings() {
             )}
           </>
         )}
+
+        {folders.supported && picked && <ArchiveSection roots={picked} onError={setError} />}
 
         {Platform.OS === 'web' && <AiSection />}
       </View>
