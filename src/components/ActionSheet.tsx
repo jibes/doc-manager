@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,7 +15,7 @@ let backdropPressed = false;
 export function ActionSheet() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const sheet = useActions((s) => s.sheet);
   if (!sheet) return null;
   const phone = width < 600;
@@ -47,22 +47,25 @@ export function ActionSheet() {
         <T v="label" color={p.muted} numberOfLines={2} style={styles.title}>
           {sheet.title}
         </T>
-        {sheet.actions.map((a) => (
-          <Pressable
-            key={a.key}
-            testID={`action-${a.key}`}
-            accessibilityRole="menuitem"
-            onPress={() => {
-              tick();
-              closeActions();
-              a.onPress();
-            }}
-            style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.item, (pressed || hovered) && { backgroundColor: p.hairline }]}
-          >
-            <Icon name={a.icon} size={21} color={a.destructive ? p.markRing : p.ink} />
-            <T color={a.destructive ? p.markRing : p.ink}>{a.label}</T>
-          </Pressable>
-        ))}
+        {/* Long lists (a filter's values) scroll within the sheet. */}
+        <ScrollView style={{ maxHeight: height * 0.6 }} bounces={false}>
+          {sheet.actions.map((a) => (
+            <Pressable
+              key={a.key}
+              testID={`action-${a.key}`}
+              accessibilityRole="menuitem"
+              onPress={() => {
+                tick();
+                closeActions();
+                a.onPress();
+              }}
+              style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.item, (pressed || hovered) && { backgroundColor: p.hairline }]}
+            >
+              <Icon name={a.icon} size={21} color={a.destructive ? p.markRing : p.ink} />
+              <T color={a.destructive ? p.markRing : p.ink}>{a.label}</T>
+            </Pressable>
+          ))}
+        </ScrollView>
       </Animated.View>
     </Animated.View>
   );

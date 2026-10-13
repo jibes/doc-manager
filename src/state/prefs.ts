@@ -1,6 +1,7 @@
 import { useColorScheme } from 'react-native';
 import { create } from 'zustand';
 
+import type { SavedView } from '@/archive/facets';
 import { palettes, type Palette } from '@/design/tokens';
 import { DEFAULT_AI, type AiSettings } from '@/scan/ai';
 import { DEFAULT_SCAN_SETTINGS, type ScanSettings } from '@/scan/types';
@@ -30,13 +31,17 @@ type Prefs = {
   scanTo: string | null;
   /** Reading scans with an AI model at an address the user gives (off until set up). */
   ai: AiSettings;
+  /** The folder documents are kept in (synced to the other devices): saved views live in its .tessel folder. */
+  archive: string | null;
+  /** Saved views while there is no archive folder (this device only). */
+  views: SavedView[];
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [] };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -47,8 +52,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views });
   },
 }));
 

@@ -60,6 +60,8 @@ const shellFolders: FoldersApi = {
       move,
     }),
   share: (_root, list) => shellRequest('share', { uris: list.map((e) => e.uri) }),
+  readText: (root, path) => shellRequest<string | null>('readText', { root, path }),
+  writeText: (root, path, text) => shellRequest('writeText', { root, path, text }),
   allFiles: async () => (await shellAccess()).allFiles,
   requestAllFiles: () => shellRequest<boolean>('requestAllFiles'),
 };
@@ -209,6 +211,22 @@ const browserFolders: FoldersApi = {
   async share(root, list) {
     const files = await Promise.all(list.filter((e) => e.handle).map((e) => e.handle!.getFile()));
     if (files.length && navigator.canShare?.({ files })) await navigator.share({ files }).catch(() => {});
+  },
+  async readText(root, path) {
+    try {
+      let dir = await folderHandle(root);
+      for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
+      return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
+    } catch {
+      return null;
+    }
+  },
+  async writeText(root, path, text) {
+    let dir = await writable(root);
+    for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
+    const w = await (await dir.getFileHandle(path[path.length - 1], { create: true })).createWritable();
+    await w.write(new Blob([text], { type: 'application/json' }));
+    await w.close();
   },
   allFiles: async () => false,
   requestAllFiles: async () => false,

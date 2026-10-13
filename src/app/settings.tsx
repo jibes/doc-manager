@@ -9,6 +9,7 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
+import { setArchive } from '@/archive/views';
 import { AppearancePicker } from '@/reader/AppearancePanel';
 import { testAi, type AiApi } from '@/scan/ai';
 import { hasLightSensor } from '@/state/ambient';
@@ -100,6 +101,8 @@ export default function Settings() {
           </>
         )}
 
+        {folders.supported && picked && <ArchiveSection roots={picked} onError={setError} />}
+
         {folders.allFilesSupported && (
           <>
             <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
@@ -149,6 +152,49 @@ export default function Settings() {
       </View>
       <Toast message={error} onDismiss={() => setError(null)} />
     </ScrollView>
+  );
+}
+
+/** The folder documents are kept and synced in: saved views go into its .tessel folder. */
+function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (message: string) => void }) {
+  const p = usePalette();
+  const archive = usePrefs((s) => s.archive);
+  const choices = [{ id: null, name: t.archiveNone }, ...roots.filter((r) => r.kind === 'folder' || r.kind === 'app').map((r) => ({ id: r.id as string | null, name: r.name }))];
+  const choose = (id: string | null) => setArchive(id).catch(() => onError(t.viewFailed));
+  return (
+    <>
+      <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+        {t.archiveTitle}
+      </T>
+      <View accessibilityRole="radiogroup" testID="settings-archive" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+        {choices.map((c, i) => {
+          const on = c.id === archive || (!c.id && !roots.some((r) => r.id === archive));
+          return (
+            <Pressable
+              key={c.id ?? 'none'}
+              testID={c.id ? 'archive-root' : 'archive-none'}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: on }}
+              aria-checked={on}
+              onPress={() => choose(c.id)}
+              style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+                styles.row,
+                { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0, backgroundColor: hovered ? p.raised : 'transparent' },
+              ]}
+            >
+              <Icon name={c.id ? 'folder' : 'device'} color={c.id ? p.accent : p.muted} />
+              <T v="label" numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+                {c.name}
+              </T>
+              {on && <Icon name="check" color={p.accent} />}
+            </Pressable>
+          );
+        })}
+      </View>
+      <T v="caption" color={p.muted} style={styles.note}>
+        {choices.length > 1 ? t.archiveNote : t.archivePickFirst}
+      </T>
+    </>
   );
 }
 

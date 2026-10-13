@@ -97,6 +97,7 @@ export default function Home() {
                 onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
               />
             )}
+            {indexed > 0 && <IconButton testID="open-documents" icon="documents" label={t.documentsTitle} onPress={() => router.push('/documents')} />}
             {/* Quiet: Files is where documents are found ("Other location…" there opens the system picker too). */}
             {docs.length > 0 && <IconButton testID="add" icon="plus" label={t.addPdf} onPress={async () => add(await pickPdfs())} />}
           </AppHeader>
