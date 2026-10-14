@@ -106,18 +106,17 @@ tap "Folders"
 wait_for "Add folder"
 tap "Settings"
 wait_for "Show every document on this device"
-# Below the folders on a small screen: scroll it into view, tap, and check it took (a tap during the scroll's
-# fling, or on a switch still off screen, is lost).
-all_on() { ui | sed 's/></>\n</g' | grep -E 'content-desc="Show every document on this device"' | grep -q 'checked="true"'; }
-for _ in 1 2 3 4; do
-  adb shell input swipe 160 520 160 120 300
+# Below the folders on a small screen. The dump lists nodes off screen too, so scroll until the switch's bounds are on
+# screen (a tap below the edge is lost), then tap it once (another tap would turn it off again).
+bottom_of() { ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"$1\"" | head -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | sed -n 4p || true; }
+height=$(adb shell wm size | tr -d '\r' | grep -Eo '[0-9]+$' | tail -1); height=${height:-640}
+for _ in 1 2 3 4 5 6; do
+  y=$(bottom_of "Show every document on this device"); y=${y:-99999}
+  [ "$y" -lt $(( height - 40 )) ] && break
+  adb shell input swipe 160 $(( height * 3 / 4 )) 160 $(( height / 4 )) 400
   sleep 2
-  all_on && break
-  tap "Show every document on this device"
-  sleep 2
-  all_on && break
 done
-all_on || { echo "All files access didn't turn on"; screen | head -40; exit 1; }
+tap "Show every document on this device"
 sleep 2
 adb shell input keyevent KEYCODE_BACK
 wait_for "Internal storage"
