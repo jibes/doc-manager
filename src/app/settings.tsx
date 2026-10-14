@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,6 +23,14 @@ export default function Settings() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const allFiles = usePrefs((s) => s.allFiles);
+  const archive = usePrefs((s) => s.archive);
+  const scroller = useRef<ScrollView>(null);
+  // Where each section starts, for the index at the top.
+  const [at, setAt] = useState<Record<string, number>>({});
+  const mark = (key: string) => ({ onLayout: (e: { nativeEvent: { layout: { y: number } } }) => {
+    const y = e.nativeEvent.layout.y;
+    setAt((all) => (all[key] === y ? all : { ...all, [key]: y }));
+  } });
   const setPrefs = usePrefs((s) => s.set);
   const [picked, setPicked] = useState<FolderRoot[] | null>(null);
   const [granted, setGranted] = useState<boolean | null>(null);
@@ -45,7 +53,14 @@ export default function Settings() {
     await folders.forget(id).catch(() => setError(t.opFailed));
     refresh();
   };
+  const chooseArchive = (id: string | null) => setArchive(id).catch(() => setError(t.viewFailed));
   const allOn = allFiles && granted === true;
+  const sections: [string, string][] = [
+    ['appearance', t.appearanceTitle],
+    ...(folders.supported ? ([['folders', t.foldersTitle]] as [string, string][]) : []),
+    ...(folders.supported && archive ? ([['sync', t.syncTitle]] as [string, string][]) : []),
+    ...(Platform.OS === 'web' ? ([['ai', t.aiTitle]] as [string, string][]) : []),
+  ];
   const toggleAll = async (on: boolean) => {
     if (!on) return setPrefs({ allFiles: false });
     const ok = await folders.requestAllFiles().catch(() => false);
@@ -55,13 +70,30 @@ export default function Settings() {
 
   return (
     <ScrollView
+      ref={scroller}
       style={{ flex: 1, backgroundColor: p.canvas }}
       contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}
     >
       <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
         <ScreenHeader title={t.settings} />
 
-        <T v="kicker" color={p.muted} style={styles.kicker}>
+        <View testID="settings-index" style={styles.index}>
+          {sections.map(([key, label]) => (
+            <Pressable
+              key={key}
+              testID={`settings-go-${key}`}
+              accessibilityRole="link"
+              onPress={() => at[key] !== undefined && scroller.current?.scrollTo({ y: at[key] + insets.top, animated: true })}
+              style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.indexItem, { borderColor: p.hairline, backgroundColor: hovered ? p.raised : 'transparent' }]}
+            >
+              <T v="label" color={p.inkSoft}>
+                {label}
+              </T>
+            </Pressable>
+          ))}
+        </View>
+
+        <T v="kicker" color={p.muted} style={styles.kicker} {...mark('appearance')}>
           {t.appearanceTitle}
         </T>
         <View testID="settings-theme" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline, padding: space.lg }]}>
@@ -73,7 +105,7 @@ export default function Settings() {
 
         <View style={{ height: space.xxl }} />
 
-        <T v="kicker" color={p.muted} style={styles.kicker}>
+        <T v="kicker" color={p.muted} style={styles.kicker} {...mark('folders')}>
           {t.foldersTitle}
         </T>
         {!folders.supported ? (
@@ -82,22 +114,43 @@ export default function Settings() {
           <>
             {picked && picked.length > 0 && (
               <View testID="settings-folders" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                {picked.map((f, i) => (
-                  <View key={f.id} style={[styles.row, { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0 }]}>
-                    <Icon name="folder" color={p.accent} />
-                    <T v="label" numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
-                      {f.name}
-                    </T>
-                    <IconButton testID="remove-folder" icon="close" size={36} label={t.removeFolder(f.name)} onPress={() => remove(f.id)} />
-                  </View>
-                ))}
+                {picked.map((f, i) => {
+                  const isArchive = f.id === archive;
+                  return (
+                    <View key={f.id} style={[styles.row, { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0 }]}>
+                      <Icon name="folder" color={p.accent} />
+                      <T v="label" numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+                        {f.name}
+                      </T>
+                      {(f.kind === 'folder' || f.kind === 'app') && (
+                        // The archive is a mark on one of the folders: a tap sets it, another takes it off.
+                        <Pressable
+                          testID="archive-root"
+                          accessibilityRole="switch"
+                          accessibilityLabel={t.archiveUse(f.name)}
+                          accessibilityState={{ checked: isArchive }}
+                          aria-checked={isArchive}
+                          onPress={() => chooseArchive(isArchive ? null : f.id)}
+                          hitSlop={6}
+                          style={[styles.archiveMark, { borderColor: isArchive ? p.markRing : p.hairline, backgroundColor: isArchive ? p.mark : 'transparent' }]}
+                        >
+                          <Icon name={isArchive ? 'check' : 'inbox'} size={14} color={isArchive ? p.ink : p.muted} />
+                          <T v="label" color={isArchive ? p.ink : p.muted}>
+                            {t.archiveMark}
+                          </T>
+                        </Pressable>
+                      )}
+                      <IconButton testID="remove-folder" icon="close" size={36} label={t.removeFolder(f.name)} onPress={() => remove(f.id)} />
+                    </View>
+                  );
+                })}
               </View>
             )}
             <View style={{ flexDirection: 'row', marginTop: space.md }}>
               <Button testID="settings-add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
             </View>
             <T v="caption" color={p.muted} style={styles.note}>
-              {t.foldersNote}
+              {t.foldersNote} {picked?.length ? t.archiveFolderNote : ''}
             </T>
           </>
         )}
@@ -147,59 +200,36 @@ export default function Settings() {
           </>
         )}
 
-        {folders.supported && picked && <ArchiveSection roots={picked} onError={setError} />}
+        {folders.supported && !!archive && (
+          <View {...mark('sync')}>
+            <SyncSection />
+          </View>
+        )}
 
-        {Platform.OS === 'web' && <AiSection />}
+        {Platform.OS === 'web' && (
+          <View {...mark('ai')}>
+            <AiSection />
+          </View>
+        )}
       </View>
       <Toast message={error} onDismiss={() => setError(null)} />
     </ScrollView>
   );
 }
 
-/** The folder documents are kept and synced in: saved views go into its .tessel folder. */
-function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (message: string) => void }) {
+/** With an archive: whether this device sorts its inbox, and whether reading is shared through it. */
+function SyncSection() {
   const p = usePalette();
-  const archive = usePrefs((s) => s.archive);
   const inboxHere = usePrefs((s) => s.inboxHere);
   const shareReading = usePrefs((s) => s.shareReading);
   const sharedWith = useSharing((s) => s.devices);
   const setPrefs = usePrefs((s) => s.set);
-  const choices = [{ id: null, name: t.archiveNone }, ...roots.filter((r) => r.kind === 'folder' || r.kind === 'app').map((r) => ({ id: r.id as string | null, name: r.name }))];
-  const choose = (id: string | null) => setArchive(id).catch(() => onError(t.viewFailed));
   return (
     <>
       <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
-        {t.archiveTitle}
+        {t.syncTitle}
       </T>
-      <View accessibilityRole="radiogroup" testID="settings-archive" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-        {choices.map((c, i) => {
-          const on = c.id === archive || (!c.id && !roots.some((r) => r.id === archive));
-          return (
-            <Pressable
-              key={c.id ?? 'none'}
-              testID={c.id ? 'archive-root' : 'archive-none'}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: on }}
-              aria-checked={on}
-              onPress={() => choose(c.id)}
-              style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-                styles.row,
-                { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0, backgroundColor: hovered ? p.raised : 'transparent' },
-              ]}
-            >
-              <Icon name={c.id ? 'folder' : 'device'} color={c.id ? p.accent : p.muted} />
-              <T v="label" numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
-                {c.name}
-              </T>
-              {on && <Icon name="check" color={p.accent} />}
-            </Pressable>
-          );
-        })}
-      </View>
-      <T v="caption" color={p.muted} style={styles.note}>
-        {choices.length > 1 ? t.archiveNote : t.archivePickFirst}
-      </T>
-      {!!archive && (
+      {(
         <>
           <Pressable
             testID="inbox-here-switch"
@@ -211,7 +241,7 @@ function ArchiveSection({ roots, onError }: { roots: FolderRoot[]; onError: (mes
             style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
               styles.card,
               styles.row,
-              { marginTop: space.lg, backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
+              { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
             ]}
           >
             <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
@@ -348,6 +378,9 @@ const styles = StyleSheet.create({
   segment: { flexDirection: 'row', borderRadius: radius.sm + 2, padding: 3 },
   segBtn: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   kicker: { marginBottom: space.md },
+  index: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.xl },
+  indexItem: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 32, justifyContent: 'center' },
+  archiveMark: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 30 },
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingLeft: space.lg, paddingRight: space.sm, minHeight: 56 },
   note: { marginTop: space.md, maxWidth: 560 },

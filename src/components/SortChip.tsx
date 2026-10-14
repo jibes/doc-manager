@@ -19,6 +19,19 @@ export function SortChip({ label, onPress, testID = 'sort' }: { label: string; o
   );
 }
 
+/** Starts picking documents from the list (a long press does too). */
+export function SelectChip({ onPress }: { onPress: () => void }) {
+  const p = usePalette();
+  return (
+    <Pressable testID="select" accessibilityRole="button" onPress={onPress} hitSlop={8} style={styles.sort}>
+      <Icon name="select" size={15} color={p.inkSoft} />
+      <T v="label" color={p.inkSoft}>
+        {t.select}
+      </T>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   sort: { flexDirection: 'row', alignItems: 'center', gap: space.xs, minHeight: 32 },
 });

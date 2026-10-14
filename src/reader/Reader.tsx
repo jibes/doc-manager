@@ -220,6 +220,9 @@ export function Reader({
   const placed = useRef<{ layout: PageLayout; zoomed: typeof zoomed } | null>(null);
   const restored = useRef(false);
   const lastDir = useRef({ y: 0, acc: 0 });
+  // Phones: the page number and bookmark step aside while the pages move, and come back when they stop.
+  const [moving, setMoving] = useState(false);
+  const stillTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const layout = useMemo(
     () =>
@@ -314,6 +317,11 @@ export function Reader({
   // Immersive (reading list only): hide chrome reading forward, reveal on a deliberate scroll back.
   const trackDirection = useCallback(
     (y: number) => {
+      if (!isWide(winW)) {
+        setMoving(true);
+        clearTimeout(stillTimer.current);
+        stillTimer.current = setTimeout(() => setMoving(false), 1200);
+      }
       if (!readingMode) return;
       const d = lastDir.current;
       const delta = y - d.y;
@@ -322,8 +330,9 @@ export function Reader({
       if (d.acc > 48 && y > 120) setChrome(false);
       else if (d.acc < -64) setChrome(true);
     },
-    [readingMode],
+    [readingMode, winW],
   );
+  useEffect(() => () => clearTimeout(stillTimer.current), []);
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -634,7 +643,12 @@ export function Reader({
     chromeV.set(withTiming(chromeShown ? 1 : 0, { duration: 240 }));
   }, [chromeShown, chromeV]);
   const topStyle = useAnimatedStyle(() => ({ opacity: chromeV.value, transform: [{ translateY: (1 - chromeV.value) * -12 }] }));
-  const bottomStyle = useAnimatedStyle(() => ({ opacity: chromeV.value, transform: [{ translateY: (1 - chromeV.value) * 10 }] }));
+  const pillsShown = chromeShown && !moving;
+  const pillsV = useSharedValue(1);
+  useEffect(() => {
+    pillsV.set(withTiming(pillsShown ? 1 : 0, { duration: pillsShown ? 240 : 160 }));
+  }, [pillsShown, pillsV]);
+  const bottomStyle = useAnimatedStyle(() => ({ opacity: pillsV.value, transform: [{ translateY: (1 - pillsV.value) * 10 }] }));
 
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
   const bookmarked = doc.bookmarks.includes(page);
@@ -657,11 +671,12 @@ export function Reader({
   };
   // Document actions; how it looks lives in Aa, how to find things in the bar.
   const menuItems: MenuItem[] = [
+    // Most used first.
+    readingItem,
+    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
     ...(outside && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
-    readingItem,
-    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
@@ -784,7 +799,7 @@ export function Reader({
 
       {/* Bottom bar + spine */}
       <View pointerEvents="box-none" style={[styles.bottomWrap, { paddingBottom: insets.bottom }]}>
-        <Animated.View pointerEvents={chromeShown ? 'box-none' : 'none'} style={[styles.bottomRow, bottomStyle]}>
+        <Animated.View pointerEvents={pillsShown ? 'box-none' : 'none'} style={[styles.bottomRow, bottomStyle]}>
           <View style={[styles.pill, { backgroundColor: p.glass, borderColor: p.hairline }]}>
             {editingPage ? (
               <TextInput

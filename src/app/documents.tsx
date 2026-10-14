@@ -12,7 +12,7 @@ import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { AppFrame, AppHeader, TAB_BAR_H, useDocsView, useMainWidth, useTabBar } from '@/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
-import { SortChip } from '@/components/SortChip';
+import { SelectChip, SortChip } from '@/components/SortChip';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
 import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
@@ -258,7 +258,6 @@ export default function Documents() {
           ) : (
             <AppHeader tab="documents">
               <LayoutToggle />
-              {view === 'all' && shown.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
             </AppHeader>
           )}
 
@@ -313,7 +312,7 @@ export default function Documents() {
           {/* One row: what is waiting (inbox, sync issues), the filters in use, and the saved views. */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
             {archive && inboxHere && <Chip testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />}
-            {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} warn onPress={() => router.push('/sync')} />}
+            {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
             <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
             {place && <Chip testID="facet-place" label={placeName(place)} on onPress={choosePlace} />}
             {FACETS.filter((f) => filter[f]).map((f) => (
@@ -351,6 +350,7 @@ export default function Documents() {
             <T v="kicker" color={p.muted} testID="docs-count" style={{ flex: 1 }}>
               {t.documentsCount(shown.length)}
             </T>
+            {shown.length > 0 && <SelectChip onPress={() => setSelected(new Set())} />}
             <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} onPress={chooseSort} />
           </View>
           {shown.length > 0 ? (
@@ -433,14 +433,14 @@ function Empty({ reading, onAdd }: { reading: string | null; onAdd?: () => void 
 }
 
 /** A small pill: somewhere to go (the inbox, sync issues), the filter button, or a filter in use. */
-function Chip({ testID, icon, label, count, warn, on, onPress }: { testID: string; icon?: IconName; label: string; count?: number; warn?: boolean; on?: boolean; onPress: () => void }) {
+function Chip({ testID, icon, label, count, on, onPress }: { testID: string; icon?: IconName; label: string; count?: number; on?: boolean; onPress: () => void }) {
   const p = usePalette();
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       onPress={onPress}
-      style={[styles.chip, { backgroundColor: warn || on ? p.mark : 'transparent', borderColor: warn || on ? p.markRing : p.hairline }]}
+      style={[styles.chip, { backgroundColor: on ? p.mark : 'transparent', borderColor: on ? p.markRing : p.hairline }]}
     >
       {icon && <Icon name={icon} size={15} color={p.ink} />}
       <T v="label" color={p.ink} numberOfLines={1} style={{ maxWidth: 200 }}>

@@ -9,7 +9,7 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
 import { DocItem, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
-import { SortChip } from '@/components/SortChip';
+import { SelectChip, SortChip } from '@/components/SortChip';
 import { showActions } from '@/state/actions';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
@@ -26,7 +26,7 @@ import { clipCount, useClipboard } from '@/state/clipboard';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
-const MAX_W = 1120;
+const MAX_W = 820;
 
 /**
  * Folder IDs are URIs and paths ("…/tree/primary%3ADocs", "100% done"): route params are decoded on the
@@ -58,7 +58,8 @@ export default function Files() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const gutter = width < 600 ? space.xl - 4 : space.xxxl;
-  const contentW = Math.min(width, MAX_W) - gutter * 2;
+  // As wide as every other document screen; the gutter only matters on narrower windows.
+  const contentW = Math.min(width - gutter * 2, MAX_W - (space.xl - 4) * 2);
   const load = useLibrary((s) => s.load);
   useEffect(() => {
     load();
@@ -345,13 +346,14 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       <T v="kicker" color={p.muted}>
         {entries ? t.folderSummary(docs, entries.length - docs) : ''}
       </T>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
         {(entries?.length ?? 0) > 12 && (
           <View style={[styles.search, { backgroundColor: p.hairline }]}>
             <Icon name="search" size={15} color={p.muted} />
             <TextInput value={query} onChangeText={setQuery} placeholder={t.filter} placeholderTextColor={p.muted} style={[styles.searchInput, { color: p.ink }]} />
           </View>
         )}
+        {(entries?.length ?? 0) > 0 && <SelectChip onPress={() => setSelected(new Set())} />}
         <SortChip
           label={sortName[sort]}
           onPress={() =>
@@ -373,7 +375,6 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
         <ScreenHeader title={name ?? rootName} over={name ? rootName : t.foldersView}>
           {editable && <IconButton testID="new-folder" icon="folderAdd" label={t.newFolder} onPress={newFolder} />}
           <LayoutToggle />
-          {entries && entries.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
         </ScreenHeader>
       )}
       {failed ? (

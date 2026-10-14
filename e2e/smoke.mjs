@@ -1762,6 +1762,8 @@ async function inbox() {
   await page.goto(BASE);
   await vis('home-settings').click();
   await vis('archive-root').click();
+  check((await vis('archive-root').getAttribute('aria-checked')) === 'true', 'settings: the archive is a mark on one of the folders');
+  check((await vis('settings-index').innerText()).includes('Sync'), 'settings: the index lists the sections');
   await vis('inbox-here-switch').click();
   check((await vis('inbox-here-switch').getAttribute('aria-checked')) === 'true', 'inbox: this device sorts the inbox');
   await vis('screen-back').click();
@@ -2204,6 +2206,21 @@ async function places() {
   await ctx.close();
 }
 
+// Reading tab: with nothing on the reading list, the document opened last is the one to continue.
+async function lastRead() {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`last-read: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  await page.getByTestId('back').click();
+  await page.getByTestId('last-read').waitFor({ timeout: 10000 });
+  check(/Orderly Notes[\s\S]*Page \d of 2/.test(await page.getByTestId('last-read').innerText()), 'last read: Continue shows the document last read');
+  await page.getByTestId('continue-add').click();
+  await page.getByTestId('reading-list').waitFor();
+  check((await page.getByTestId('last-read').count()) === 0, 'last read: adding it puts it on the reading list');
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -2517,6 +2534,7 @@ await step('batch', batch);
 await step('shared', sharedReading);
 await step('places', places);
 await step('tabs', tabs);
+await step('lastread', lastRead);
 await step('appearance', appearance);
 await step('regressions', regressions);
 await step('books', books);

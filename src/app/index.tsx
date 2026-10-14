@@ -6,12 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppFrame, AppHeader, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { DocItem, DocList, gridOf, LayoutToggle, useLayout, type Layout } from '@/components/DocItems';
+import { SelectChip } from '@/components/SortChip';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
 import { shareDocs } from '@/lib/fileActions';
 import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
 import { Icon } from '@/components/Icon';
-import { Button, IconButton, T } from '@/components/primitives';
+import { Button, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
@@ -23,7 +24,7 @@ import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 
-const MAX_W = 1120;
+const MAX_W = 820;
 /** Opened as an app (the Android app, an installed web app): it opens where it was. A browser tab follows its URL. */
 const launchedAsApp = () => !!shell || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
 /** Set once the app has opened its first place (later visits here don't jump away). */
@@ -79,7 +80,8 @@ export default function Home() {
   };
 
   const gutter = width < 600 ? space.xl - 4 : space.xxxl;
-  const contentW = Math.min(width, MAX_W) - gutter * 2;
+  // As wide as every other document screen; the gutter only matters on narrower windows.
+  const contentW = Math.min(width - gutter * 2, MAX_W - (space.xl - 4) * 2);
   const layout = useLayout();
   const grid = gridOf(contentW);
   const wide = width >= 760;
@@ -88,6 +90,8 @@ export default function Home() {
   const finished = useMemo(() => docs.filter((d) => d.reading?.finishedAt), [docs]);
   // Docs are sorted by last opened, so the first unfinished one is the one to continue.
   const [current, ...shelf] = reading;
+  // Nothing on the reading list: the document opened last is the one to continue.
+  const lastRead = reading.length ? undefined : docs.find((d) => d.openedAt && !d.reading);
   // Recently opened: the last few (every document is in Documents).
   const recent = useMemo(() => docs.slice(0, RECENT), [docs]);
 
@@ -137,7 +141,6 @@ export default function Home() {
           ) : (
             <AppHeader tab="reading">
               <LayoutToggle />
-              {recent.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
               {installKind && (
                 <Button
                   testID="install"
@@ -153,6 +156,14 @@ export default function Home() {
             <EmptyLibrary onAdd={async () => add(await pickPdfs())} onSample={async () => add([await sampleItem()])} />
           ) : (
             <>
+              {lastRead && (
+                <View style={styles.section} testID="last-read">
+                  <ContinueCard doc={lastRead} cover={covers[lastRead.id]} wide={wide} />
+                  <View style={{ alignItems: 'flex-start', marginTop: space.sm }}>
+                    <Button testID="continue-add" kind="quiet" icon="readingAdd" label={t.addToReadingList} onPress={() => toggleReading(lastRead.id)} />
+                  </View>
+                </View>
+              )}
               {(reading.length > 0 || finished.length > 0) && (
                 <View style={styles.section} testID="reading-list">
                   <T v="kicker" color={p.muted} style={styles.kicker}>
@@ -200,7 +211,10 @@ export default function Home() {
                   <T v="kicker" color={p.muted}>
                     {t.recentTitle}
                   </T>
-                  <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+                    {recent.length > 0 && <SelectChip onPress={() => setSelected(new Set())} />}
+                    <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
+                  </View>
                 </View>
                 {importing.length > 0 && (
                   <T v="label" color={p.muted} style={{ marginBottom: space.sm }}>
