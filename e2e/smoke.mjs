@@ -1963,10 +1963,16 @@ async function syncSafety() {
     (await names('2026')).join() === 'letter.pdf' && (await sizeOf('2026/letter.pdf')) === copySize && (await names('.tessel/trash')).includes('letter.pdf'),
     `sync: keeping the other version puts it in place, the first in the trash (${await names('2026')})`,
   );
+  check((await vis('sync-conflict').count()) === 0, 'sync: a resolved conflict leaves the list at once');
   await vis('sync-duplicate').getByTestId('sync-keep-one').first().click();
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(150);
+  check((await vis('sync-duplicate').count()) === 0, 'sync: a resolved duplicate leaves the list at once');
+  await page.waitForTimeout(650);
   const left = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
   check(left.length === 1, `sync: keeping one duplicate trashes the others (${left})`);
+  // And stays gone while the folders are read again.
+  await page.waitForTimeout(3000);
+  check((await vis('sync-duplicate').count()) === 0 && (await vis('sync-conflict').count()) === 0, 'sync: resolved items stay resolved');
 
   // The trash (Documents → Folders, under the archive): restore one, delete one for good.
   await vis('screen-back').click();

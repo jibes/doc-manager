@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { allDocs, schedule, useIndex, type Conflict } from '@/archive/indexer';
+import { allDocs, forget, useIndex, type Conflict } from '@/archive/indexer';
 import { openDoc, whereIs } from '@/archive/Results';
 import type { IndexedDoc } from '@/archive/search';
 import { duplicates } from '@/archive/sync';
@@ -62,18 +62,23 @@ export default function Sync() {
     };
   }, [conflicts, done, round, archive]);
 
+  // Resolved files leave the lists (and the index) at once; the next pass reads the folders again.
   const act = async (op: () => Promise<unknown>, after: () => void) => {
     try {
       await op();
       after();
       setNotice(t.syncKept);
-      schedule(500);
     } catch (e) {
       setNotice(message(e));
     }
     setRound((r) => r + 1);
   };
-  const dropPair = (pair: Pair) => useIndex.setState((s) => ({ conflicts: s.conflicts.filter((c) => c !== pair.conflict) }));
+  /** `replaced`: the original went to the trash (the copy took its name): read again on the next pass. */
+  const dropPair = (pair: Pair, replaced = false) => {
+    const { root, entry } = pair.conflict;
+    forget(replaced && pair.original ? [`${root}:${pair.original.id}`] : [], [pair.conflict]);
+    setPairs((ps) => ps?.filter((p) => p.conflict.entry.id !== entry.id) ?? null);
+  };
 
   const keepOriginal = (pair: Pair) => act(() => discard(pair.conflict.root, pair.conflict.dir, [pair.conflict.entry]), () => dropPair(pair));
   const keepCopy = (pair: Pair) =>
@@ -81,7 +86,7 @@ export default function Sync() {
       const { root, dir, entry, name } = pair.conflict;
       if (pair.original) await discard(root, dir, [pair.original]);
       await folders.rename(root, dir, entry, name.original);
-    }, () => dropPair(pair));
+    }, () => dropPair(pair, true));
   const keepBoth = (pair: Pair) =>
     act(async () => {
       const { root, dir, entry, name } = pair.conflict;
@@ -92,7 +97,10 @@ export default function Sync() {
   const keepOne = (group: IndexedDoc[], keep: IndexedDoc) =>
     act(async () => {
       for (const d of group) if (d !== keep && d.place.kind === 'folder') await discard(d.place.root, d.place.dir, [d.place.entry]);
-    }, () => setGroups((gs) => gs.filter((g) => g !== group)));
+    }, () => {
+      forget(group.filter((d) => d !== keep).map((d) => d.key));
+      setGroups((gs) => gs.filter((g) => g !== group));
+    });
 
   const shownPairs = pairs ?? [];
   return (

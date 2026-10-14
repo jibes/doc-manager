@@ -121,6 +121,24 @@ function drop(keys: string[]) {
   useIndex.setState({ count: countDocs() });
 }
 
+/**
+ * Files resolved on the Sync screen (trashed, renamed), by key, with when: they leave the index and the
+ * conflict list at once, and a pass that listed the folders before that doesn't bring them back.
+ */
+const settled = new Map<string, number>();
+const conflictKey = (c: Conflict) => `${c.root}:${c.entry.id}`;
+
+export function forget(keys: string[], conflicts: Conflict[] = []) {
+  if (Platform.OS !== 'web') return;
+  const now = Date.now();
+  for (const key of [...keys, ...conflicts.map(conflictKey)]) settled.set(key, now);
+  drop(keys.filter((k) => docs.has(k)));
+  const gone = new Set(conflicts.map(conflictKey));
+  useIndex.setState((s) => ({ conflicts: s.conflicts.filter((c) => !gone.has(conflictKey(c))), duplicates: archiveDuplicates() }));
+  schedule(1000);
+}
+const settledSince = (key: string, since: number) => (settled.get(key) ?? 0) >= since;
+
 /** Best matches for `query` in every indexed document. */
 export async function searchAll(query: string): Promise<Hit[]> {
   if (Platform.OS !== 'web' || query.trim().length < 2) return [];
@@ -183,8 +201,10 @@ async function walk(root: FolderRoot, dir: string | undefined, depth: number, ou
       if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, out, conflicts).catch(() => {});
     } else if (e.kind === 'pdf') {
       const conflict = parseConflict(e.name);
-      if (conflict) conflicts.push({ root: root.id, rootName: root.name, dir, entry: e, name: conflict });
-      else out.push({ key: `${root.id}:${e.id}`, place: { kind: 'folder', root: root.id, rootName: root.name, dir, entry: e }, name: e.name, size: e.size, modified: e.modified });
+      // Conflict copies are resolved in the folders Tessel works in ("All documents" has no folders to work in).
+      if (conflict) {
+        if (root.kind !== 'all') conflicts.push({ root: root.id, rootName: root.name, dir, entry: e, name: conflict });
+      } else out.push({ key: `${root.id}:${e.id}`, place: { kind: 'folder', root: root.id, rootName: root.name, dir, entry: e }, name: e.name, size: e.size, modified: e.modified });
     }
   }
 }
@@ -303,9 +323,11 @@ async function run(): Promise<void> {
   // Nothing while a document is open: opening and reading it come first.
   await whileOpen();
   await load();
-  lastWalk = Date.now();
-  const { list, unlisted, conflicts } = await candidates();
-  useIndex.setState({ conflicts });
+  const started = (lastWalk = Date.now());
+  const { list: listed, unlisted, conflicts } = await candidates();
+  // What was resolved while the folders were being listed is gone already.
+  const list = listed.filter((c) => !settledSince(c.key, started));
+  useIndex.setState({ conflicts: conflicts.filter((c) => !settledSince(conflictKey(c), started)) });
   const seen = new Set(list.map((c) => c.key));
   drop(
     [...docs.keys()].filter((key) => {
