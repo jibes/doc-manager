@@ -11,6 +11,9 @@ import { loadViews, removeView, saveView, useViews } from '@/archive/views';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { AppFrame, AppHeader, TAB_BAR_H, useDocsView, useTabBar } from '@/components/AppNav';
+import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, shareAll, undoDelete } from '@/archive/batch';
+import { useClipboard } from '@/state/clipboard';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
@@ -63,6 +66,10 @@ export default function Documents() {
   const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);
   const [notice, setNotice] = useState<string | null>(null);
+  // Picked documents (by key), while picking; Undo for the last move to the trash.
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [undo, setUndo] = useState<(() => void) | null>(null);
+  const setClip = useClipboard((s) => s.set);
   const { count, done } = useIndex();
   const views = useViews((s) => s.views);
 
@@ -169,7 +176,48 @@ export default function Documents() {
       { key: 'place-any', icon: place ? 'close' : 'check', label: t.facetAny, onPress: () => setPlace(undefined) },
       ...PLACES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
     ]);
-  const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0);
+  // Room for the action bar while picking.
+  const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0);
+
+  const picked = selected ? shown.filter((h) => selected.has(h.doc.key)).map((h) => h.doc) : [];
+  // A long press (or right click) starts picking; taps then add and remove.
+  const hold = (key: string) => {
+    if (justSelected(key)) return;
+    heldNow(key);
+    setSelected((s) => (s ? toggled(s, key) : new Set([key])));
+  };
+  const tap = (key: string) => !justSelected(key) && setSelected((s) => toggled(s, key));
+  const batch = async (op: () => Promise<string | void>) => {
+    try {
+      const done = await op();
+      if (done) setNotice(done);
+      setSelected(null);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const clip = (move: boolean) => {
+    setClip({ move, items: byFolder(picked) });
+    setSelected(null);
+    // On to the folders, to open the one they go to.
+    useDocsView.setState({ view: 'folders' });
+  };
+  const remove = async () => {
+    const list = picked;
+    if (deletesForGood(list)) {
+      const yes = await ask({ title: t.deleteTitle(list.length), body: t.deleteBody(list.length, list[0].title || list[0].name), confirm: t.delete, destructive: true });
+      if (yes == null) return;
+    }
+    await batch(async () => {
+      const trashed = await deleteAll(list);
+      const n = trashed.reduce((k, g) => k + g.items.length, 0);
+      if (n && n === list.length) {
+        setUndo(() => () => void undoDelete(trashed).catch(() => {}));
+        return t.trashedN(n);
+      }
+      return t.deletedN(list.length);
+    });
+  };
 
   return (
     <AppFrame tab="documents">
@@ -179,7 +227,11 @@ export default function Documents() {
         contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
-          <AppHeader tab="documents" />
+          {selected && view === 'all' ? (
+            <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
+          ) : (
+            <AppHeader tab="documents" />
+          )}
 
           {folders.supported && (
             <View accessibilityRole="tablist" style={[styles.segments, { backgroundColor: p.hairline }]}>
@@ -189,7 +241,10 @@ export default function Documents() {
                   testID={`docs-${v}`}
                   role="tab"
                   aria-selected={view === v}
-                  onPress={() => useDocsView.setState({ view: v })}
+                  onPress={() => {
+                    setSelected(null);
+                    useDocsView.setState({ view: v });
+                  }}
                   style={[styles.segment, view === v && { backgroundColor: p.raised }]}
                 >
                   <T v="label" color={view === v ? p.ink : p.muted}>
@@ -305,7 +360,17 @@ export default function Documents() {
           {shown.length > 0 ? (
             <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
               {shown.slice(0, limit).map((h, i) => (
-                <HitRow key={h.doc.key} hit={h} query={searching ? q : ''} first={i === 0} size={!byRelevance && sort === 'size'} onError={setNotice} />
+                <HitRow
+                  key={h.doc.key}
+                  hit={h}
+                  query={searching ? q : ''}
+                  first={i === 0}
+                  size={!byRelevance && sort === 'size'}
+                  selected={selected ? selected.has(h.doc.key) : undefined}
+                  onSelect={() => hold(h.doc.key)}
+                  onToggle={() => tap(h.doc.key)}
+                  onError={setNotice}
+                />
               ))}
             </View>
           ) : (
@@ -320,7 +385,27 @@ export default function Documents() {
           )}
         </View>
       </ScrollView>
-      <Toast message={notice} onDismiss={() => setNotice(null)} above={tabBar ? TAB_BAR_H : 0} />
+      {selected && view === 'all' && (
+        <ActionBar bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4}>
+          {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void batch(() => shareAll(picked))} />}
+          <Action
+            testID="act-reading"
+            icon="readingAdd"
+            label={t.readingList}
+            disabled={!picked.length}
+            onPress={() => void batch(async () => t.readingAddedN(await addToReading(picked)))}
+          />
+          <Action testID="act-copy" icon="copy" label={t.copy} disabled={!allInFolders(picked)} onPress={() => clip(false)} />
+          <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => clip(true)} />
+          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => void remove()} />
+        </ActionBar>
+      )}
+      <Toast
+        message={notice}
+        onDismiss={() => (setNotice(null), setUndo(null))}
+        action={undo && notice ? { label: t.undo, onPress: () => (undo(), setNotice(null), setUndo(null)) } : undefined}
+        above={tabBar ? TAB_BAR_H : 0}
+      />
     </AppFrame>
   );
 }

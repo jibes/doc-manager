@@ -2370,6 +2370,103 @@ async function appearance() {
   await ctx.close();
 }
 
+// Picking several documents: in Documents (files in the archive) and in Reading (the library).
+async function batch() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`batch: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  await page.evaluate(
+    async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+      await root.getDirectoryHandle('Done', { create: true });
+      for (const [name, b64] of files) {
+        const w = await (await root.getFileHandle(name, { create: true })).createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+      }
+    },
+    [
+      ['one.pdf', fixture('columns.pdf')],
+      ['two.pdf', fixture('tagged.pdf')],
+      ['three.pdf', fixture('xrefstream.pdf')],
+    ],
+  );
+  const names = (path) =>
+    page.evaluate(async (path) => {
+      let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      try {
+        for (const d of path.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(d);
+      } catch {
+        return [];
+      }
+      const out = [];
+      for await (const [name, h] of dir.entries()) if (h.kind === 'file') out.push(name);
+      return out.sort();
+    }, path);
+  await openFolders(page);
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('screen-back').click();
+
+  await openDocs(page);
+  for (let i = 0; i < 60 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
+  const hit = (title) => vis('archive-hit').filter({ hasText: title });
+  // A right click starts picking; a tap adds one more.
+  await hit('Orderly Notes').click({ button: 'right' });
+  await hit('Old title').click();
+  check(/2 selected/.test(await page.getByText(/selected$/).locator('visible=true').innerText()), 'batch: documents are picked with a right click and a tap');
+  await vis('act-move').click();
+  check(await vis('paste-bar').isVisible(), 'batch: Move goes on to the folders to choose where');
+  await vis('folder-root').filter({ hasText: 'Archive' }).click();
+  await vis('folder-dir').filter({ hasText: 'Done' }).click();
+  await vis('paste').click();
+  await page.waitForTimeout(800);
+  check((await names('Done')).join() === 'one.pdf,three.pdf' && (await names('')).join() === 'two.pdf', `batch: both are moved into the folder (${await names('Done')})`);
+
+  // To the trash, and back.
+  await page.goto(BASE);
+  await openDocs(page);
+  for (let i = 0; i < 60 && !((await vis('archive-hit').count()) === 3 && /Done/.test((await hit('Old title').innerText().catch(() => '')))); i++) await page.waitForTimeout(500);
+  await hit('Orderly Notes').click({ button: 'right' });
+  await hit('Old title').click();
+  await vis('act-delete').click();
+  await page.getByText('Moved 2 items to the trash.').waitFor({ timeout: 10000 });
+  check((await names('Done')).length === 0 && (await vis('archive-hit').count()) === 1, 'batch: deleting in the archive goes to its trash, and leaves the list');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await page.waitForTimeout(1000);
+  check((await names('Done')).join() === 'one.pdf,three.pdf', 'batch: and Undo puts them back');
+
+  // Reading: onto the reading list together, then out of the library.
+  for (let i = 0; i < 40 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
+  await vis('archive-hit').nth(0).click({ button: 'right' });
+  await vis('archive-hit').nth(1).click();
+  await vis('act-reading').click();
+  await page.getByText('Added 2 documents to the reading list.').waitFor({ timeout: 10000 });
+  await vis('tab-reading').click();
+  await vis('recent-row').first().waitFor();
+  check((await vis('recent-row').count()) === 2 && (await vis('reading-list').isVisible()), 'batch: picked documents go on the reading list together');
+  await vis('recent-row').first().click({ button: 'right' });
+  await vis('select-all').click();
+  check(/On the reading list|Remove from reading list/i.test(await vis('act-reading').getAttribute('aria-label')), 'batch: all on the list: the action takes them off');
+  await vis('act-remove').click();
+  await page.getByTestId('ask-confirm').click();
+  await page.waitForTimeout(500);
+  check((await vis('recent-row').count()) === 0, 'batch: and they are removed from the library together');
+  check((await names('Done')).length === 2 && (await names('')).length === 1, 'batch: their files stay where they are');
+  await ctx.close();
+}
+
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
 await step('german', german);
 await step('locked', locked);
@@ -2384,6 +2481,7 @@ await step('documents', documentsScreen);
 await step('inbox', inbox);
 await step('searchable', searchable);
 await step('sync', syncSafety);
+await step('batch', batch);
 await step('shared', sharedReading);
 await step('places', places);
 await step('tabs', tabs);

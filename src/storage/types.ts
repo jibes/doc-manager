@@ -60,6 +60,8 @@ export interface LibraryRepo {
   linkedTo(uris: string[]): Promise<Map<string, string[]>>;
   /** Points documents linked to a file at its new place (renamed or moved in the file browser). */
   relink(id: string, uri: string): Promise<void>;
+  /** Android app: the URI of the file a document is linked to (to hand it to other apps); undefined for a copy. */
+  linkOf(id: string): Promise<string | undefined>;
   /** Displayable URI (object URL on web, file URI on native) or null. */
   coverUri(id: string): Promise<string | null>;
   /** Text recognized on-device for scanned PDFs, per page; undefined = not recognized yet. */

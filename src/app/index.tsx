@@ -1,10 +1,12 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppFrame, AppHeader, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
+import { Action, ActionBar, Check, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { shareDocs } from '@/lib/fileActions';
 import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
 import { Icon } from '@/components/Icon';
@@ -53,6 +55,9 @@ export default function Home() {
   const { docs, covers, loaded, importing, error, load, importFiles, remove, toggleReading, clearError } = useLibrary();
   const [hint, setHint] = useState<string | null>(null);
   const [showFinished, setShowFinished] = useState(false);
+  // Picked documents (by id), while picking.
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const { kind: installKind, install } = useInstall();
   const tabBar = useTabBar();
 
@@ -88,25 +93,58 @@ export default function Home() {
 
   const removeDoc = (d: DocRecord) => void confirmRemove(d, remove);
 
+  const picked = selected ? docs.filter((d) => selected.has(d.id)) : [];
+  const hold = (id: string) => {
+    if (justSelected(id)) return;
+    heldNow(id);
+    setSelected((s) => (s ? toggled(s, id) : new Set([id])));
+  };
+  const tap = (id: string) => !justSelected(id) && setSelected((s) => toggled(s, id));
+  const selection = (d: DocRecord) => ({ selected: selected ? selected.has(d.id) : undefined, onSelect: () => hold(d.id), onToggle: () => tap(d.id) });
+  // All on the reading list already: they come off it; else the others go on.
+  const allReading = picked.length > 0 && picked.every((d) => d.reading);
+  const readingAll = () => {
+    const change = picked.filter((d) => !!d.reading === allReading);
+    for (const d of change) toggleReading(d.id);
+    setNotice(allReading ? t.readingRemovedN(change.length) : t.readingAddedN(change.length));
+    setSelected(null);
+  };
+  const removeAll = async () => {
+    const list = picked;
+    const yes = await ask(
+      list.length === 1
+        ? { title: t.removeTitle, body: t.removeConfirm(list[0].title), confirm: t.remove, destructive: true }
+        : { title: t.removeManyTitle(list.length), body: t.removeManyBody, confirm: t.remove, destructive: true },
+    );
+    if (yes === null) return;
+    for (const d of list) await remove(d.id);
+    setNotice(t.removedN(list.length));
+    setSelected(null);
+  };
+
   return (
     <AppFrame tab="reading">
     <DropZone onFiles={add}>
       <ScrollView
         style={{ flex: 1, backgroundColor: p.canvas }}
-        contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0), alignItems: 'center', flexGrow: 1 }}
+        contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0), alignItems: 'center', flexGrow: 1 }}
       >
         <View style={{ width: contentW, flexGrow: 1 }}>
-          <AppHeader tab="reading">
-            {installKind && (
-              <Button
-                testID="install"
-                kind="quiet"
-                icon="install"
-                label={t.install}
-                onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
-              />
-            )}
-          </AppHeader>
+          {selected ? (
+            <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(recent.map((d) => d.id)))} />
+          ) : (
+            <AppHeader tab="reading">
+              {installKind && (
+                <Button
+                  testID="install"
+                  kind="quiet"
+                  icon="install"
+                  label={t.install}
+                  onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
+                />
+              )}
+            </AppHeader>
+          )}
           {docs.length === 0 ? (
             <EmptyLibrary onAdd={async () => add(await pickPdfs())} onSample={async () => add([await sampleItem()])} />
           ) : (
@@ -142,7 +180,7 @@ export default function Home() {
                       {showFinished && (
                         <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline, marginTop: space.sm }]}>
                           {finished.map((d, i) => (
-                            <Row key={d.id} doc={d} cover={covers[d.id]} first={i === 0} onReading={() => toggleReading(d.id)} onRemove={() => removeDoc(d)} />
+                            <Row key={d.id} doc={d} cover={covers[d.id]} first={i === 0} {...selection(d)} onReading={() => toggleReading(d.id)} onRemove={() => removeDoc(d)} />
                           ))}
                         </View>
                       )}
@@ -173,6 +211,7 @@ export default function Home() {
                       doc={d}
                       cover={covers[d.id]}
                       first={i === 0 && importing.length === 0}
+                      {...selection(d)}
                       onReading={() => toggleReading(d.id)}
                       onRemove={() => removeDoc(d)}
                     />
@@ -192,7 +231,20 @@ export default function Home() {
           </T>
         </Pressable>
       </ScrollView>
-      <Toast message={error ?? hint} onDismiss={() => (error ? clearError() : setHint(null))} above={tabBar ? TAB_BAR_H : 0} />
+      {selected && (
+        <ActionBar bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4}>
+          <Action
+            testID="act-reading"
+            icon={allReading ? 'readingOn' : 'readingAdd'}
+            label={allReading ? t.removeFromReadingList : t.readingList}
+            disabled={!picked.length}
+            onPress={readingAll}
+          />
+          <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void shareDocs(picked).catch(() => {})} />
+          <Action testID="act-remove" icon="trash" label={t.remove} disabled={!picked.length} onPress={() => void removeAll()} />
+        </ActionBar>
+      )}
+      <Toast message={error ?? hint ?? notice} onDismiss={() => (error ? clearError() : hint ? setHint(null) : setNotice(null))} above={tabBar ? TAB_BAR_H : 0} />
     </DropZone>
     </AppFrame>
   );
@@ -260,12 +312,21 @@ function Row({
   doc,
   cover,
   first,
+  selected,
+  onSelect,
+  onToggle,
   onReading,
   onRemove,
 }: {
   doc: DocRecord;
   cover?: string | null;
   first?: boolean;
+  /** Undefined: not selecting. */
+  selected?: boolean;
+  /** A long press (or a right click): starts selecting, or picks one more. */
+  onSelect: () => void;
+  /** A tap while selecting. */
+  onToggle: () => void;
   onReading: () => void;
   onRemove: () => void;
 }) {
@@ -289,13 +350,25 @@ function Row({
     >
       <Pressable
         testID="recent-row"
-        accessibilityRole="button"
+        accessibilityRole={selected === undefined ? 'button' : 'checkbox'}
+        accessibilityState={selected === undefined ? undefined : { checked: selected }}
         accessibilityLabel={doc.title}
         accessibilityHint={t.rowHint}
-        onPress={() => open(doc)}
-        onLongPress={actions}
+        onPress={() => (selected === undefined ? open(doc) : onToggle())}
+        onLongPress={onSelect}
+        delayLongPress={350}
+        // Right-click selects on a computer, like a long press on a phone.
+        {...(Platform.OS === 'web'
+          ? {
+              onContextMenu: (ev: { preventDefault(): void }) => {
+                ev.preventDefault();
+                onSelect();
+              },
+            }
+          : {})}
         style={styles.rowMain}
       >
+        {selected !== undefined && <Check on={selected} />}
         <Cover uri={cover} aspect={doc.coverAspect} width={36} />
         <View style={{ flex: 1, gap: 2 }}>
           <T v="label" numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20 }}>
@@ -310,7 +383,7 @@ function Row({
         </View>
       </Pressable>
       {/* A sibling, not a child: buttons can't nest in the DOM. */}
-      <IconButton testID="row-more" icon="more" label={t.moreFor(doc.title)} size={36} onPress={actions} color={hover ? p.ink : p.muted} />
+      {selected === undefined && <IconButton testID="row-more" icon="more" label={t.moreFor(doc.title)} size={36} onPress={actions} color={hover ? p.ink : p.muted} />}
     </View>
   );
 }

@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
 import { T } from '@/components/primitives';
+import { Check } from '@/components/Selection';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders } from '@/lib/folders';
@@ -44,7 +45,28 @@ export async function openDoc(doc: IndexedDoc, page: number, query: string) {
 }
 
 /** One document found: title, sender, date and place, and the words around the match with its page. */
-export function HitRow({ hit: h, query, first, size, onError }: { hit: Hit; query: string; first: boolean; size?: boolean; onError: (message: string) => void }) {
+export function HitRow({
+  hit: h,
+  query,
+  first,
+  size,
+  selected,
+  onSelect,
+  onToggle,
+  onError,
+}: {
+  hit: Hit;
+  query: string;
+  first: boolean;
+  size?: boolean;
+  /** Undefined: not selecting. */
+  selected?: boolean;
+  /** A long press (or a right click): starts selecting, or picks one more. */
+  onSelect?: () => void;
+  /** A tap while selecting. */
+  onToggle?: () => void;
+  onError: (message: string) => void;
+}) {
   const p = usePalette();
   const where = h.doc.place.kind === 'folder' ? whereIs(h.doc.place) : t.placeDevice;
   const bytes = size && h.doc.size ? `${(h.doc.size / 1_048_576).toFixed(h.doc.size < 10_485_760 ? 1 : 0)} MB` : '';
@@ -52,14 +74,26 @@ export function HitRow({ hit: h, query, first, size, onError }: { hit: Hit; quer
   return (
     <Pressable
       testID="archive-hit"
-      accessibilityRole="button"
-      onPress={() => openDoc(h.doc, h.page, query).catch((e) => onError(e instanceof Error ? e.message : String(e)))}
+      accessibilityRole={selected === undefined ? 'button' : 'checkbox'}
+      accessibilityState={selected === undefined ? undefined : { checked: selected }}
+      onPress={() => (selected !== undefined && onToggle ? onToggle() : openDoc(h.doc, h.page, query).catch((e) => onError(e instanceof Error ? e.message : String(e))))}
+      onLongPress={onSelect}
+      delayLongPress={350}
+      // Right-click selects on a computer, like a long press on a phone.
+      {...(Platform.OS === 'web' && onSelect
+        ? {
+            onContextMenu: (ev: { preventDefault(): void }) => {
+              ev.preventDefault();
+              onSelect();
+            },
+          }
+        : {})}
       style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.row,
         { borderColor: p.hairline, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth, backgroundColor: hovered ? p.hairline : 'transparent' },
       ]}
     >
-      <Icon name="documents" size={20} color={p.muted} />
+      {selected === undefined ? <Icon name="documents" size={20} color={p.muted} /> : <Check on={selected} style={{ marginLeft: -2 }} />}
       <View style={{ flex: 1, gap: 2 }}>
         <T numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
           {h.doc.title || h.doc.name.replace(/\.pdf$/i, '')}

@@ -1,4 +1,4 @@
-import { sendToShell, shell } from '@/lib/shell';
+import { sendToShell, shell, shellRequest } from '@/lib/shell';
 import { repo, type DocRecord } from '@/storage';
 
 export const canDownload = true;
@@ -44,6 +44,26 @@ export async function shareDoc(doc: DocRecord, current?: Current) {
   } else {
     save(file);
   }
+}
+
+/** Several documents in one share sheet (the Android app hands over their files; browsers share them as files). */
+export async function shareDocs(docs: DocRecord[]) {
+  if (docs.length === 1) return shareDoc(docs[0]);
+  if (shell) {
+    const links = await Promise.all(docs.map((d) => repo.linkOf(d.id)));
+    if (links.every(Boolean)) return shellRequest('share', { uris: links });
+  }
+  const files = await Promise.all(docs.map((d) => asFile(d)));
+  if (shell) {
+    // Copies in the app: one at a time.
+    for (const f of files) await sendToShell(f, f.name, 'share');
+    return;
+  }
+  if (navigator.canShare?.({ files })) {
+    await navigator.share({ files }).catch((e: Error) => {
+      if (e.name !== 'AbortError') files.forEach(save);
+    });
+  } else files.forEach(save);
 }
 
 /**

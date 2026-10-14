@@ -1,5 +1,5 @@
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { Cover } from '@/components/Cover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { Action, ActionBar, Check, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, t } from '@/i18n';
@@ -15,9 +16,10 @@ import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/fo
 import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { setArchive } from '@/archive/views';
+import { schedule } from '@/archive/indexer';
 import { cachedThumb, cancelThumbs, thumb, type Thumb } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
-import { useClipboard } from '@/state/clipboard';
+import { clipCount, useClipboard } from '@/state/clipboard';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
@@ -205,9 +207,6 @@ function opError(e: unknown): string {
   return m === t.writeDenied || m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
 }
 
-/** The item a long press selected, and when: its follow-up events (context menu, release) don't toggle it back. */
-let holdAt = { id: '', at: 0 };
-const justSelected = (id: string) => holdAt.id === id && Date.now() - holdAt.at < 800;
 
 type Sort = 'name' | 'date';
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -260,13 +259,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const tileW = Math.floor((width - gap * (cols - 1)) / cols);
 
   const picked = useMemo(() => (selected ? shown.filter((e) => selected.has(e.id)) : []), [selected, shown]);
-  const toggle = (e: FolderEntry) =>
-    setSelected((s) => {
-      const next = new Set(s ?? []);
-      if (next.has(e.id)) next.delete(e.id);
-      else next.add(e.id);
-      return next;
-    });
+  const toggle = (e: FolderEntry) => setSelected((s) => toggled(s, e.id));
 
   /** Runs a file operation; the folder (and any folder below it on the stack) lists itself again. */
   const run = async (op: () => Promise<string | void>) => {
@@ -331,7 +324,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   };
   const share = () => run(() => folders.share(root, picked));
   const clip = (move: boolean) => {
-    setClip({ move, from: here, entries: picked });
+    setClip({ move, items: [{ from: here, entries: picked }] });
     setSelected(null);
   };
 
@@ -356,13 +349,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   return (
     <>
       {selected ? (
-        <View style={styles.selectBar}>
-          <IconButton testID="select-cancel" icon="close" label={t.cancel} onPress={() => setSelected(null)} style={{ marginLeft: -space.sm }} />
-          <T v="headline" style={{ flex: 1, fontSize: 17 }}>
-            {t.selectedCount(selected.size)}
-          </T>
-          <IconButton testID="select-all" icon="select" label={t.selectAll} onPress={() => setSelected(new Set(shown.map((e) => e.id)))} />
-        </View>
+        <SelectBar count={selected.size} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((e) => e.id)))} />
       ) : (
         <ScreenHeader title={name ?? rootName} over={name ? rootName : t.files}>
           {editable && <IconButton testID="new-folder" icon="folderAdd" label={t.newFolder} onPress={newFolder} />}
@@ -399,7 +386,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
               onSelect={() => {
                 // A long press on a phone also fires a context menu (and the release a tap): one gesture, one change.
                 if (justSelected(item.id)) return;
-                holdAt = { id: item.id, at: Date.now() };
+                heldNow(item.id);
                 if (selected) toggle(item);
                 else setSelected(new Set([item.id]));
               }}
@@ -436,18 +423,25 @@ function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | 
   const followFiles = useLibrary((s) => s.followFiles);
   const [busy, setBusy] = useState(false);
   if (!clip) return null;
-  const same = here && here.root === clip.from.root && (here.dir ?? '') === (clip.from.dir ?? '');
+  const count = clipCount(clip);
+  const same = here && clip.items.every(({ from }) => here.root === from.root && (here.dir ?? '') === (from.dir ?? ''));
   // Into itself or below itself: a folder can't be moved or copied inside itself.
-  const inside = here && clip.entries.some((e) => e.kind === 'dir' && here.root === clip.from.root && here.dir != null && (here.dir === e.id || here.dir.startsWith(`${e.id}/`)));
+  const inside =
+    here && clip.items.some(({ from, entries }) => entries.some((e) => e.kind === 'dir' && here.root === from.root && here.dir != null && (here.dir === e.id || here.dir.startsWith(`${e.id}/`))));
   const canPaste = here && !inside && !(clip.move && same);
 
   const paste = async () => {
     if (!here) return;
     setBusy(true);
     try {
-      const moved = await folders.transfer(clip.from, clip.entries, here, clip.move);
-      if (clip.move) await followFiles(moved);
-      onMessage?.(clip.move ? t.movedN(clip.entries.length) : t.copiedN(clip.entries.length));
+      for (const { from, entries } of clip.items) {
+        // Already here: nothing to move.
+        if (clip.move && from.root === here.root && (from.dir ?? '') === (here.dir ?? '')) continue;
+        const moved = await folders.transfer(from, entries, here, clip.move);
+        if (clip.move) await followFiles(moved);
+      }
+      if (clip.move) schedule(1000);
+      onMessage?.(clip.move ? t.movedN(count) : t.copiedN(count));
       setClip(null);
     } catch (e) {
       onError(opError(e));
@@ -461,7 +455,7 @@ function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | 
   return (
     <View testID="paste-bar" style={[styles.bar, styles.pasteBar, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
       <T v="label" color={p.inkSoft} numberOfLines={2} style={{ paddingHorizontal: space.sm }}>
-        {canPaste ? t.selectedCount(clip.entries.length) : t.pickTarget(clip.move)}
+        {canPaste ? t.selectedCount(count) : t.pickTarget(clip.move)}
       </T>
       <View style={styles.pasteButtons}>
         <Button kind="quiet" label={t.cancel} onPress={() => setClip(null)} />
@@ -471,37 +465,6 @@ function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | 
   );
 }
 
-function ActionBar({ bottom, children }: { bottom: number; children: ReactNode }) {
-  const p = usePalette();
-  return (
-    <View testID="action-bar" style={[styles.bar, styles.actions, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
-      {children}
-    </View>
-  );
-}
-
-function Action({ icon, label, disabled, onPress, testID }: { icon: IconName; label: string; disabled?: boolean; onPress: () => void; testID: string }) {
-  const p = usePalette();
-  return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
-        styles.action,
-        { opacity: disabled ? 0.35 : pressed ? 0.6 : 1, backgroundColor: hovered && !disabled ? p.hairline : 'transparent' },
-      ]}
-    >
-      <Icon name={icon} size={22} color={p.ink} />
-      <T v="caption" numberOfLines={1} style={{ fontSize: 11 }}>
-        {label}
-      </T>
-    </Pressable>
-  );
-}
 
 function Tile({
   root,
@@ -578,11 +541,7 @@ function Tile({
           </View>
         )}
         {busy && <ActivityIndicator style={StyleSheet.absoluteFill} color={p.accent} />}
-        {selected !== undefined && (
-          <View pointerEvents="none" style={[styles.check, checkAt, { backgroundColor: selected ? p.accent : p.surface, borderColor: selected ? p.accent : p.muted }, elevation(p.shadow, 1)]}>
-            {selected && <Icon name="check" size={16} color={p.surface} strokeWidth={2.4} />}
-          </View>
-        )}
+        {selected !== undefined && <Check on={selected} style={[styles.check, checkAt]} />}
       </View>
       <T v="caption" numberOfLines={isDir ? 3 : 2} style={[styles.tileName, hyphenate]}>
         {isDir ? entry.name : bareName(entry.name)}
@@ -611,8 +570,7 @@ const styles = StyleSheet.create({
   searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 120, height: 32, outlineStyle: 'none' } as object,
   dirBox: { borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   plain: { borderRadius: radius.cover, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
-  check: { position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  selectBar: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 52, marginBottom: space.lg },
+  check: { position: 'absolute' },
   bar: {
     position: 'absolute',
     left: 0,
@@ -625,8 +583,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  actions: { gap: 0, paddingHorizontal: space.xs, paddingLeft: space.xs },
-  action: { flex: 1, minWidth: 0, alignItems: 'center', gap: 2, paddingVertical: space.xs, paddingHorizontal: 2, borderRadius: radius.md },
   pasteBar: { flexDirection: 'column', alignItems: 'stretch', gap: space.sm, paddingLeft: space.sm },
   pasteButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
 });

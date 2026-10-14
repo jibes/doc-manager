@@ -24,6 +24,11 @@ export async function shareDoc(doc: DocRecord, _current?: Current) {
   await Sharing.shareAsync(await namedCopy(doc), { ...(doc.format === 'epub' ? { mimeType: 'application/epub+zip', UTI: 'org.idpf.epub-container' } : { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' }), dialogTitle: doc.title });
 }
 
+/** One share sheet per document here. */
+export async function shareDocs(docs: DocRecord[]) {
+  for (const d of docs) await shareDoc(d);
+}
+
 export async function downloadDoc(doc: DocRecord, _current?: Current) {
   await shareDoc(doc);
 }

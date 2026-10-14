@@ -104,6 +104,11 @@ export const en = {
   select: 'Select',
   selectAll: 'Select all',
   selectedCount: (n: number) => `${n} selected`,
+  readingAddedN: (n: number) => (n === 1 ? 'Added to the reading list.' : `Added ${n} documents to the reading list.`),
+  readingRemovedN: (n: number) => (n === 1 ? 'Taken off the reading list.' : `Took ${n} documents off the reading list.`),
+  removeManyTitle: (n: number) => `Remove ${n} documents?`,
+  removeManyBody: 'They leave Tessel; the original files stay where they are.',
+  removedN: (n: number) => (n === 1 ? 'Removed from Tessel.' : `Removed ${n} documents from Tessel.`),
   deleteTitle: (n: number) => (n === 1 ? 'Delete this item?' : `Delete ${n} items?`),
   deleteBody: (n: number, name: string) =>
     n === 1 ? `“${name}” will be deleted from this device. This can’t be undone.` : `These ${n} items will be deleted from this device. This can’t be undone.`,

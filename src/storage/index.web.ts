@@ -72,6 +72,10 @@ export const repo: LibraryRepo = {
   async relink(id, uri) {
     await set(id, { kind: 'shell', uri }, files);
   },
+  async linkOf(id) {
+    const stored = await get<unknown>(id, files);
+    return isShellLink(stored) ? stored.uri : undefined;
+  },
   async saveCover(id, cover) {
     await set(id, cover, covers);
   },

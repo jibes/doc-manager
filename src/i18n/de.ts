@@ -84,6 +84,11 @@ export const de: Strings = {
   select: 'Auswählen',
   selectAll: 'Alle auswählen',
   selectedCount: (n) => `${n} ausgewählt`,
+  readingAddedN: (n) => (n === 1 ? 'Zur Leseliste hinzugefügt.' : `${n} Dokumente zur Leseliste hinzugefügt.`),
+  readingRemovedN: (n) => (n === 1 ? 'Von der Leseliste genommen.' : `${n} Dokumente von der Leseliste genommen.`),
+  removeManyTitle: (n) => `${n} Dokumente entfernen?`,
+  removeManyBody: 'Sie verlassen Tessel; die Originaldateien bleiben, wo sie sind.',
+  removedN: (n) => (n === 1 ? 'Aus Tessel entfernt.' : `${n} Dokumente aus Tessel entfernt.`),
   deleteTitle: (n) => (n === 1 ? 'Dieses Element löschen?' : `${n} Elemente löschen?`),
   deleteBody: (n, name) =>
     n === 1
