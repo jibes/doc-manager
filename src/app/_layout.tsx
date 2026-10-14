@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ActionSheet } from '@/components/ActionSheet';
 import { AskDialog } from '@/components/AskDialog';
 import { PasswordDialog } from '@/components/PasswordDialog';
+import { ShellOpen } from '@/components/ShellOpen';
 import { shell } from '@/lib/shell';
 import { useAmbientLight } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -75,6 +76,7 @@ export default function RootLayout() {
           animation: 'fade_from_bottom',
         }}
       />
+      <ShellOpen />
       <PasswordDialog />
       <ActionSheet />
       <AskDialog />

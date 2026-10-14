@@ -5,7 +5,6 @@ import { t } from '@/i18n';
 import { fonts, radius } from '@/design/tokens';
 import { isFileHandle, type FileHandle } from '@/lib/fsa';
 import { itemsFromFiles, itemsFromHandles } from '@/lib/pick';
-import { SHELL_OPEN_EVENT, shell, takeShellFiles } from '@/lib/shell';
 import type { ImportItem } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { T } from './primitives';
@@ -13,7 +12,7 @@ import { T } from './primitives';
 type LaunchQueue = { setConsumer(fn: (p: { files: FileHandle[] }) => void): void };
 type HandleItem = DataTransferItem & { getAsFileSystemHandle?: () => Promise<unknown> };
 
-/** Window-wide PDF drop target, plus OS "Open with" via the File Handling API. */
+/** Window-wide PDF drop target, plus OS "Open with" via the File Handling API (the Android app's: ShellOpen). */
 export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: (items: ImportItem[]) => void }) {
   const p = usePalette();
   const [over, setOver] = useState(false);
@@ -57,18 +56,8 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
       const items = await itemsFromHandles(files);
       if (items.length) cb.current(items);
     });
-    // Android app: files opened or shared from other apps.
-    const fromShell = () =>
-      void takeShellFiles().then((files) => {
-        const items = itemsFromFiles(files);
-        if (items.length) cb.current(items);
-      });
-    if (shell) {
-      window.addEventListener(SHELL_OPEN_EVENT, fromShell);
-      fromShell();
-    }
+    // Files from other apps in the Android app: see ShellOpen.
     return () => {
-      window.removeEventListener(SHELL_OPEN_EVENT, fromShell);
       window.removeEventListener('dragenter', enter);
       window.removeEventListener('dragleave', leave);
       window.removeEventListener('dragover', overFn);

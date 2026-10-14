@@ -14,7 +14,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
-import { shell } from '@/lib/shell';
+import { openedWithFiles, shell } from '@/lib/shell';
 import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { useLibrary, type ImportItem } from '@/state/library';
@@ -56,10 +56,10 @@ export default function Home() {
   const { kind: installKind, install } = useInstall();
   const tabBar = useTabBar();
 
-  // The app opens where it was last used; from then on this is the place last used.
+  // The app opens where it was last used (unless it was opened with a document); from then on this is the place last used.
   useEffect(() => {
     const { lastTab, set } = usePrefs.getState();
-    if (!launched && lastTab === 'documents' && launchedAsApp()) router.replace('/documents');
+    if (!launched && !openedWithFiles && lastTab === 'documents' && launchedAsApp()) router.replace('/documents');
     else set({ lastTab: 'reading' });
     launched = true;
   }, []);

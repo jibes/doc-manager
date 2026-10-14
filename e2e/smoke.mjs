@@ -740,6 +740,17 @@ async function shellBridge() {
       request: (id, method) =>
         setTimeout(() => window.dispatchEvent(new CustomEvent('tessel-shell-reply', { detail: { id, ok: true, value: method === 'folders' ? [] : { allFiles: false } } })), 10),
     };
+    // Whether the home screen was ever there to see (not under the cover) before the reader.
+    window.__homeSeen = false;
+    new MutationObserver(() => {
+      if (window.__homeSeen || document.querySelector('[data-testid="reader"]')) return;
+      for (const el of document.querySelectorAll('[data-testid="tab-reading"], [data-testid="sample"], [data-testid="add"]')) {
+        const r = el.getBoundingClientRect();
+        if (!r.width) continue;
+        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        if (top && el.contains(top)) window.__homeSeen = true;
+      }
+    }).observe(document, { childList: true, subtree: true, attributes: true });
   });
   const pdf = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url));
   await ctx.route('**/__shell/file/one', (r) => r.fulfill({ body: pdf, contentType: 'application/pdf' }));
@@ -750,6 +761,7 @@ async function shellBridge() {
     () => check(true, 'shell: a file opened from another app is added and opened'),
     () => check(false, 'shell: a file opened from another app is added and opened'),
   );
+  check(!(await page.evaluate(() => window.__homeSeen)), 'shell: the home screen does not flash by before it opens');
   await page.waitForTimeout(500);
   await page.getByTestId('open-more').click();
   await page.getByText('Share', { exact: true }).click();

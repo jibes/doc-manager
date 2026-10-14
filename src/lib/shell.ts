@@ -19,10 +19,20 @@ export const shell: ShellApi | undefined = typeof window !== 'undefined' ? (wind
 /** Fired by the shell when files arrive from "Open with" or "Share". */
 export const SHELL_OPEN_EVENT = 'tessel-shell-open';
 
-/** Files handed over by the shell since the last call. */
-export async function takeShellFiles(): Promise<File[]> {
-  if (!shell) return [];
-  const list = JSON.parse(shell.pending()) as { url: string; name: string; type: string }[];
+export type ShellFile = { url: string; name: string; type: string };
+
+/** Files handed over by the shell since the last call (claimed: the next call won't list them again). */
+export const claimShellFiles = (): ShellFile[] => (shell ? (JSON.parse(shell.pending()) as ShellFile[]) : []);
+
+/**
+ * The files the app was started with, claimed as it loads: the first screen knows a document is about to
+ * open, so nothing else shows first.
+ */
+export const launchFiles: ShellFile[] = claimShellFiles();
+export const openedWithFiles = launchFiles.length > 0;
+
+/** The files' contents. */
+export async function fetchShellFiles(list: ShellFile[]): Promise<File[]> {
   const files = await Promise.all(
     list.map(async (f) => {
       const blob = await (await fetch(f.url)).blob();
