@@ -1771,14 +1771,19 @@ async function inbox() {
   await card('scan-1.pdf').waitFor({ timeout: 20000 });
   await card('notes.pdf').waitFor({ timeout: 20000 });
   check((await card('scan-1.pdf').getByTestId('inbox-title').inputValue()) === 'Old title', 'inbox: a document keeps its own title');
+  await card('scan-1.pdf').locator('[data-testid="inbox-preview"] img').first().waitFor({ timeout: 20000 });
+  check(true, 'inbox: each card shows its first page');
 
-  // A rule: its words in the text give the sender, type and tags.
+  // A rule (on its own screen): its words in the text give the sender, type and tags.
+  await vis('inbox-rules').click();
   await vis('rule-match').fill('stream cross-reference');
   await vis('rule-sender').fill('Stream Co');
   await vis('rule-type').fill('Letter');
   await vis('rule-tags').fill('Test, Demo');
   await vis('rule-add').click();
   await page.getByTestId('rule').first().waitFor();
+  await vis('screen-back').click();
+  check(/Rules · 1/.test(await vis('inbox-rules').innerText()), 'inbox: the Rules button counts the rules');
   const sender = await card('scan-1.pdf').getByTestId('inbox-sender').inputValue();
   const other = await card('notes.pdf').getByTestId('inbox-sender').inputValue();
   check(sender === 'Stream Co' && other !== 'Stream Co', `inbox: a rule fills in the documents it matches (${sender} / ${other})`);
@@ -1860,9 +1865,12 @@ async function searchable() {
   await card.getByTestId('inbox-no-text').waitFor({ timeout: 120000 });
   check(true, 'inbox: an image-only document is marked to be made searchable');
   // A rule matches words that are only in the picture.
+  await vis('inbox-rules').click();
   await vis('rule-match').fill('quick brown fox');
   await vis('rule-sender').fill('Fox Ltd');
   await vis('rule-add').click();
+  await page.getByTestId('rule').first().waitFor();
+  await vis('screen-back').click();
   await page.waitForTimeout(300);
   check(
     (await card.getByTestId('inbox-sender').inputValue()) === 'Fox Ltd' && (await card.getByTestId('inbox-title').inputValue()) === 'letter',

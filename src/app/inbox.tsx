@@ -1,14 +1,14 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { changeRules, destination, fileDocument, inboxFiles, loadRules, propose, suggest, useRules, withRules, type Proposal } from '@/archive/inbox';
+import { destination, fileDocument, inboxFiles, loadRules, propose, suggest, useRules, withRules, type Proposal } from '@/archive/inbox';
 import type { Details } from '@/archive/pdfInfo';
 import { openDoc } from '@/archive/Results';
 import { discard } from '@/archive/trash';
-import type { Rule } from '@/archive/rules';
-import { Icon } from '@/components/Icon';
+import { Thumbnail } from '@/components/DocItems';
+import { Field } from '@/components/Field';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
@@ -127,6 +127,7 @@ export default function Inbox() {
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
           <ScreenHeader title={t.inboxTitle}>
+            {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push('/rules')} />}
             {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} onPress={() => void fileAll()} />}
           </ScreenHeader>
 
@@ -153,6 +154,7 @@ export default function Inbox() {
                   <Card
                     key={item.entry.id}
                     item={item}
+                    archive={archive}
                     edits={edits[item.entry.id] ?? {}}
                     onEdit={(e) => setEdits((all) => ({ ...all, [item.entry.id]: { ...all[item.entry.id], ...e } }))}
                     path={pathOf(item)}
@@ -171,7 +173,6 @@ export default function Inbox() {
                   />
                 ))}
               </View>
-              <RulesEditor archive={archive} onError={(e) => setNotice(message(e))} />
             </>
           )}
         </View>
@@ -196,27 +197,9 @@ async function readInbox(archive: string, onProgress: (r: { done: number; total:
 
 const blank = (name: string): Details => ({ title: name.replace(/\.pdf$/i, ''), sender: '', type: '', tags: [], date: '' });
 
-function Field({ label, value, onChange, testID, placeholder, error }: { label: string; value: string; onChange: (v: string) => void; testID: string; placeholder?: string; error?: boolean }) {
-  const p = usePalette();
-  return (
-    <View style={{ flex: 1, minWidth: 140, gap: 2 }}>
-      <T v="caption" color={error ? p.markRing : p.muted}>
-        {label}
-      </T>
-      <TextInput
-        testID={testID}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={p.muted}
-        style={[styles.input, { color: p.ink, borderColor: error ? p.markRing : p.hairline }]}
-      />
-    </View>
-  );
-}
-
 function Card(props: {
   item: Proposal;
+  archive: string;
   edits: Edits;
   onEdit: (e: Edits) => void;
   path: string[];
@@ -234,8 +217,10 @@ function Card(props: {
   return (
     <View testID="inbox-item" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
       <View style={styles.cardHead}>
-        <Icon name="documents" size={20} color={p.muted} />
-        <T numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+        <Pressable testID="inbox-preview" accessibilityRole="button" accessibilityLabel={t.inboxOpen} onPress={props.onOpen}>
+          <Thumbnail picture={{ kind: 'file', root: props.archive, entry: item.entry }} width={56} />
+        </Pressable>
+        <T numberOfLines={2} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
           {item.entry.name}
         </T>
         <IconButton icon="chevronRight" size={34} label={t.inboxOpen} onPress={props.onOpen} />
@@ -273,76 +258,10 @@ function Card(props: {
   );
 }
 
-/** The template and the rules, kept in the archive. */
-function RulesEditor({ archive, onError }: { archive: string; onError: (e: unknown) => void }) {
-  const p = usePalette();
-  const rules = useRules();
-  const [template, setTemplate] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ match: '', sender: '', type: '', tags: '' });
-  const saveTemplate = () => {
-    if (template === null || template.trim() === rules.template) return;
-    changeRules(archive, (r) => ({ ...r, template: template.trim() || r.template })).then(() => setTemplate(null), onError);
-  };
-  const add = () => {
-    if (!draft.match.trim()) return;
-    const rule: Rule = { id: `r-${Date.now().toString(36)}`, match: draft.match.trim(), sender: draft.sender.trim(), type: draft.type.trim(), tags: tagsOf(draft.tags) };
-    changeRules(archive, (r) => ({ ...r, rules: [...r.rules, rule] })).then(() => setDraft({ match: '', sender: '', type: '', tags: '' }), onError);
-  };
-  const remove = (id: string) => changeRules(archive, (r) => ({ ...r, rules: r.rules.filter((x) => x.id !== id) })).catch(onError);
-  return (
-    <View style={{ marginTop: space.xxl, gap: space.sm }}>
-      <T v="kicker" color={p.muted}>
-        {t.rulesTitle}
-      </T>
-      <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-        <Field label={t.rulesTemplate} value={template ?? rules.template} onChange={setTemplate} testID="rules-template" />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <T v="caption" color={p.muted} style={{ flex: 1 }}>
-            {t.rulesTemplateNote}
-          </T>
-          {template !== null && template.trim() !== rules.template && <Button testID="rules-template-save" kind="quiet" label={t.save} onPress={saveTemplate} />}
-        </View>
-      </View>
-      {rules.rules.length > 0 && (
-        <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-          {rules.rules.map((r, i) => (
-            <View key={r.id} testID="rule" style={[styles.ruleRow, { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0 }]}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <T style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>{t.ruleSummary(r.match)}</T>
-                <T v="caption" color={p.muted}>
-                  → {[r.sender, r.type, ...r.tags.map((x) => `#${x}`)].filter(Boolean).join(' · ')}
-                </T>
-              </View>
-              <IconButton testID="rule-remove" icon="trash" size={34} label={t.ruleRemove} onPress={() => void remove(r.id)} />
-            </View>
-          ))}
-        </View>
-      )}
-      <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-        <Field label={t.ruleWhen} value={draft.match} onChange={(match) => setDraft({ ...draft, match })} testID="rule-match" placeholder="Nordkorn, Haferflocken" />
-        <View style={styles.fields}>
-          <Field label={t.detailSender} value={draft.sender} onChange={(sender) => setDraft({ ...draft, sender })} testID="rule-sender" />
-          <Field label={t.detailType} value={draft.type} onChange={(type) => setDraft({ ...draft, type })} testID="rule-type" />
-        </View>
-        <Field label={t.detailTags} value={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} testID="rule-tags" placeholder={t.inboxTags} />
-        <View style={styles.actions}>
-          <Button testID="rule-add" kind="quiet" icon="plus" label={t.ruleAdd} onPress={add} disabled={!draft.match.trim()} />
-        </View>
-      </View>
-      <T v="caption" color={p.muted}>
-        {t.rulesNote}
-      </T>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: space.lg, gap: space.md },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginRight: -space.sm },
   fields: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
-  input: { fontFamily: fonts.sans, fontSize: 15, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
   duplicate: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' },
-  list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  ruleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingLeft: space.lg, paddingRight: space.sm, paddingVertical: space.sm },
 });

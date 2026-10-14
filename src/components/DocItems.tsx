@@ -226,6 +226,13 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, sele
   );
 }
 
+/** A document's picture on its own, `width` wide. */
+export function Thumbnail({ picture, width }: { picture: Picture; width: number }) {
+  const image = usePicture(picture);
+  if (image) return <Cover uri={image.uri} aspect={image.aspect} width={width} />;
+  return <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={width} label={picture.kind === 'file' && picture.entry.kind === 'epub' ? 'EPUB' : 'PDF'} small={width < 48} />;
+}
+
 /** A document without a picture (yet, or at all). */
 function Plain({ testID, width, label, small }: { testID: string; width: number; label: string; small?: boolean }) {
   const p = usePalette();
