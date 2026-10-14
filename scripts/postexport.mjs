@@ -16,6 +16,7 @@ const html = readFileSync(file, 'utf8')
   .replaceAll('href="/manifest.webmanifest"', `href="${base}/manifest.webmanifest"`)
   .replaceAll('href="/icons/', `href="${base}/icons/`)
   .replaceAll("register('/sw.js')", `register('${base}/sw.js')`)
+  .replace("var base = '';", `var base = '${base}';`)
   .replace('</head>', `${fonts}</head>`);
 writeFileSync(file, html);
 copyFileSync(file, `${out}/404.html`);

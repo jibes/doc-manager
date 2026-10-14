@@ -37,14 +37,16 @@
       (function () {
         var shell = window.TesselShell;
         if (!shell) return;
+        // Where the app is served (set by scripts/postexport.mjs; the Android app serves it at the root).
+        var base = '';
         try {
           var list = JSON.parse(shell.pending());
           if (!list.length) return;
           // A bare first screen: no other screen is built before the document's.
-          history.replaceState(null, '', '/opening');
+          history.replaceState(null, '', base + '/opening');
           window.__tesselLaunch = {
             list: list,
-            worker: new Worker('/engine/pdfium-worker.js', { type: 'module' }),
+            worker: new Worker(base + '/engine/pdfium-worker.js', { type: 'module' }),
             files: Promise.all(list.map(function (f) {
               return fetch(f.url).then(function (r) { return r.blob(); }).then(function (b) { return new File([b], f.name, { type: f.type || b.type }); });
             })),

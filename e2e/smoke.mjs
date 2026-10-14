@@ -728,9 +728,14 @@ async function books() {
 async function shellBridge() {
   const ctx = await newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) TesselShell/1.0' });
   await ctx.addInitScript(() => {
-    const log = (window.__shell = { pending: [{ url: '/__shell/file/one', name: 'columns.pdf', type: 'application/pdf' }], calls: [], bytes: 0 });
+    // Handed over once, as the app does (not again on every page load).
+    const handed = sessionStorage.getItem('handed');
+    const log = (window.__shell = { pending: handed ? [] : [{ url: '/__shell/file/one', name: 'columns.pdf', type: 'application/pdf' }], calls: [], bytes: 0 });
     window.TesselShell = {
-      pending: () => JSON.stringify(log.pending.splice(0)),
+      pending: () => {
+        if (log.pending.length) sessionStorage.setItem('handed', '1');
+        return JSON.stringify(log.pending.splice(0));
+      },
       begin: (name, mime) => (log.calls.push(['begin', name, mime]), 't1'),
       append: (_t, b64) => void (log.bytes += atob(b64).length),
       finish: (_t, action) => void log.calls.push(['finish', action]),
@@ -773,7 +778,7 @@ async function shellBridge() {
   check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
   // Shown before it was stored: it is in the library after a restart all the same.
   await page.goto(BASE);
-  const kept = await page.getByText('Orderly Notes').first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  const kept = await page.getByTestId('recent-row').filter({ hasText: 'Orderly Notes' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
   check(kept, 'shell: the opened file is kept in the library');
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
