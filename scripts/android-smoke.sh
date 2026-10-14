@@ -106,6 +106,9 @@ tap "Folders"
 wait_for "Add folder"
 tap "Settings"
 wait_for "Show every document on this device"
+# Below the folders on a small screen: scroll it into view first.
+adb shell input swipe 160 520 160 120 300
+sleep 1
 tap "Show every document on this device"
 sleep 2
 adb shell input keyevent KEYCODE_BACK
