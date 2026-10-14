@@ -2017,6 +2017,9 @@ async function sharedReading() {
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-reading').click();
   await vis('bookmark').click();
+  // Saved before the page goes away (a reload right after the tap can lose it).
+  await page.waitForFunction(() => document.querySelector('[data-testid=bookmark][aria-pressed=true]'), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(1000);
   await page.goto(BASE);
   const states = () =>
     page.evaluate(async () => {

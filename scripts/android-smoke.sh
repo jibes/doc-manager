@@ -188,7 +188,8 @@ echo "--- Auto appearance: listening to the light sensor ---"
 # saved to the library and opened.
 for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
 adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
-wait_for "RECENT"
+# The app opens where it was last used (Reading or Documents): Scan is in the bar on both.
+wait_for "Scan"
 tap "Scan"
 wait_for "While using the app|Only this time|Allow"
 tap "While using the app" || tap "Allow"
