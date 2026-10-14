@@ -6,7 +6,8 @@ APK="$1"
 OUT="${2:-android-smoke}"
 mkdir -p "$OUT"
 
-ui() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true; adb shell cat /sdcard/ui.xml 2>/dev/null || true; }
+# A failed dump must not leave the last screen's file behind to be read as this one.
+ui() { adb shell rm -f /sdcard/ui.xml; adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true; adb shell cat /sdcard/ui.xml 2>/dev/null || true; }
 # Waits until the screen shows a text (or content description) matching $1.
 wait_for() {
   for _ in $(seq 1 30); do
@@ -41,8 +42,8 @@ screen() { ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"'; }
 # Taps the centre of the first node whose text or description matches $1.
 tap() {
   local b
-  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | head -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ')
-  [ -n "$b" ] || { echo "Nothing to tap for: $1"; return 1; }
+  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | head -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ' || true)
+  [ -n "$b" ] || { echo "Nothing to tap for: $1"; screen | head -40; return 1; }
   set -- $b
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
@@ -56,8 +57,8 @@ on_device() {
 # Taps the last match instead (a dialog's button over the screen's own).
 tap_last() {
   local b
-  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | tail -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ')
-  [ -n "$b" ] || { echo "Nothing to tap for: $1"; return 1; }
+  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | tail -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ' || true)
+  [ -n "$b" ] || { echo "Nothing to tap for: $1"; screen | head -40; return 1; }
   set -- $b
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
