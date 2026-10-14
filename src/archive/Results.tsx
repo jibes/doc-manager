@@ -8,6 +8,7 @@ import { t } from '@/i18n';
 import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
+import { docDate } from './facets';
 import type { Hit, IndexedDoc, Place } from './search';
 
 /** A file of a folder in the library (opened in place where it can be). */
@@ -15,6 +16,22 @@ export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>
   const file = await folders.read(place.root, place.entry);
   const [added] = await useLibrary.getState().importFiles([{ name: place.entry.name, size: place.entry.size || file.size, file, handle: place.entry.handle, link: place.entry.uri }]);
   return added;
+}
+
+/** The folders a file is in, for people: "Archive / 2024 / Arzt" (just the place where its folders can't be told). */
+export function whereIs(place: Extract<Place, { kind: 'folder' }>): string {
+  if (place.entry.where) return place.entry.where === '/' ? place.rootName : place.entry.where.split('/').join(' / ');
+  let dir = place.dir ?? '';
+  // Android folders: IDs such as "primary:Sync/Archive/2024" below the picked "primary:Sync/Archive".
+  const tree = /\/tree\/([^/]+)/.exec(place.root);
+  const top = tree ? decodeURIComponent(tree[1]) : '';
+  if (top && dir.startsWith(`${top}/`)) dir = dir.slice(top.length + 1);
+  else if (dir.startsWith('/')) {
+    // A path on the device: what is below the place's own folder.
+    const at = dir.lastIndexOf(`/${place.rootName}/`);
+    dir = at >= 0 ? dir.slice(at + place.rootName.length + 2) : '';
+  } else if (dir.includes(':')) dir = '';
+  return [place.rootName, ...dir.split('/').filter(Boolean)].join(' / ');
 }
 
 /** Opens a document at a page, with the query highlighted: a library document directly, a folder file via the library. */
@@ -27,9 +44,11 @@ export async function openDoc(doc: IndexedDoc, page: number, query: string) {
 }
 
 /** One document found: title, sender, date and place, and the words around the match with its page. */
-export function HitRow({ hit: h, query, first, onError }: { hit: Hit; query: string; first: boolean; onError: (message: string) => void }) {
+export function HitRow({ hit: h, query, first, size, onError }: { hit: Hit; query: string; first: boolean; size?: boolean; onError: (message: string) => void }) {
   const p = usePalette();
-  const meta = [h.doc.sender, h.doc.date, h.doc.place.kind === 'folder' ? h.doc.place.rootName : t.placeDevice].filter(Boolean).join(' · ');
+  const where = h.doc.place.kind === 'folder' ? whereIs(h.doc.place) : t.placeDevice;
+  const bytes = size && h.doc.size ? `${(h.doc.size / 1_048_576).toFixed(h.doc.size < 10_485_760 ? 1 : 0)} MB` : '';
+  const meta = [h.doc.sender, docDate(h.doc), bytes, where].filter(Boolean).join(' · ');
   return (
     <Pressable
       testID="archive-hit"

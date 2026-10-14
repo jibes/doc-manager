@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { allDocs, schedule, useIndex, type Conflict } from '@/archive/indexer';
-import { openDoc } from '@/archive/Results';
+import { openDoc, whereIs } from '@/archive/Results';
 import type { IndexedDoc } from '@/archive/search';
 import { duplicates } from '@/archive/sync';
 import { discard } from '@/archive/trash';
@@ -15,9 +15,11 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
-import { usePalette } from '@/state/prefs';
+import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 820;
+/** Groups shown at first, and added by "Show more". */
+const PAGE = 20;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const when = (ms: number) => (ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
 const kb = (n: number) => `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -28,7 +30,7 @@ type Pair = { conflict: Conflict; original: FolderEntry | null };
 /** Opens a file of a folder (through the library, as search hits do). */
 const open = (root: string, rootName: string, entry: FolderEntry) =>
   openDoc(
-    { key: entry.id, place: { kind: 'folder', root, rootName, entry }, name: entry.name, size: entry.size, modified: entry.modified, title: '', sender: '', type: '', tags: [], date: '', pages: [] },
+    { key: entry.id, place: { kind: 'folder', root, rootName, entry }, name: entry.name, size: entry.size, modified: entry.modified, title: '', sender: '', type: '', tags: [], date: '' },
     0,
     '',
   );
@@ -43,6 +45,8 @@ export default function Sync() {
   const [groups, setGroups] = useState<IndexedDoc[][]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  const [limit, setLimit] = useState(PAGE);
+  const archive = usePrefs((s) => s.archive);
 
   useEffect(() => {
     let alive = true;
@@ -52,11 +56,11 @@ export default function Sync() {
         return { conflict: c, original: here.find((e) => e.name === c.name.original) ?? null };
       }),
     ).then((list) => alive && setPairs(list));
-    allDocs().then((docs) => alive && setGroups(duplicates(docs)));
+    allDocs().then((docs) => alive && setGroups(duplicates(docs, archive)));
     return () => {
       alive = false;
     };
-  }, [conflicts, done, round]);
+  }, [conflicts, done, round, archive]);
 
   const act = async (op: () => Promise<unknown>, after: () => void) => {
     try {
@@ -108,7 +112,7 @@ export default function Sync() {
               </T>
               {shownPairs.map((pair) => (
                 <View key={pair.conflict.entry.id} testID="sync-conflict" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                  <T style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>{pair.conflict.name.original}</T>
+                  <T style={styles.title}>{pair.conflict.name.original}</T>
                   {pair.original ? (
                     <Version
                       label={t.syncThisVersion}
@@ -147,14 +151,15 @@ export default function Sync() {
               <T v="caption" color={p.muted}>
                 {t.syncDuplicatesNote}
               </T>
-              {groups.map((group) => (
+              {groups.slice(0, limit).map((group) => (
                 <View key={group[0].hash} testID="sync-duplicate" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                  <T style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>{group[0].title || group[0].name}</T>
+                  <T style={styles.title}>{group[0].title || group[0].name}</T>
                   {group.map((d) =>
                     d.place.kind === 'folder' ? (
                       <Version
                         key={d.key}
-                        label={`${d.place.rootName} · ${d.name}`}
+                        label={d.name}
+                        where={whereIs(d.place)}
                         entry={d.place.entry}
                         onOpen={() => void openDoc(d, 0, '').catch((e) => setNotice(message(e)))}
                         onKeep={() => void keepOne(group, d)}
@@ -164,6 +169,11 @@ export default function Sync() {
                   )}
                 </View>
               ))}
+              {groups.length > limit && (
+                <View style={{ flexDirection: 'row' }}>
+                  <Button kind="quiet" label={t.showMore} onPress={() => setLimit(limit + PAGE)} />
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -173,26 +183,40 @@ export default function Sync() {
   );
 }
 
-function Version({ label, entry, onOpen, onKeep, testID }: { label: string; entry: FolderEntry; onOpen: () => void; onKeep: () => void; testID: string }) {
+/** One copy: what and where it is, when it changed and how big it is, then what can be done with it. */
+function Version({ label, where, entry, onOpen, onKeep, testID }: { label: string; where?: string; entry: FolderEntry; onOpen: () => void; onKeep: () => void; testID: string }) {
   const p = usePalette();
   return (
     <View style={[styles.version, { borderColor: p.hairline }]}>
-      <Icon name="documents" size={20} color={p.muted} />
-      <View style={{ flex: 1, gap: 2 }}>
-        <T v="label" numberOfLines={2}>
-          {label}
-        </T>
-        <T v="caption" color={p.muted}>
-          {[when(entry.modified), entry.size ? kb(entry.size) : ''].filter(Boolean).join(' · ')}
-        </T>
+      <View style={styles.what}>
+        <Icon name={where ? 'folder' : 'documents'} size={18} color={p.muted} />
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          {!!where && (
+            <T v="label" style={{ fontFamily: fonts.sansMedium }}>
+              {where}
+            </T>
+          )}
+          <T v={where ? 'caption' : 'label'} color={where ? p.inkSoft : p.ink} numberOfLines={2}>
+            {label}
+          </T>
+          <T v="caption" color={p.muted}>
+            {[when(entry.modified), entry.size ? kb(entry.size) : ''].filter(Boolean).join(' · ')}
+          </T>
+        </View>
       </View>
-      <Button kind="quiet" label={t.inboxOpen} onPress={onOpen} />
-      <Button testID={testID} label={t.syncKeep} onPress={onKeep} />
+      <View style={styles.actions}>
+        <Button kind="quiet" label={t.inboxOpen} onPress={onOpen} />
+        <Button testID={testID} label={t.syncKeep} onPress={onKeep} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: space.lg, gap: space.md },
-  version: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: space.md },
+  title: { fontFamily: fonts.sansMedium, fontSize: 15 },
+  // Wide enough, the actions sit beside what they act on; on a phone, under it.
+  version: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: space.md },
+  what: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md, flexGrow: 1, flexBasis: 280, minWidth: 0 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: space.sm, flexGrow: 1 },
 });

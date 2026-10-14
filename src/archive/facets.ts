@@ -2,7 +2,9 @@ import type { IndexedDoc } from './search';
 
 /** What the Documents screen narrows by: one value per kind (any for the others), and how it sorts. */
 export type Filter = { tag?: string; sender?: string; type?: string; year?: string };
-export type Sort = 'date' | 'name';
+/** Newest or oldest by the document's date, by name, or largest first; search results also by how well they match. */
+export type Sort = 'date' | 'oldest' | 'name' | 'size';
+export const SORTS: Sort[] = ['date', 'oldest', 'name', 'size'];
 export type Facet = keyof Filter;
 export const FACETS: Facet[] = ['tag', 'sender', 'type', 'year'];
 
@@ -62,10 +64,24 @@ export function facetCounts(docs: IndexedDoc[], filter: Filter): Record<Facet, {
 
 const titleOf = (d: IndexedDoc) => d.title || d.name.replace(/\.pdf$/i, '');
 
-export function sortDocs(docs: IndexedDoc[], sort: Sort): IndexedDoc[] {
-  return [...docs].sort((a, b) =>
-    sort === 'name' ? titleOf(a).localeCompare(titleOf(b), undefined, { numeric: true }) : docDate(b).localeCompare(docDate(a)) || titleOf(a).localeCompare(titleOf(b)),
-  );
+const byName = (a: IndexedDoc, b: IndexedDoc) => titleOf(a).localeCompare(titleOf(b), undefined, { numeric: true });
+
+export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc): T[];
+export function sortDocs(items: IndexedDoc[], sort: Sort): IndexedDoc[];
+export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc = (x) => x as unknown as IndexedDoc): T[] {
+  const compare = (a: IndexedDoc, b: IndexedDoc): number => {
+    switch (sort) {
+      case 'name':
+        return byName(a, b);
+      case 'size':
+        return b.size - a.size || byName(a, b);
+      case 'oldest':
+        return docDate(a).localeCompare(docDate(b)) || byName(a, b);
+      case 'date':
+        return docDate(b).localeCompare(docDate(a)) || byName(a, b);
+    }
+  };
+  return [...items].sort((a, b) => compare(docOf(a), docOf(b)));
 }
 
 /** A named filter, kept with the archive so every device has it. */
@@ -83,7 +99,7 @@ export function parseViews(json: string): SavedView[] {
         name: v.name,
         query: typeof v.query === 'string' ? v.query : '',
         filter: Object.fromEntries(FACETS.filter((f) => typeof v.filter?.[f] === 'string').map((f) => [f, v.filter[f]])) as Filter,
-        sort: v.sort === 'name' ? 'name' : 'date',
+        sort: SORTS.includes(v.sort) ? v.sort : 'date',
       }));
   } catch {
     return [];

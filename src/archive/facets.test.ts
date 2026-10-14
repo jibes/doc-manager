@@ -14,7 +14,6 @@ const doc = (key: string, over: Partial<IndexedDoc>): IndexedDoc => ({
   type: '',
   tags: [],
   date: '',
-  pages: [],
   ...over,
 });
 
@@ -50,16 +49,22 @@ describe('filters', () => {
     expect(steuer.tag.map((s) => s.value)).toEqual(['Steuer', 'Strom']);
   });
 
-  it('sorts newest first or by name', () => {
+  it('sorts by date either way, by name or by size', () => {
     expect(sortDocs(docs, 'date').map((d) => d.key)).toEqual(['energie', 'korn', 'old', 'wheel']);
+    expect(sortDocs(docs, 'oldest').map((d) => d.key)).toEqual(['wheel', 'old', 'korn', 'energie']);
     expect(sortDocs(docs, 'name').map((d) => d.key)).toEqual(['energie', 'korn', 'wheel', 'old']);
+    const sized = docs.map((d, i) => ({ ...d, size: [5, 50, 5, 1][i] }));
+    expect(sortDocs(sized, 'size').map((d) => d.key)).toEqual(['korn', 'energie', 'wheel', 'old']);
+    // Anything holding a document sorts by it.
+    expect(sortDocs(docs.map((doc) => ({ doc })), 'oldest', (h) => h.doc)[0].doc.key).toBe('wheel');
   });
 
   it('stores views as JSON and drops what it cannot read', () => {
     const views: SavedView[] = [{ id: 'v1', name: 'Steuer 2026', query: '', filter: { tag: 'Steuer', year: '2026' }, sort: 'date' }];
     expect(parseViews(serializeViews(views))).toEqual(views);
-    expect(parseViews('{"views":[{"id":"x"},{"id":"y","name":"Y","filter":{"tag":3,"type":"Brief"},"sort":"weird"}]}')).toEqual([
+    expect(parseViews('{"views":[{"id":"x"},{"id":"y","name":"Y","filter":{"tag":3,"type":"Brief"},"sort":"weird"},{"id":"z","name":"Z","sort":"size"}]}')).toEqual([
       { id: 'y', name: 'Y', query: '', filter: { type: 'Brief' }, sort: 'date' },
+      { id: 'z', name: 'Z', query: '', filter: {}, sort: 'size' },
     ]);
     expect(parseViews('not json')).toEqual([]);
   });

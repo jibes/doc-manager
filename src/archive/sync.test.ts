@@ -14,7 +14,6 @@ const doc = (key: string, over: Partial<IndexedDoc>): IndexedDoc => ({
   type: '',
   tags: [],
   date: '',
-  pages: [],
   ...over,
 });
 
@@ -34,9 +33,12 @@ describe('sync conflicts', () => {
 });
 
 describe('duplicates', () => {
-  it('group folder documents with the same content, oldest first', () => {
-    const groups = duplicates([doc('a', { hash: 'h1', modified: 5 }), doc('b', { hash: 'h2' }), doc('c', { hash: 'h1', modified: 1 }), doc('lib', { hash: 'h2', place: { kind: 'library', id: 'x' } }), doc('d', {})]);
+  it('group archive documents with the same content, oldest first', () => {
+    const elsewhere = doc('e', { hash: 'h1' });
+    const other = { ...elsewhere, place: { ...(elsewhere.place as Extract<IndexedDoc['place'], { kind: 'folder' }>), root: 'other' } };
+    const groups = duplicates([doc('a', { hash: 'h1', modified: 5 }), doc('b', { hash: 'h2' }), doc('c', { hash: 'h1', modified: 1 }), doc('lib', { hash: 'h2', place: { kind: 'library', id: 'x' } }), doc('d', {}), other], 'r');
     expect(groups.map((g) => g.map((d) => d.key))).toEqual([['c', 'a']]);
+    expect(duplicates([doc('a', { hash: 'h1' }), doc('c', { hash: 'h1' })], null)).toEqual([]);
   });
 });
 

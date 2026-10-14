@@ -1,0 +1,145 @@
+/// <reference lib="webworker" />
+import { createStore, delMany, entries, getMany, set, setMany, values } from 'idb-keyval';
+import MiniSearch from 'minisearch';
+
+import { createIndex, indexOptions, rank, snippetFor, type Indexable, type IndexedDoc } from './search';
+import type { SearchRequest, SearchResponse } from './searchProtocol';
+
+/**
+ * The search index, away from the screen: documents' text is stored, indexed and searched here, so building
+ * the index (seconds, for thousands of documents) never holds up the app. Built when first needed, and saved
+ * (with the documents changed since, which are applied again on loading) so the next start only loads it.
+ */
+
+const metaStore = createStore('tessel-docs', 'meta');
+const textStore = createStore('tessel-text', 'pages');
+const savedStore = createStore('tessel-search', 'saved');
+/** Saved this long after the last change. */
+const SAVE_MS = 20_000;
+
+let index: MiniSearch<Indexable> | null = null;
+let building: Promise<MiniSearch<Indexable>> | null = null;
+/** Changes while the index is being built: applied to it once it is. */
+let pending: (Indexable | string)[] = [];
+
+function apply(to: MiniSearch<Indexable>, change: Indexable | string) {
+  const key = typeof change === 'string' ? change : change.key;
+  if (to.has(key)) to.discard(key);
+  if (typeof change !== 'string' && !change.failed) to.add(change);
+}
+
+/** The saved index with what changed since it was saved, or null (none, or unreadable). */
+async function loadSaved(): Promise<MiniSearch<Indexable> | null> {
+  const [json, changed] = await getMany<string | string[] | undefined>(['index', 'changed'], savedStore);
+  if (typeof json !== 'string') return null;
+  let made: MiniSearch<Indexable>;
+  try {
+    made = MiniSearch.loadJSON<Indexable>(json, indexOptions);
+  } catch {
+    return null;
+  }
+  const keys = Array.isArray(changed) ? changed : [];
+  const [metas, texts] = await Promise.all([getMany<IndexedDoc | undefined>(keys, metaStore), getMany<string[] | undefined>(keys, textStore)]);
+  keys.forEach((key, i) => apply(made, metas[i] && texts[i] ? { ...metas[i], pages: texts[i] } : key));
+  return made;
+}
+
+async function buildFresh(): Promise<MiniSearch<Indexable>> {
+  const made = createIndex();
+  const metas = new Map((await values<IndexedDoc>(metaStore)).map((d) => [d.key, d]));
+  for (const [key, pages] of await entries<string, string[]>(textStore)) {
+    const meta = metas.get(key);
+    if (meta && !meta.failed) made.add({ ...meta, pages });
+  }
+  return made;
+}
+
+/** Documents changed since the index was saved (kept with it, so a change is never lost to an early exit). */
+const changed = new Set<string>();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+function noteChanged(keys: string[]) {
+  for (const k of keys) changed.add(k);
+  void set('changed', [...changed], savedStore).catch(() => {});
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => enqueue({ id: 0, type: 'save' } as const), SAVE_MS);
+}
+
+async function save() {
+  if (!index) return;
+  if (index.dirtCount > 0) await index.vacuum();
+  const json = JSON.stringify(index);
+  changed.clear();
+  await setMany([['index', json], ['changed', []]], savedStore);
+}
+
+function ready(): Promise<MiniSearch<Indexable>> {
+  if (index) return Promise.resolve(index);
+  building ??= (async () => {
+    const saved = await loadSaved().catch(() => null);
+    const made = saved ?? (await buildFresh());
+    for (const change of pending) apply(made, change);
+    pending = [];
+    index = made;
+    if (!saved) noteChanged([]);
+    return made;
+  })().finally(() => {
+    building = null;
+  });
+  return building;
+}
+
+function change(c: Indexable | string) {
+  if (index) apply(index, c);
+  else if (building) pending.push(c);
+}
+
+/** Records from before details and text were kept apart: split once, then the old store goes. */
+async function migrate(): Promise<void> {
+  const old = await values<Indexable>(createStore('tessel-index', 'docs')).catch(() => [] as Indexable[]);
+  if (old.length) {
+    await setMany(old.map(({ pages: _, ...meta }) => [meta.key, meta]), metaStore);
+    await setMany(old.map((d) => [d.key, d.pages]), textStore);
+  }
+  indexedDB.deleteDatabase('tessel-index');
+}
+
+async function handle(req: SearchRequest | { id: 0; type: 'save' }): Promise<unknown> {
+  switch (req.type) {
+    case 'save':
+      return save();
+    case 'migrate':
+      return migrate();
+    case 'warm':
+      await ready();
+      return;
+    case 'put': {
+      const { pages, ...meta } = req.doc;
+      await Promise.all([set(meta.key, meta, metaStore), set(meta.key, pages, textStore)]);
+      change(req.doc);
+      noteChanged([meta.key]);
+      return;
+    }
+    case 'drop':
+      await Promise.all([delMany(req.keys, metaStore), delMany(req.keys, textStore)]);
+      for (const key of req.keys) change(key);
+      noteChanged(req.keys);
+      return;
+    case 'search': {
+      const ranked = rank(await ready(), req.query, req.limit);
+      const texts = await getMany<string[] | undefined>(ranked.map((r) => r.key), textStore);
+      return ranked.map((r, i) => ({ key: r.key, score: r.score, ...snippetFor(texts[i] ?? [], r.terms) }));
+    }
+  }
+}
+
+// One at a time, in order: a search after a change sees it.
+let queue: Promise<unknown> = Promise.resolve();
+function enqueue(req: SearchRequest | { id: 0; type: 'save' }) {
+  queue = queue.then(() =>
+    handle(req).then(
+      (result) => req.id && self.postMessage({ id: req.id, ok: true, result } satisfies SearchResponse),
+      (err: unknown) => req.id && self.postMessage({ id: req.id, ok: false, error: err instanceof Error ? err.message : String(err) } satisfies SearchResponse),
+    ),
+  );
+}
+self.onmessage = (e: MessageEvent<SearchRequest>) => enqueue(e.data);

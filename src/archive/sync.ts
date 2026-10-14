@@ -18,11 +18,14 @@ export function parseConflict(name: string): ConflictName | null {
 /** Files Syncthing is still writing (hidden or "~syncthing~" temporaries): not documents yet. */
 export const syncTemporary = (name: string) => name.startsWith('.') || name.startsWith('~syncthing~');
 
-/** Documents in the folders with the same content, in groups of two or more (library copies aside). */
-export function duplicates(docs: IndexedDoc[]): IndexedDoc[][] {
+/**
+ * Documents in the archive with the same content, in groups of two or more (library copies, and copies
+ * elsewhere on the device, aside: they are not the archive's to tidy).
+ */
+export function duplicates(docs: IndexedDoc[], archive: string | null): IndexedDoc[][] {
   const groups = new Map<string, IndexedDoc[]>();
   for (const d of docs) {
-    if (!d.hash || d.place.kind !== 'folder') continue;
+    if (!d.hash || d.place.kind !== 'folder' || d.place.root !== archive) continue;
     groups.set(d.hash, [...(groups.get(d.hash) ?? []), d]);
   }
   return [...groups.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => a.modified - b.modified));

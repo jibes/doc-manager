@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { createIndex, searchIndex, snippetFor, type IndexedDoc } from './search';
+import { createIndex, rank, snippetFor, type Indexable } from './search';
 
-const doc = (key: string, over: Partial<IndexedDoc>): IndexedDoc => ({
+const doc = (key: string, over: Partial<Indexable>): Indexable => ({
   key,
   place: { kind: 'library', id: key },
   name: `${key}.pdf`,
@@ -27,6 +27,9 @@ describe('search across documents', () => {
   const index = createIndex();
   index.addAll(docs);
   const byKey = new Map(docs.map((d) => [d.key, d]));
+  // As the search worker answers: the best documents, each with a snippet from its text.
+  const searchIndex = (_i: unknown, docs: Map<string, Indexable>, q: string) =>
+    rank(index, q).map((r) => ({ doc: docs.get(r.key)!, score: r.score, ...snippetFor(docs.get(r.key)!.pages, r.terms) }));
   const keys = (q: string) => searchIndex(index, byKey, q).map((h) => h.doc.key);
 
   it('finds text, details and file names', () => {
@@ -56,8 +59,8 @@ describe('search across documents', () => {
     const [hit] = searchIndex(index, byKey, 'zahlbar');
     expect(hit.page).toBe(1);
     expect(hit.snippet).toEqual({ before: '', match: 'Zahlbar', after: ' bis 01.11.2026. Konto CH93 0076 2011 6238 5295 7' });
-    expect(snippetFor(docs[1], ['hiermit']).snippet?.match).toBe('hiermit');
-    expect(snippetFor(docs[1], ['nothing'])).toEqual({ page: 0, snippet: null });
+    expect(snippetFor(docs[1].pages, ['hiermit']).snippet?.match).toBe('hiermit');
+    expect(snippetFor(docs[1].pages, ['nothing'])).toEqual({ page: 0, snippet: null });
   });
 
   it('ignores one-letter queries', () => {

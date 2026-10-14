@@ -1635,6 +1635,19 @@ async function documentsScreen() {
   for (let i = 0; i < 60 && !(rows.length === 2 && rows.some((r) => /Nordkorn/.test(r))); i++) rows = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
   check(rows.length === 2 && rows.some((r) => /Nordkorn · 2026-09-28/.test(r)), `documents: every document is listed with its details (${rows.map((r) => r.replace(/\n/g, ' / '))})`);
 
+  // Sorting: chosen from a menu, which shows the order in use.
+  const titles = async () => (await vis('archive-hit').allInnerTexts()).map((r) => r.split('\n')[0]);
+  const newest = await titles();
+  await vis('docs-sort').click();
+  await page.getByTestId('action-sort-oldest').click();
+  check(/Oldest first/.test(await vis('docs-sort').innerText()) && (await titles()).join() === [...newest].reverse().join(), `documents: sorted oldest first (${await titles()})`);
+  await vis('docs-sort').click();
+  await page.getByTestId('action-sort-size').click();
+  const sizes = (await vis('archive-hit').count()) === 2;
+  check(sizes && /Largest first/.test(await vis('docs-sort').innerText()), 'documents: and largest first');
+  await vis('docs-sort').click();
+  await page.getByTestId('action-sort-date').click();
+
   await vis('facet-type').click();
   await page.getByTestId('action-sheet').getByText('Rechnung · 1').click();
   check((await count()) === '1 DOCUMENT' && /Old title/.test(await vis('archive-hit').first().innerText()), 'documents: choosing a type narrows the list');

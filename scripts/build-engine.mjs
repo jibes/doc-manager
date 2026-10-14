@@ -20,6 +20,18 @@ await build({
   logLevel: 'warning',
 });
 
+// Search: the index of every document's text, built and searched away from the screen.
+await build({
+  entryPoints: ['src/archive/searchWorker.ts'],
+  outfile: join(out, 'search-worker.js'),
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  minify: process.argv.includes('--minify'),
+  conditions: ['browser'],
+  logLevel: 'warning',
+});
+
 const wasm = join(dirname(require.resolve('@embedpdf/pdfium/pdfium.wasm')), 'pdfium.wasm');
 copyFileSync(wasm, join(out, 'pdfium.wasm'));
 

@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { folders } from '@/lib/folders';
 import { INBOX_TARGET, usePrefs } from '@/state/prefs';
 import { parseViews, serializeViews, type SavedView } from './facets';
+import { schedule } from './indexer';
 
 /** Where saved views are kept in the archive folder: synced with the documents, so every device has them. */
 const PATH = ['.tessel', 'views.json'];
@@ -55,4 +56,6 @@ export async function setArchive(archive: string | null): Promise<void> {
     set({ views: [] });
   }
   await loadViews();
+  // Which documents are the archive's changes: indexed again.
+  if (archive !== before) schedule(1000);
 }

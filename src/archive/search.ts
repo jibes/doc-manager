@@ -1,4 +1,4 @@
-import MiniSearch, { type SearchResult } from 'minisearch';
+import MiniSearch, { type Options, type SearchResult } from 'minisearch';
 
 import type { FolderEntry } from '@/lib/folderTypes';
 
@@ -23,8 +23,6 @@ export type IndexedDoc = {
   type: string;
   tags: string[];
   date: string;
-  /** Text per page (capped). */
-  pages: string[];
   /** Could not be read (damaged, protected): kept so it isn't tried again until it changes. */
   failed?: boolean;
   /** Content hash (SHA-256, hex), to find the same document filed twice. */
@@ -33,36 +31,43 @@ export type IndexedDoc = {
   share?: string;
 };
 
+/** A document with its text (per page, capped): what the index is built from. Kept apart from the details. */
+export type Indexable = IndexedDoc & { pages: string[] };
+
 export type Hit = { doc: IndexedDoc; score: number; page: number; snippet: { before: string; match: string; after: string } | null };
 
 /** Letters, digits and dots inside numbers stay together ("02.10.2026", "NKL4471902"). */
 const tokenize = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+(?:[.,][\p{N}]+)*/gu) ?? [];
 
-export function createIndex(): MiniSearch<IndexedDoc> {
-  return new MiniSearch<IndexedDoc>({
-    idField: 'key',
-    fields: ['title', 'sender', 'type', 'tags', 'name', 'text'],
-    storeFields: [],
-    extractField: (doc, field) => {
-      if (field === 'tags') return doc.tags.join(' ');
-      if (field === 'text') return doc.pages.join('\n');
-      return (doc as unknown as Record<string, string>)[field] ?? '';
-    },
-    tokenize,
-    searchOptions: {
-      boost: { title: 3, sender: 2, tags: 2, type: 1.5, name: 1.5 },
-      prefix: (term) => term.length > 2,
-      fuzzy: (term) => (term.length > 4 ? 0.2 : false),
-      combineWith: 'AND',
-    },
-  });
-}
+/** How documents are indexed (the same when a saved index is loaded again). */
+export const indexOptions: Options<Indexable> = {
+  idField: 'key',
+  fields: ['title', 'sender', 'type', 'tags', 'name', 'text'],
+  storeFields: [],
+  extractField: (doc, field) => {
+    if (field === 'tags') return doc.tags.join(' ');
+    if (field === 'text') return doc.pages.join('\n');
+    return (doc as unknown as Record<string, string>)[field] ?? '';
+  },
+  tokenize,
+  // Cleaning up after removals runs in the background and can trip over documents added meanwhile: the search
+  // worker cleans up itself, before it saves the index.
+  autoVacuum: false,
+  searchOptions: {
+    boost: { title: 3, sender: 2, tags: 2, type: 1.5, name: 1.5 },
+    prefix: (term) => term.length > 2,
+    fuzzy: (term) => (term.length > 4 ? 0.2 : false),
+    combineWith: 'AND',
+  },
+};
+
+export const createIndex = (): MiniSearch<Indexable> => new MiniSearch<Indexable>(indexOptions);
 
 /** The page where a query's terms first appear, with the words around the first of them. */
-export function snippetFor(doc: IndexedDoc, terms: string[]): Pick<Hit, 'page' | 'snippet'> {
+export function snippetFor(pages: string[], terms: string[]): Pick<Hit, 'page' | 'snippet'> {
   const lowered = terms.map((t) => t.toLowerCase()).filter(Boolean);
-  for (let page = 0; page < doc.pages.length; page++) {
-    const text = doc.pages[page];
+  for (let page = 0; page < pages.length; page++) {
+    const text = pages[page];
     const lower = text.toLowerCase();
     let at = -1;
     let len = 0;
@@ -88,16 +93,12 @@ export function snippetFor(doc: IndexedDoc, terms: string[]): Pick<Hit, 'page' |
   return { page: 0, snippet: null };
 }
 
-/** Best matches first, each with the page to open and a snippet. */
-export function searchIndex(index: MiniSearch<IndexedDoc>, docs: Map<string, IndexedDoc>, query: string, limit = 50): Hit[] {
+/** Best matches first: keys with the terms they matched. */
+export function rank(index: MiniSearch<Indexable>, query: string, limit = 50): { key: string; score: number; terms: string[] }[] {
   const q = query.trim();
   if (q.length < 2) return [];
   return index
     .search(q)
     .slice(0, limit)
-    .map((r: SearchResult) => {
-      const doc = docs.get(String(r.id))!;
-      return { doc, score: r.score, ...snippetFor(doc, r.terms) };
-    })
-    .filter((h) => h.doc);
+    .map((r: SearchResult) => ({ key: String(r.id), score: r.score, terms: r.terms }));
 }

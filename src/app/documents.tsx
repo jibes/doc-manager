@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FACETS, facetCounts, matches, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/archive/facets';
-import { allDocs, searchAll, useIndex } from '@/archive/indexer';
+import { FACETS, facetCounts, matches, SORTS, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/archive/facets';
+import { allDocs, searchAll, useIndex, warmSearch } from '@/archive/indexer';
 import { HitRow } from '@/archive/Results';
 import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
@@ -27,6 +27,8 @@ const PAGE = 100;
 
 const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
 const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'documents', type: 'pages', year: 'sort' };
+
+const sortName: Record<Sort, string> = { date: t.sortDate, oldest: t.sortOldest, name: t.sortName, size: t.sortSize };
 
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
@@ -57,6 +59,8 @@ export default function Documents() {
   const [query, setQuery] = useState(params.q ?? '');
   const [filter, setFilter] = useState<Filter>({});
   const [sort, setSort] = useState<Sort>('date');
+  // Search results come best match first, until another order is chosen for them.
+  const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);
   const [notice, setNotice] = useState<string | null>(null);
   const { count, done } = useIndex();
@@ -74,6 +78,8 @@ export default function Documents() {
 
   useEffect(() => {
     loadViews().catch(() => {});
+    // The search index is built ahead, so the first search answers at once.
+    warmSearch();
   }, []);
 
   // Search results, kept with the query they answer (so an older answer never shows for a newer query).
@@ -94,9 +100,10 @@ export default function Documents() {
 
   // With a query, best matches first; without, every document by date or name.
   const base = useMemo(() => {
-    const hits = searching ? (found?.query === q ? found.hits : []) : sortDocs(all, sort).map(asHit);
+    const answer = found?.query === q ? found.hits : [];
+    const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc)) : sortDocs(all, sort).map(asHit);
     return place ? hits.filter((h) => placeOf(h.doc, archive) === place) : hits;
-  }, [searching, found, q, all, sort, place, archive]);
+  }, [searching, found, q, all, sort, bestFirst, place, archive]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -116,10 +123,26 @@ export default function Documents() {
     ]);
   };
 
+  const byRelevance = searching && bestFirst;
+  const chooseSort = () =>
+    showActions(t.sortTitle, [
+      ...(searching ? [{ key: 'sort-relevance', icon: (byRelevance ? 'check' : 'search') as IconName, label: t.sortRelevance, onPress: () => setBestFirst(true) }] : []),
+      ...SORTS.map((s) => ({
+        key: `sort-${s}`,
+        icon: (!byRelevance && sort === s ? 'check' : 'sort') as IconName,
+        label: sortName[s],
+        onPress: () => {
+          setSort(s);
+          setBestFirst(false);
+        },
+      })),
+    ]);
+
   const apply = (v: SavedView) => {
     setQuery(v.query);
     setFilter(v.filter);
     setSort(v.sort);
+    setBestFirst(!!v.query && v.sort === 'date');
     setLimit(PAGE);
   };
   const current = views.find((v) => sameView(v, query, filter, sort));
@@ -156,11 +179,7 @@ export default function Documents() {
         contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
-          <AppHeader tab="documents">
-            {view === 'all' && !searching && (
-              <IconButton testID="docs-sort" icon="sort" label={sort === 'date' ? t.sortName : t.sortDate} onPress={() => setSort(sort === 'date' ? 'name' : 'date')} />
-            )}
-          </AppHeader>
+          <AppHeader tab="documents" />
 
           {folders.supported && (
             <View accessibilityRole="tablist" style={[styles.segments, { backgroundColor: p.hairline }]}>
@@ -192,6 +211,7 @@ export default function Documents() {
               testID="docs-search"
               value={query}
               onChangeText={(text) => {
+                if (!query.trim() && text.trim()) setBestFirst(true);
                 setQuery(text);
                 setLimit(PAGE);
               }}
@@ -238,7 +258,7 @@ export default function Documents() {
             </ScrollView>
           )}
 
-          <View style={styles.chips}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]}>
             <Pressable
               testID="facet-place"
               accessibilityRole="button"
@@ -269,15 +289,23 @@ export default function Documents() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
-          <T v="kicker" color={p.muted} style={{ marginTop: space.lg, marginBottom: space.sm }} testID="docs-count">
-            {t.documentsCount(shown.length)}
-          </T>
+          <View style={styles.countRow}>
+            <T v="kicker" color={p.muted} testID="docs-count" style={{ flex: 1 }}>
+              {t.documentsCount(shown.length)}
+            </T>
+            <Pressable testID="docs-sort" accessibilityRole="button" accessibilityLabel={`${t.sortTitle}: ${byRelevance ? t.sortRelevance : sortName[sort]}`} onPress={chooseSort} hitSlop={8} style={styles.sort}>
+              <Icon name="sort" size={15} color={p.inkSoft} />
+              <T v="label" color={p.inkSoft}>
+                {byRelevance ? t.sortRelevance : sortName[sort]}
+              </T>
+            </Pressable>
+          </View>
           {shown.length > 0 ? (
             <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
               {shown.slice(0, limit).map((h, i) => (
-                <HitRow key={h.doc.key} hit={h} query={searching ? q : ''} first={i === 0} onError={setNotice} />
+                <HitRow key={h.doc.key} hit={h} query={searching ? q : ''} first={i === 0} size={!byRelevance && sort === 'size'} onError={setNotice} />
               ))}
             </View>
           ) : (
@@ -339,5 +367,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 16, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36 },
+  countRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.lg, marginBottom: space.sm },
+  sort: { flexDirection: 'row', alignItems: 'center', gap: space.xs, minHeight: 32 },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
 });

@@ -1,15 +1,17 @@
-import { createStore, del, set, values, type UseStore } from 'idb-keyval';
-import type MiniSearch from 'minisearch';
+import { createStore, set, values, type UseStore } from 'idb-keyval';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
 import { engine } from '@/engine';
+import { BASE } from '@/lib/base';
 import { folders, type FolderRoot } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
+import { usePrefs } from '@/state/prefs';
 import { repo } from '@/storage';
 import { parseTags, real } from './pdfInfo';
 import { docKey } from './shared';
-import { createIndex, searchIndex, type Hit, type IndexedDoc, type Place } from './search';
+import type { Hit, Indexable, IndexedDoc, Place } from './search';
+import type { Match, SearchRequest, SearchResponse } from './searchProtocol';
 import { duplicates, parseConflict, syncTemporary, type ConflictName } from './sync';
 
 /**
@@ -26,8 +28,9 @@ const MAX_DEPTH = 12;
 /** A full walk again after this long, when the app comes back. */
 const REWALK_MS = 5 * 60_000;
 
-let db: UseStore | null = null;
-const store = () => (db ??= createStore('tessel-index', 'docs'));
+/** Details per document (small: read at start). Their text is kept, indexed and searched by the search worker. */
+let metaDb: UseStore | null = null;
+const metaStore = () => (metaDb ??= createStore('tessel-docs', 'meta'));
 
 /** A Syncthing conflict copy found in a folder: kept out of the index, listed to be resolved. */
 export type Conflict = { root: string; rootName: string; dir?: string; entry: FolderEntry; name: ConflictName };
@@ -38,48 +41,98 @@ export const useIndex = create<{ running: boolean; done: number; total: number; 
   total: 0,
   count: 0,
   conflicts: [],
-  /** Groups of documents with the same content. */
+  /** Groups of documents in the archive with the same content. */
   duplicates: 0,
 }));
 
+/* ------------------------------------------------------- search worker ---- */
+
+let worker: Worker | null = null;
+let seq = 1;
+const waiting = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+function ask<T>(req: DistributiveOmit<SearchRequest, 'id'>): Promise<T> {
+  if (!worker) {
+    worker = new Worker(`${BASE}/engine/search-worker.js`, { type: 'module' });
+    worker.onmessage = (e: MessageEvent<SearchResponse>) => {
+      const w = waiting.get(e.data.id);
+      waiting.delete(e.data.id);
+      if (e.data.ok) w?.resolve(e.data.result);
+      else w?.reject(new Error(e.data.error));
+    };
+  }
+  const id = seq++;
+  return new Promise<T>((resolve, reject) => {
+    waiting.set(id, { resolve: resolve as (v: unknown) => void, reject });
+    worker!.postMessage({ ...req, id });
+  });
+}
+type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
+
+/* ----------------------------------------------------------- the details ---- */
+
 const docs = new Map<string, IndexedDoc>();
-let index: MiniSearch<IndexedDoc> | null = null;
 let loading: Promise<void> | null = null;
+
+/** Records from before details and text were kept apart: split once (by the worker), then the old store goes. */
+async function migrate(): Promise<void> {
+  const DONE = 'tessel-index-split';
+  try {
+    if (localStorage.getItem(DONE)) return;
+  } catch {
+    return;
+  }
+  await ask({ type: 'migrate' });
+  try {
+    localStorage.setItem(DONE, '1');
+  } catch {}
+}
+
+const countDocs = () => [...docs.values()].filter((d) => !d.failed).length;
+const archiveDuplicates = () => duplicates([...docs.values()], usePrefs.getState().archive).length;
 
 function load(): Promise<void> {
   loading ??= (async () => {
-    const stored = await values<IndexedDoc>(store()).catch(() => []);
-    for (const d of stored) docs.set(d.key, d);
-    index = createIndex();
-    index.addAll(stored.filter((d) => !d.failed));
-    useIndex.setState({ count: index.documentCount, duplicates: duplicates(stored).length });
+    await migrate().catch(() => {});
+    for (const d of await values<IndexedDoc>(metaStore()).catch(() => [])) docs.set(d.key, d);
+    useIndex.setState({ count: countDocs(), duplicates: archiveDuplicates() });
   })();
   return loading;
 }
 
-function put(doc: IndexedDoc) {
-  if (index!.has(doc.key)) index!.discard(doc.key);
-  docs.set(doc.key, doc);
-  if (!doc.failed) index!.add(doc);
-  void set(doc.key, doc, store()).catch(() => {});
-  useIndex.setState({ count: index!.documentCount });
+/** Builds the search index ahead of a search (in the worker: the app stays responsive). The Documents screen asks. */
+export function warmSearch() {
+  if (Platform.OS !== 'web') return;
+  void load().then(() => ask({ type: 'warm' })).catch(() => {});
 }
 
-function drop(key: string) {
-  if (index!.has(key)) index!.discard(key);
-  docs.delete(key);
-  void del(key, store()).catch(() => {});
-  useIndex.setState({ count: index!.documentCount });
+function put(doc: Indexable) {
+  const { pages: _, ...meta } = doc;
+  docs.set(doc.key, meta);
+  // The worker stores both, and indexes it.
+  void ask({ type: 'put', doc }).catch(() => {});
+  useIndex.setState({ count: countDocs() });
+}
+
+function drop(keys: string[]) {
+  if (!keys.length) return;
+  for (const key of keys) docs.delete(key);
+  void ask({ type: 'drop', keys }).catch(() => {});
+  useIndex.setState({ count: countDocs() });
 }
 
 /** Best matches for `query` in every indexed document. */
 export async function searchAll(query: string): Promise<Hit[]> {
-  if (Platform.OS !== 'web') return [];
+  if (Platform.OS !== 'web' || query.trim().length < 2) return [];
   await load();
-  return searchIndex(index!, docs, query);
+  const matches = await ask<Match[]>({ type: 'search', query });
+  return matches.flatMap(({ key, ...m }) => {
+    const doc = docs.get(key);
+    return doc ? [{ doc, ...m }] : [];
+  });
 }
 
-/** Every indexed document (for the Documents screen's filters). */
+/** Every indexed document's details (for the Documents screen's filters); their text isn't read. */
 export async function allDocs(): Promise<IndexedDoc[]> {
   if (Platform.OS !== 'web') return [];
   await load();
@@ -96,7 +149,7 @@ export function invalidate(docId: string) {
     // Stored too: the mark must outlive a reload before the next pass.
     const stale = { ...known, modified: -1 };
     docs.set(key, stale);
-    void set(key, stale, store()).catch(() => {});
+    void set(key, stale, metaStore()).catch(() => {});
   });
   schedule(1000);
 }
@@ -105,17 +158,25 @@ export function invalidate(docId: string) {
 
 type Candidate = { key: string; place: Place; name: string; size: number; modified: number };
 
-/** The places to index: with all files access, every document on the device; otherwise each picked folder. */
+/**
+ * The places to index: the archive first, the picked folders and Tessel's own; then, with all files access,
+ * every other document on the device (those already found in a folder above are left out of it).
+ */
 async function rootsToWalk(): Promise<FolderRoot[]> {
   if (!folders.supported) return [];
-  const roots = await folders.roots(true).catch(() => [] as FolderRoot[]);
-  const all = roots.find((r) => r.kind === 'all');
-  return (all ? [all] : roots.filter((r) => r.kind !== 'device')).filter((r) => !r.locked);
+  const roots = (await folders.roots(true).catch(() => [] as FolderRoot[])).filter((r) => !r.locked && r.kind !== 'device');
+  const archive = usePrefs.getState().archive;
+  const rank = (r: FolderRoot) => (r.id === archive ? 0 : r.kind === 'all' ? 2 : 1);
+  return roots.sort((a, b) => rank(a) - rank(b));
 }
 
 async function walk(root: FolderRoot, dir: string | undefined, depth: number, out: Candidate[], conflicts: Conflict[]): Promise<void> {
-  const entries = await folders.list(root.id, dir);
-  for (const e of entries) {
+  await whileOpen();
+  const listed = await folders.list(root.id, dir);
+  // "All documents" is every file on the device: those in a folder walked already are in the index as that.
+  const known = root.kind === 'all' ? new Set(out.map((c) => `${c.name}|${c.size}`)) : null;
+  for (const e of listed) {
+    if (known?.has(`${e.name}|${e.size}`)) continue;
     // Hidden folders (Syncthing's versions, Tessel's own .tessel and trash) and files Syncthing is still writing.
     if (syncTemporary(e.name)) continue;
     if (e.kind === 'dir') {
@@ -164,7 +225,7 @@ async function bytesOf(place: Place): Promise<ArrayBuffer> {
 }
 
 /** The document's record, or null when it can't be read just now (no access at the moment, gone): tried next pass. */
-async function read(c: Candidate): Promise<IndexedDoc | null> {
+async function read(c: Candidate): Promise<Indexable | null> {
   const base = { key: c.key, place: c.place, name: c.name, size: c.size, modified: c.modified };
   const empty = { title: '', sender: '', type: '', tags: [] as string[], date: '', pages: [] as string[] };
   const bytes = await bytesOf(c.place).catch(() => null);
@@ -195,16 +256,19 @@ async function read(c: Candidate): Promise<IndexedDoc | null> {
 /* ------------------------------------------------------------ scheduling ---- */
 
 let paused = 0;
-let waking: (() => void) | null = null;
+let waking: (() => void)[] = [];
 /** A document is open: indexing waits (they share the PDF engine). Returns the function that lets it go on. */
 export function pauseIndexing(): () => void {
   paused++;
   return () => {
     paused = Math.max(0, paused - 1);
-    if (!paused) waking?.();
+    if (paused) return;
+    const wake = waking;
+    waking = [];
+    for (const go of wake) go();
   };
 }
-const whileOpen = () => (paused ? new Promise<void>((r) => (waking = r)) : Promise.resolve());
+const whileOpen = () => (paused ? new Promise<void>((r) => waking.push(r)) : Promise.resolve());
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let due = 0;
@@ -236,15 +300,19 @@ export function schedule(ms = 3000) {
 }
 
 async function run(): Promise<void> {
+  // Nothing while a document is open: opening and reading it come first.
+  await whileOpen();
   await load();
   lastWalk = Date.now();
   const { list, unlisted, conflicts } = await candidates();
   useIndex.setState({ conflicts });
   const seen = new Set(list.map((c) => c.key));
-  for (const key of [...docs.keys()]) {
-    const root = key.startsWith('lib:') ? null : key.slice(0, key.indexOf(':'));
-    if (!seen.has(key) && !(root && unlisted.has(root))) drop(key);
-  }
+  drop(
+    [...docs.keys()].filter((key) => {
+      const root = key.startsWith('lib:') ? null : key.slice(0, key.indexOf(':'));
+      return !seen.has(key) && !(root && unlisted.has(root));
+    }),
+  );
   const todo = list.filter((c) => {
     const known = docs.get(c.key);
     // Records from before content hashes are read again once.
@@ -259,7 +327,7 @@ async function run(): Promise<void> {
     // Let the app breathe between documents.
     await new Promise((r) => setTimeout(r, 30));
   }
-  useIndex.setState({ running: false, duplicates: duplicates([...docs.values()]).length });
+  useIndex.setState({ running: false, duplicates: archiveDuplicates() });
 }
 
 /** Starts indexing a little after launch, and again when the app comes back after a while. */
