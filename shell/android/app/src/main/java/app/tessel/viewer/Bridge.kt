@@ -214,7 +214,10 @@ class Bridge(private val activity: MainActivity) {
         OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
-            .dns { host -> try { Dns.SYSTEM.lookup(host) } catch (e: UnknownHostException) { doh.lookup(host) } }
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    try { Dns.SYSTEM.lookup(hostname) } catch (e: UnknownHostException) { doh.lookup(hostname) }
+            })
             .build()
     }
 
