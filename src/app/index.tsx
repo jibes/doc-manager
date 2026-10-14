@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppFrame, AppHeader, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
-import { Action, ActionBar, Check, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { DocItem, DocList, gridOf, LayoutToggle, useLayout, type Layout } from '@/components/DocItems';
+import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
 import { shareDocs } from '@/lib/fileActions';
 import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
@@ -17,7 +18,6 @@ import { t } from '@/i18n';
 import { useInstall } from '@/lib/install';
 import { pickPdfs, sampleItem } from '@/lib/pick';
 import { openedWithFiles, shell } from '@/lib/shell';
-import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -80,6 +80,8 @@ export default function Home() {
 
   const gutter = width < 600 ? space.xl - 4 : space.xxxl;
   const contentW = Math.min(width, MAX_W) - gutter * 2;
+  const layout = useLayout();
+  const grid = gridOf(contentW);
   const wide = width >= 760;
 
   const reading = useMemo(() => docs.filter((d) => d.reading && !d.reading.finishedAt), [docs]);
@@ -134,6 +136,8 @@ export default function Home() {
             <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(recent.map((d) => d.id)))} />
           ) : (
             <AppHeader tab="reading">
+              <LayoutToggle />
+              {recent.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
               {installKind && (
                 <Button
                   testID="install"
@@ -178,10 +182,12 @@ export default function Home() {
                         </View>
                       </Pressable>
                       {showFinished && (
-                        <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline, marginTop: space.sm }]}>
-                          {finished.map((d, i) => (
-                            <Row key={d.id} doc={d} cover={covers[d.id]} first={i === 0} {...selection(d)} onReading={() => toggleReading(d.id)} onRemove={() => removeDoc(d)} />
-                          ))}
+                        <View style={{ marginTop: space.sm }}>
+                          <DocList layout={layout} gap={grid.gap}>
+                            {finished.map((d, i) => (
+                              <Row key={d.id} doc={d} cover={covers[d.id]} layout={layout} width={grid.tile} first={i === 0} last={i === finished.length - 1} {...selection(d)} onReading={() => toggleReading(d.id)} onRemove={() => removeDoc(d)} />
+                            ))}
+                          </DocList>
                         </View>
                       )}
                     </View>
@@ -196,27 +202,27 @@ export default function Home() {
                   </T>
                   <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                 </View>
-                <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                  {importing.map((name) => (
-                    <View key={name} style={[styles.row, { borderColor: p.hairline }]}>
-                      <View style={[styles.thumbPlaceholder, { borderColor: p.hairline }]} />
-                      <T v="label" color={p.muted}>
-                        {t.adding}
-                      </T>
-                    </View>
-                  ))}
+                {importing.length > 0 && (
+                  <T v="label" color={p.muted} style={{ marginBottom: space.sm }}>
+                    {t.adding}
+                  </T>
+                )}
+                <DocList layout={layout} gap={grid.gap}>
                   {recent.map((d, i) => (
                     <Row
                       key={d.id}
                       doc={d}
                       cover={covers[d.id]}
-                      first={i === 0 && importing.length === 0}
+                      layout={layout}
+                      width={grid.tile}
+                      first={i === 0}
+                      last={i === recent.length - 1}
                       {...selection(d)}
                       onReading={() => toggleReading(d.id)}
                       onRemove={() => removeDoc(d)}
                     />
                   ))}
-                </View>
+                </DocList>
               </View>
             </>
           )}
@@ -233,6 +239,7 @@ export default function Home() {
       </ScrollView>
       {selected && (
         <ActionBar bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4}>
+          <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void shareDocs(picked).catch(() => {})} />
           <Action
             testID="act-reading"
             icon={allReading ? 'readingOn' : 'readingAdd'}
@@ -240,7 +247,6 @@ export default function Home() {
             disabled={!picked.length}
             onPress={readingAll}
           />
-          <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void shareDocs(picked).catch(() => {})} />
           <Action testID="act-remove" icon="trash" label={t.remove} disabled={!picked.length} onPress={() => void removeAll()} />
         </ActionBar>
       )}
@@ -308,10 +314,14 @@ function ShelfItem({ doc, cover }: { doc: DocRecord; cover?: string | null }) {
   );
 }
 
+/** A library document, as every list shows documents; its ⋯ offers the reading list and removing it. */
 function Row({
   doc,
   cover,
+  layout,
+  width,
   first,
+  last,
   selected,
   onSelect,
   onToggle,
@@ -320,71 +330,38 @@ function Row({
 }: {
   doc: DocRecord;
   cover?: string | null;
-  first?: boolean;
-  /** Undefined: not selecting. */
+  layout: Layout;
+  width: number;
+  first: boolean;
+  last: boolean;
+  /** Undefined: not picking. */
   selected?: boolean;
-  /** A long press (or a right click): starts selecting, or picks one more. */
   onSelect: () => void;
-  /** A tap while selecting. */
   onToggle: () => void;
   onReading: () => void;
   onRemove: () => void;
 }) {
-  const p = usePalette();
-  const [hover, setHover] = useState(false);
   const onList = !!doc.reading;
-  // One place for what can be done with a document: its ⋯ button, or a long press.
-  const actions = () =>
-    showActions(doc.title, [
-      { key: 'reading', icon: onList ? 'readingOn' : 'readingAdd', label: onList ? t.removeFromReadingList : t.addToReadingList, onPress: onReading },
-      { key: 'remove', icon: 'trash', label: t.removeFromLibrary, destructive: true, onPress: onRemove },
-    ]);
   return (
-    <View
-      onPointerEnter={() => setHover(true)}
-      onPointerLeave={() => setHover(false)}
-      style={[
-        styles.row,
-        { borderColor: p.hairline, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth, backgroundColor: hover ? p.raised : 'transparent' },
+    <DocItem
+      layout={layout}
+      width={width}
+      testID="recent-row"
+      picture={{ kind: 'cover', uri: cover, aspect: doc.coverAspect }}
+      title={doc.title}
+      meta={[onList ? t.readingList : '', t.docMeta(doc.pageCount, doc.bytes, doc.openedAt), doc.format === 'epub' ? 'EPUB' : '', doc.linked ? t.inPlace : ''].filter(Boolean).join(' · ')}
+      progress={onList ? progressOf(doc) : undefined}
+      first={first}
+      last={last}
+      selected={selected}
+      onOpen={() => open(doc)}
+      onSelect={onSelect}
+      onToggle={onToggle}
+      actions={[
+        { key: 'reading', icon: onList ? 'readingOn' : 'readingAdd', label: onList ? t.removeFromReadingList : t.addToReadingList, onPress: onReading },
+        { key: 'remove', icon: 'trash', label: t.removeFromLibrary, destructive: true, onPress: onRemove },
       ]}
-    >
-      <Pressable
-        testID="recent-row"
-        accessibilityRole={selected === undefined ? 'button' : 'checkbox'}
-        accessibilityState={selected === undefined ? undefined : { checked: selected }}
-        accessibilityLabel={doc.title}
-        accessibilityHint={t.rowHint}
-        onPress={() => (selected === undefined ? open(doc) : onToggle())}
-        onLongPress={onSelect}
-        delayLongPress={350}
-        // Right-click selects on a computer, like a long press on a phone.
-        {...(Platform.OS === 'web'
-          ? {
-              onContextMenu: (ev: { preventDefault(): void }) => {
-                ev.preventDefault();
-                onSelect();
-              },
-            }
-          : {})}
-        style={styles.rowMain}
-      >
-        {selected !== undefined && <Check on={selected} />}
-        <Cover uri={cover} aspect={doc.coverAspect} width={36} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <T v="label" numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20 }}>
-            {doc.title}
-          </T>
-          <T v="caption" color={p.muted} numberOfLines={1}>
-            {onList ? `${t.readingList} · ` : ''}
-            {t.docMeta(doc.pageCount, doc.bytes, doc.openedAt)}
-            {doc.format === 'epub' ? ' · EPUB' : ''}
-            {doc.linked ? ` · ${t.inPlace}` : ''}
-          </T>
-        </View>
-      </Pressable>
-      {/* A sibling, not a child: buttons can't nest in the DOM. */}
-      {selected === undefined && <IconButton testID="row-more" icon="more" label={t.moreFor(doc.title)} size={36} onPress={actions} color={hover ? p.ink : p.muted} />}
-    </View>
+    />
   );
 }
 
@@ -398,9 +375,5 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36, marginBottom: space.md },
   search: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.pill, paddingHorizontal: space.md, height: 32 },
   searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 140, height: 32, outlineStyle: 'none' } as object,
-  list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', paddingRight: space.sm, minHeight: 68 },
-  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingVertical: space.md, paddingLeft: space.lg },
-  thumbPlaceholder: { width: 36, height: 48, marginLeft: space.lg, marginRight: space.lg, borderRadius: radius.cover, borderWidth: 1, borderStyle: 'dashed' },
   colophon: { marginTop: space.xxxl, paddingVertical: space.sm },
 });

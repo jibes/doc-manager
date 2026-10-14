@@ -103,6 +103,8 @@ export const en = {
   delete: 'Delete',
   select: 'Select',
   selectAll: 'Select all',
+  showAsList: 'Show as list',
+  showAsGrid: 'Show as grid',
   selectedCount: (n: number) => `${n} selected`,
   readingAddedN: (n: number) => (n === 1 ? 'Added to the reading list.' : `Added ${n} documents to the reading list.`),
   readingRemovedN: (n: number) => (n === 1 ? 'Taken off the reading list.' : `Took ${n} documents off the reading list.`),

@@ -1,14 +1,16 @@
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TAB_BAR_H, useTabBar } from '@/components/AppNav';
-import { Cover } from '@/components/Cover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { Action, ActionBar, Check, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { DocItem, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
+import { SortChip } from '@/components/SortChip';
+import { showActions } from '@/state/actions';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, t } from '@/i18n';
@@ -17,7 +19,8 @@ import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { setArchive } from '@/archive/views';
 import { schedule } from '@/archive/indexer';
-import { cachedThumb, cancelThumbs, thumb, type Thumb } from '@/lib/thumbs';
+import { addToReading, filesAsDocs } from '@/archive/batch';
+import { cancelThumbs } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
 import { clipCount, useClipboard } from '@/state/clipboard';
 import { useLibrary } from '@/state/library';
@@ -208,7 +211,16 @@ function opError(e: unknown): string {
 }
 
 
-type Sort = 'name' | 'date';
+/** Folders first, then documents in the order chosen. */
+type Sort = 'name' | 'date' | 'oldest' | 'size';
+const SORTS: Sort[] = ['name', 'date', 'oldest', 'size'];
+const sortName: Record<Sort, string> = { name: t.sortName, date: t.sortDate, oldest: t.sortOldest, size: t.sortSize };
+const byOrder: Record<Sort, (a: FolderEntry, b: FolderEntry) => number> = {
+  name: (a, b) => collator.compare(a.name, b.name),
+  date: (a, b) => b.modified - a.modified || collator.compare(a.name, b.name),
+  oldest: (a, b) => a.modified - b.modified || collator.compare(a.name, b.name),
+  size: (a, b) => b.size - a.size || collator.compare(a.name, b.name),
+};
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 function FolderView({ root, rootName, dir, name, width, bottom }: { root: string; rootName: string; dir?: string; name?: string; width: number; bottom: number }) {
@@ -250,13 +262,12 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
     const q = query.trim().toLowerCase();
     const list = q ? entries.filter((e) => e.name.toLowerCase().includes(q)) : entries;
     const dirs = list.filter((e) => e.kind === 'dir').sort((a, b) => collator.compare(a.name, b.name));
-    const docs = list.filter((e) => e.kind !== 'dir').sort((a, b) => (sort === 'date' ? b.modified - a.modified : collator.compare(a.name, b.name)));
+    const docs = list.filter((e) => e.kind !== 'dir').sort(byOrder[sort]);
     return [...dirs, ...docs];
   }, [entries, query, sort]);
 
-  const gap = width < 600 ? space.md : space.lg;
-  const cols = Math.max(3, Math.floor((width + gap) / ((width < 600 ? 104 : 150) + gap)));
-  const tileW = Math.floor((width - gap * (cols - 1)) / cols);
+  const layout = useLayout();
+  const { cols, gap, tile } = gridOf(width);
 
   const picked = useMemo(() => (selected ? shown.filter((e) => selected.has(e.id)) : []), [selected, shown]);
   const toggle = (e: FolderEntry) => setSelected((s) => toggled(s, e.id));
@@ -341,7 +352,15 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
             <TextInput value={query} onChangeText={setQuery} placeholder={t.filter} placeholderTextColor={p.muted} style={[styles.searchInput, { color: p.ink }]} />
           </View>
         )}
-        <IconButton testID="sort" icon="sort" size={36} label={sort === 'name' ? t.sortByDate : t.sortByName} onPress={() => setSort((s) => (s === 'name' ? 'date' : 'name'))} />
+        <SortChip
+          label={sortName[sort]}
+          onPress={() =>
+            showActions(
+              t.sortTitle,
+              SORTS.map((o) => ({ key: `sort-${o}`, icon: o === sort ? 'check' : 'sort', label: sortName[o], onPress: () => setSort(o) })),
+            )
+          }
+        />
       </View>
     </View>
   );
@@ -353,6 +372,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       ) : (
         <ScreenHeader title={name ?? rootName} over={name ? rootName : t.files}>
           {editable && <IconButton testID="new-folder" icon="folderAdd" label={t.newFolder} onPress={newFolder} />}
+          <LayoutToggle />
           {entries && entries.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
         </ScreenHeader>
       )}
@@ -362,41 +382,57 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
         <ActivityIndicator color={p.muted} />
       ) : (
         <FlatList
-          key={cols}
+          key={layout === 'grid' ? cols : 'list'}
           testID="folder-grid"
           data={shown}
-          numColumns={cols}
+          numColumns={layout === 'grid' ? cols : 1}
           keyExtractor={(e) => e.id}
           ListHeaderComponent={header}
           ListEmptyComponent={<T color={p.muted}>{t.folderEmpty}</T>}
-          columnWrapperStyle={{ gap }}
-          contentContainerStyle={{ gap: gap + space.xs, paddingBottom: bottom + space.xxxl * 2 }}
+          columnWrapperStyle={layout === 'grid' ? { gap } : undefined}
+          contentContainerStyle={{ gap: layout === 'grid' ? gap + space.xs : 0, paddingBottom: bottom + space.xxxl * 2 }}
           showsVerticalScrollIndicator={false}
-          initialNumToRender={cols * 4}
+          initialNumToRender={layout === 'grid' ? cols * 4 : 14}
           windowSize={5}
-          renderItem={({ item }) => (
-            <Tile
-              root={root}
-              entry={item}
-              width={tileW}
-              where={root === 'all'}
-              busy={opening === item.id}
-              selected={selected ? selected.has(item.id) : undefined}
-              onPress={() => open(item)}
-              onSelect={() => {
-                // A long press on a phone also fires a context menu (and the release a tap): one gesture, one change.
-                if (justSelected(item.id)) return;
-                heldNow(item.id);
-                if (selected) toggle(item);
-                else setSelected(new Set([item.id]));
-              }}
-            />
-          )}
+          renderItem={({ item, index }) => {
+            const isDir = item.kind === 'dir';
+            return (
+              <DocItem
+                layout={layout}
+                width={tile}
+                testID={isDir ? 'folder-dir' : 'folder-doc'}
+                picture={isDir ? { kind: 'dir' } : { kind: 'file', root, entry: item }}
+                title={isDir ? item.name : bareName(item.name)}
+                label={item.name}
+                meta={isDir ? undefined : root === 'all' && item.where ? item.where : t.fileMeta(item.size, item.modified)}
+                busy={opening === item.id}
+                first={index === 0}
+                last={index === shown.length - 1}
+                selected={selected ? selected.has(item.id) : undefined}
+                onOpen={() => void open(item)}
+                onToggle={() => !justSelected(item.id) && toggle(item)}
+                onSelect={() => {
+                  // A long press on a phone also fires a context menu (and the release a tap): one gesture, one change.
+                  if (justSelected(item.id)) return;
+                  heldNow(item.id);
+                  if (selected) toggle(item);
+                  else setSelected(new Set([item.id]));
+                }}
+              />
+            );
+          }}
         />
       )}
       {selected ? (
         <ActionBar bottom={bottom}>
           {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length || picked.some((e) => e.kind === 'dir')} onPress={share} />}
+          <Action
+            testID="act-reading"
+            icon="readingAdd"
+            label={t.readingList}
+            disabled={!picked.length || picked.some((e) => e.kind === 'dir')}
+            onPress={() => void run(async () => t.readingAddedN(await addToReading(filesAsDocs(root, dir, picked))))}
+          />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!picked.length} onPress={() => clip(false)} />
           <Action testID="act-move" icon="move" label={t.move} disabled={!picked.length} onPress={() => clip(true)} />
           <Action testID="act-rename" icon="pencil" label={t.rename} disabled={picked.length !== 1} onPress={rename} />
@@ -466,111 +502,17 @@ function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | 
 }
 
 
-function Tile({
-  root,
-  entry,
-  width,
-  where,
-  busy,
-  selected,
-  onPress,
-  onSelect,
-}: {
-  root: string;
-  entry: FolderEntry;
-  width: number;
-  where: boolean;
-  busy: boolean;
-  /** undefined: not selecting. */
-  selected?: boolean;
-  onPress: () => void;
-  onSelect: () => void;
-}) {
-  const p = usePalette();
-  const [image, setImage] = useState<Thumb | undefined>(undefined);
-  const isDir = entry.kind === 'dir';
-  const boxH = Math.round(width * 1.32);
-  // The check sits on the picture itself (folders and covers are shorter than the box).
-  const coverW = image ? Math.min(width, Math.round(boxH / image.aspect)) : width;
-  const shownH = isDir ? Math.round(width * 0.8) : image ? Math.round(coverW * Math.min(Math.max(image.aspect, 0.5), 1.8)) : Math.round(width * 1.3);
-  const checkAt = { top: boxH - shownH + 6, right: Math.round((width - (isDir ? width : coverW)) / 2) + 6 };
-
-  useEffect(() => {
-    if (isDir) return;
-    let live = true;
-    cachedThumb(root, entry)
-      .then((hit) => (hit !== undefined ? hit : thumb(root, entry, () => folders.read(root, entry))))
-      .then((th) => live && setImage(th));
-    return () => {
-      live = false;
-    };
-  }, [root, entry, isDir]);
-
-  return (
-    <Pressable
-      testID={isDir ? 'folder-dir' : 'folder-doc'}
-      accessibilityRole={selected === undefined ? 'button' : 'checkbox'}
-      accessibilityState={selected === undefined ? undefined : { checked: selected }}
-      accessibilityLabel={entry.name}
-      onPress={onPress}
-      onLongPress={onSelect}
-      delayLongPress={350}
-      // Right-click selects on a computer, like a long press on a phone.
-      {...(Platform.OS === 'web'
-        ? {
-            onContextMenu: (ev: { preventDefault(): void }) => {
-              ev.preventDefault();
-              onSelect();
-            },
-          }
-        : {})}
-      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [{ width, opacity: pressed || busy ? 0.6 : hovered ? 0.92 : 1 }]}
-    >
-      <View style={{ height: boxH, justifyContent: 'flex-end', alignItems: 'center' }}>
-        {isDir ? (
-          <View style={[styles.dirBox, { width, height: Math.round(width * 0.8), backgroundColor: p.surface, borderColor: p.hairline }]}>
-            <Icon name="folder" size={Math.round(width * 0.36)} color={p.accent} strokeWidth={1.2} />
-          </View>
-        ) : image ? (
-          <Cover uri={image.uri} aspect={image.aspect} width={coverW} />
-        ) : (
-          <View testID={image === null ? 'thumb-none' : 'thumb-pending'} style={[styles.plain, { width, height: Math.round(width * 1.3), backgroundColor: p.surface, borderColor: p.hairline }]}>
-            <T v="kicker" color={p.muted}>
-              {entry.kind === 'epub' ? 'EPUB' : 'PDF'}
-            </T>
-          </View>
-        )}
-        {busy && <ActivityIndicator style={StyleSheet.absoluteFill} color={p.accent} />}
-        {selected !== undefined && <Check on={selected} style={[styles.check, checkAt]} />}
-      </View>
-      <T v="caption" numberOfLines={isDir ? 3 : 2} style={[styles.tileName, hyphenate]}>
-        {isDir ? entry.name : bareName(entry.name)}
-      </T>
-      {!isDir && (
-        <T v="caption" color={p.muted} numberOfLines={1} style={{ fontSize: 11 }}>
-          {where && entry.where ? entry.where : t.fileMeta(entry.size, entry.modified)}
-        </T>
-      )}
-    </Pressable>
-  );
-}
 
 /** The thumbnail already says it's a document: "Report.pdf" shows as "Report". */
 const bareName = (name: string) => name.replace(/\.(pdf|epub)$/i, '');
-/** Long words in narrow tiles break at syllables (in the page's language), not mid-letter. */
-const hyphenate = (Platform.OS === 'web' ? { hyphens: 'auto', overflowWrap: 'anywhere' } : {}) as object;
 
 const styles = StyleSheet.create({
-  tileName: { marginTop: space.sm, fontFamily: fonts.sansMedium, fontSize: 12.5, lineHeight: 16 },
   empty: { alignItems: 'center', gap: space.md, paddingTop: space.xxxl, paddingHorizontal: space.lg },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   rootRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.lg, minHeight: 56 },
   listHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36, marginBottom: space.xs },
   search: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.pill, paddingHorizontal: space.md, height: 32 },
   searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 120, height: 32, outlineStyle: 'none' } as object,
-  dirBox: { borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
-  plain: { borderRadius: radius.cover, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
-  check: { position: 'absolute' },
   bar: {
     position: 'absolute',
     left: 0,

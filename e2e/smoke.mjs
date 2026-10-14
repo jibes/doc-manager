@@ -931,6 +931,7 @@ async function foldersDesktop() {
   const names = async () => (await docs.allInnerTexts()).map((x) => x.split('\n')[0]);
   const byName = await names();
   await vis('sort').click();
+  await page.getByTestId('action-sort-date').click();
   const byDate = await names();
   check(byName[0] === 'columns' && byDate[0] === 'form', `folders: sorts by name and by date (${byName} / ${byDate})`);
   await page.screenshot({ path: `${OUT}folders-grid.png` });
@@ -2456,6 +2457,17 @@ async function batch() {
   await vis('tab-reading').click();
   await vis('recent-row').first().waitFor();
   check((await vis('recent-row').count()) === 2 && (await vis('reading-list').isVisible()), 'batch: picked documents go on the reading list together');
+  // One layout for every list: switched here, the same in Documents; and back.
+  const wide = async (id) => ((await vis(id).first().boundingBox())?.width ?? 0) > 400;
+  const listed = (await wide('recent-row')) && (await vis('row-more').count()) === 2;
+  await vis('layout-toggle').click();
+  const tiled = !(await wide('recent-row')) && (await vis('row-more').count()) === 0;
+  await openDocs(page);
+  const tiledThere = !(await wide('archive-hit'));
+  await vis('layout-toggle').click();
+  check(listed && tiled && tiledThere && (await wide('archive-hit')), 'layout: rows or tiles, chosen once for every list');
+  await vis('tab-reading').click();
+  await vis('recent-row').first().waitFor();
   await vis('recent-row').first().click({ button: 'right' });
   await vis('select-all').click();
   check(/On the reading list|Remove from reading list/i.test(await vis('act-reading').getAttribute('aria-label')), 'batch: all on the list: the action takes them off');

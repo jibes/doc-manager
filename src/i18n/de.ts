@@ -83,6 +83,8 @@ export const de: Strings = {
   delete: 'Löschen',
   select: 'Auswählen',
   selectAll: 'Alle auswählen',
+  showAsList: 'Als Liste zeigen',
+  showAsGrid: 'Als Raster zeigen',
   selectedCount: (n) => `${n} ausgewählt`,
   readingAddedN: (n) => (n === 1 ? 'Zur Leseliste hinzugefügt.' : `${n} Dokumente zur Leseliste hinzugefügt.`),
   readingRemovedN: (n) => (n === 1 ? 'Von der Leseliste genommen.' : `${n} Dokumente von der Leseliste genommen.`),

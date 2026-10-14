@@ -10,9 +10,11 @@ import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
-import { AppFrame, AppHeader, TAB_BAR_H, useDocsView, useTabBar } from '@/components/AppNav';
+import { AppFrame, AppHeader, TAB_BAR_H, useDocsView, useMainWidth, useTabBar } from '@/components/AppNav';
+import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
+import { SortChip } from '@/components/SortChip';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
-import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, shareAll, undoDelete } from '@/archive/batch';
+import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
@@ -52,6 +54,7 @@ export default function Documents() {
   const inboxCount = useInboxCount((s) => s.count);
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
   const tabBar = useTabBar();
+  const mainWidth = useMainWidth();
   const [place, setPlace] = useState<Place | undefined>(undefined);
   // Opened on Folders (from an old Files link), then counted and remembered as the place last used.
   useEffect(() => {
@@ -177,6 +180,8 @@ export default function Documents() {
       ...PLACES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
     ]);
   // Room for the action bar while picking.
+  const layout = useLayout();
+  const grid = gridOf(Math.min(mainWidth, MAX_W) - 2 * (space.xl - 4));
   const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0);
 
   const picked = selected ? shown.filter((h) => selected.has(h.doc.key)).map((h) => h.doc) : [];
@@ -201,6 +206,12 @@ export default function Documents() {
     setSelected(null);
     // On to the folders, to open the one they go to.
     useDocsView.setState({ view: 'folders' });
+  };
+  const rename = async () => {
+    const d = picked[0];
+    const name = (await ask({ title: t.rename, input: d.name.replace(/\.(pdf|epub)$/i, ''), placeholder: t.newName, confirm: t.rename }))?.trim();
+    if (!name) return;
+    await batch(() => renameDoc(d, name));
   };
   const remove = async () => {
     const list = picked;
@@ -230,7 +241,10 @@ export default function Documents() {
           {selected && view === 'all' ? (
             <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
           ) : (
-            <AppHeader tab="documents" />
+            <AppHeader tab="documents">
+              <LayoutToggle />
+              {view === 'all' && shown.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}
+            </AppHeader>
           )}
 
           {folders.supported && (
@@ -350,21 +364,19 @@ export default function Documents() {
             <T v="kicker" color={p.muted} testID="docs-count" style={{ flex: 1 }}>
               {t.documentsCount(shown.length)}
             </T>
-            <Pressable testID="docs-sort" accessibilityRole="button" accessibilityLabel={`${t.sortTitle}: ${byRelevance ? t.sortRelevance : sortName[sort]}`} onPress={chooseSort} hitSlop={8} style={styles.sort}>
-              <Icon name="sort" size={15} color={p.inkSoft} />
-              <T v="label" color={p.inkSoft}>
-                {byRelevance ? t.sortRelevance : sortName[sort]}
-              </T>
-            </Pressable>
+            <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} onPress={chooseSort} />
           </View>
           {shown.length > 0 ? (
-            <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+            <DocList layout={layout} gap={grid.gap}>
               {shown.slice(0, limit).map((h, i) => (
                 <HitRow
                   key={h.doc.key}
                   hit={h}
                   query={searching ? q : ''}
+                  layout={layout}
+                  width={grid.tile}
                   first={i === 0}
+                  last={i === Math.min(shown.length, limit) - 1}
                   size={!byRelevance && sort === 'size'}
                   selected={selected ? selected.has(h.doc.key) : undefined}
                   onSelect={() => hold(h.doc.key)}
@@ -372,7 +384,7 @@ export default function Documents() {
                   onError={setNotice}
                 />
               ))}
-            </View>
+            </DocList>
           ) : (
             <T color={p.muted}>{all.length || searching ? t.documentsEmpty : t.documentsNone}</T>
           )}
@@ -397,6 +409,13 @@ export default function Documents() {
           />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!allInFolders(picked)} onPress={() => clip(false)} />
           <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => clip(true)} />
+          <Action
+            testID="act-rename"
+            icon="pencil"
+            label={t.rename}
+            disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root)}
+            onPress={() => void rename()}
+          />
           <Action testID="act-delete" icon="trash" label={t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => void remove()} />
         </ActionBar>
       )}
@@ -453,6 +472,4 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36 },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.lg, marginBottom: space.sm },
-  sort: { flexDirection: 'row', alignItems: 'center', gap: space.xs, minHeight: 32 },
-  list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
 });

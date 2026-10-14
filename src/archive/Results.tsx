@@ -1,10 +1,7 @@
 import { router } from 'expo-router';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
-
-import { Icon } from '@/components/Icon';
+import { DocItem, type Layout } from '@/components/DocItems';
 import { T } from '@/components/primitives';
-import { Check } from '@/components/Selection';
-import { fonts, radius, space } from '@/design/tokens';
+import { fonts } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
@@ -44,11 +41,14 @@ export async function openDoc(doc: IndexedDoc, page: number, query: string) {
   if (added) router.push({ pathname: '/read/[id]', params: { id: added.id, ...params } });
 }
 
-/** One document found: title, sender, date and place, and the words around the match with its page. */
+/** One document found, as every list shows documents: its picture, title, details and place, the words around the match and its page. */
 export function HitRow({
   hit: h,
   query,
+  layout,
+  width,
   first,
+  last,
   size,
   selected,
   onSelect,
@@ -57,53 +57,33 @@ export function HitRow({
 }: {
   hit: Hit;
   query: string;
+  layout: Layout;
+  width: number;
   first: boolean;
+  last: boolean;
   size?: boolean;
-  /** Undefined: not selecting. */
+  /** Undefined: not picking. */
   selected?: boolean;
-  /** A long press (or a right click): starts selecting, or picks one more. */
-  onSelect?: () => void;
-  /** A tap while selecting. */
-  onToggle?: () => void;
+  onSelect: () => void;
+  onToggle: () => void;
   onError: (message: string) => void;
 }) {
   const p = usePalette();
-  const where = h.doc.place.kind === 'folder' ? whereIs(h.doc.place) : t.placeDevice;
+  const { place } = h.doc;
+  const cover = useLibrary((s) => (place.kind === 'library' ? s.covers[place.id] : undefined));
+  const aspect = useLibrary((s) => (place.kind === 'library' ? s.docs.find((d) => d.id === place.id)?.coverAspect : undefined));
+  const where = place.kind === 'folder' ? whereIs(place) : t.placeDevice;
   const bytes = size && h.doc.size ? `${(h.doc.size / 1_048_576).toFixed(h.doc.size < 10_485_760 ? 1 : 0)} MB` : '';
-  const meta = [h.doc.sender, docDate(h.doc), bytes, where].filter(Boolean).join(' · ');
   return (
-    <Pressable
+    <DocItem
+      layout={layout}
+      width={width}
       testID="archive-hit"
-      accessibilityRole={selected === undefined ? 'button' : 'checkbox'}
-      accessibilityState={selected === undefined ? undefined : { checked: selected }}
-      onPress={() => (selected !== undefined && onToggle ? onToggle() : openDoc(h.doc, h.page, query).catch((e) => onError(e instanceof Error ? e.message : String(e))))}
-      onLongPress={onSelect}
-      delayLongPress={350}
-      // Right-click selects on a computer, like a long press on a phone.
-      {...(Platform.OS === 'web' && onSelect
-        ? {
-            onContextMenu: (ev: { preventDefault(): void }) => {
-              ev.preventDefault();
-              onSelect();
-            },
-          }
-        : {})}
-      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-        styles.row,
-        { borderColor: p.hairline, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth, backgroundColor: hovered ? p.hairline : 'transparent' },
-      ]}
-    >
-      {selected === undefined ? <Icon name="documents" size={20} color={p.muted} /> : <Check on={selected} style={{ marginLeft: -2 }} />}
-      <View style={{ flex: 1, gap: 2 }}>
-        <T numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
-          {h.doc.title || h.doc.name.replace(/\.pdf$/i, '')}
-        </T>
-        {!!meta && (
-          <T v="caption" color={p.muted} numberOfLines={1}>
-            {meta}
-          </T>
-        )}
-        {h.snippet && (
+      picture={place.kind === 'folder' ? { kind: 'file', root: place.root, entry: place.entry } : { kind: 'cover', uri: cover, aspect: aspect ?? 1.414 }}
+      title={h.doc.title || h.doc.name.replace(/\.(pdf|epub)$/i, '')}
+      meta={[h.doc.sender, docDate(h.doc), bytes, where].filter(Boolean).join(' · ')}
+      extra={
+        h.snippet && (
           <T v="caption" color={p.inkSoft} numberOfLines={2}>
             {h.snippet.before}
             <T v="caption" style={{ backgroundColor: p.mark, color: p.ink, fontFamily: fonts.sansSemi }}>
@@ -111,20 +91,15 @@ export function HitRow({
             </T>
             {h.snippet.after}
           </T>
-        )}
-      </View>
-      {h.snippet && (
-        <T v="numeral" color={p.muted}>
-          {t.pageShort(h.page + 1)}
-        </T>
-      )}
-    </Pressable>
+        )
+      }
+      badge={h.snippet ? t.pageShort(h.page + 1) : undefined}
+      first={first}
+      last={last}
+      selected={selected}
+      onOpen={() => void openDoc(h.doc, h.page, query).catch((e) => onError(e instanceof Error ? e.message : String(e)))}
+      onSelect={onSelect}
+      onToggle={onToggle}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  section: { marginTop: space.xxl, gap: space.sm },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md },
-  list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
-});

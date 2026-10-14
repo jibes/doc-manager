@@ -29,6 +29,21 @@ export function byFolder(docs: IndexedDoc[]): { from: FolderPlace; entries: Fold
 /** Whether all of them are files in folders (copies only in this library can't be copied or moved to a folder). */
 export const allInFolders = (docs: IndexedDoc[]) => docs.length > 0 && docs.every(inFolder);
 
+/** Files of one folder (the file browser's), as the reading list takes them. */
+export const filesAsDocs = (root: string, dir: string | undefined, entries: FolderEntry[]): IndexedDoc[] =>
+  entries.map((entry) => ({
+    key: `${root}:${entry.id}`,
+    place: { kind: 'folder', root, rootName: '', dir, entry },
+    name: entry.name,
+    size: entry.size,
+    modified: entry.modified,
+    title: '',
+    sender: '',
+    type: '',
+    tags: [],
+    date: '',
+  }));
+
 /** Puts them on the reading list (files come into the library for it); returns how many were added. */
 export async function addToReading(docs: IndexedDoc[]): Promise<number> {
   let added = 0;
@@ -73,6 +88,15 @@ export async function deleteAll(docs: IndexedDoc[]): Promise<{ root: string; ite
   }
   forget(docs.map((d) => d.key));
   return trashed;
+}
+
+/** Renames a file (in its folder; library documents linked to it follow). */
+export async function renameDoc(d: IndexedDoc, name: string) {
+  if (!inFolder(d)) return;
+  const { root, dir, entry } = d.place;
+  const to = await folders.rename(root, dir, entry, /\.(pdf|epub)$/i.test(name) ? name : `${name}${entry.name.match(/\.(pdf|epub)$/i)?.[0] ?? ''}`);
+  if (to && entry.uri) await useLibrary.getState().followFiles([{ from: entry.uri, to }]);
+  forget([d.key]);
 }
 
 /** Puts back what deleteAll moved to the trash. */

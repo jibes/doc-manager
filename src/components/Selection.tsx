@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { elevation, radius, space } from '@/design/tokens';
@@ -26,6 +26,27 @@ export function toggled(set: Set<string> | null, id: string): Set<string> {
   if (next.has(id)) next.delete(id);
   else next.add(id);
   return next;
+}
+
+/** Picking: which ids are picked (null: not picking), and the gestures that change it. */
+export function usePicking() {
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  return {
+    selected,
+    setSelected,
+    /** Picked, or undefined when not picking (as items take it). */
+    of: (id: string) => (selected ? selected.has(id) : undefined),
+    /** A long press or right click: starts picking, or picks one more. */
+    hold: (id: string) => {
+      if (justSelected(id)) return;
+      heldNow(id);
+      setSelected((s) => (s ? toggled(s, id) : new Set([id])));
+    },
+    /** A tap while picking (not the release of the long press that started it). */
+    tap: (id: string) => {
+      if (!justSelected(id)) setSelected((s) => toggled(s, id));
+    },
+  };
 }
 
 /** Instead of the screen's header while selecting: Cancel, how many, Select all. */

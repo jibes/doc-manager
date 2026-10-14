@@ -14,6 +14,8 @@ const paths = {
   zoomOut: 'M10.75 17.5a6.75 6.75 0 1 0 0-13.5 6.75 6.75 0 0 0 0 13.5ZM15.6 15.6 20 20M8 10.75h5.5',
   trash: 'M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7',
   pages: 'M5 4.5h5.5v6.5H5zM13.5 4.5H19v6.5h-5.5zM5 13.5h5.5V20H5zM13.5 13.5H19V20h-5.5z',
+  viewList: 'M4 5h4.5v5.5H4zM11.5 6.5H20M11.5 9h5M4 13.5h4.5V19H4zM11.5 15H20M11.5 17.5h5',
+  viewGrid: 'M4.5 4.5h4v4h-4zM10 4.5h4v4h-4zM15.5 4.5h4v4h-4zM4.5 10h4v4h-4zM10 10h4v4h-4zM15.5 10h4v4h-4zM4.5 15.5h4v4h-4zM10 15.5h4v4h-4zM15.5 15.5h4v4h-4z',
   install: 'M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13',
   textView: 'M5 6.5h14M5 10.5h14M5 14.5h14M5 18.5h8.5',
   pageView: 'M6.5 3.5h7.75L18 7.25V20.5H6.5zM14 3.5v4h4',

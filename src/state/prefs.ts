@@ -46,13 +46,15 @@ type Prefs = {
   deviceId: string;
   /** The place last used: the app opens there. */
   lastTab: 'reading' | 'documents';
+  /** How every list of documents shows them: small pictures beside the text, or big ones above it. */
+  layout: 'list' | 'grid';
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, shareReading: true, deviceId: '', lastTab: 'reading' };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, shareReading: true, deviceId: '', lastTab: 'reading', layout: 'list' };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -63,8 +65,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId, lastTab } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId, lastTab });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId, lastTab, layout } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, shareReading, deviceId, lastTab, layout });
   },
 }));
 
