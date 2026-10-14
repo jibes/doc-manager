@@ -14,12 +14,23 @@ import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceResponse
 import androidx.core.content.FileProvider
+import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.dnsoverhttps.DnsOverHttps
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.net.InetAddress
+import java.net.UnknownHostException
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * window.TesselShell: what the web app can't do inside a WebView on its own.
@@ -176,25 +187,35 @@ class Bridge(private val activity: MainActivity) {
      * {url, method, headers, body} → {status, body}.
      */
     private fun http(a: JSONObject): JSONObject {
-        val url = java.net.URL(a.getString("url"))
-        if (url.protocol != "https" && url.protocol != "http") throw IllegalArgumentException("Not a web address")
-        val conn = url.openConnection() as java.net.HttpURLConnection
+        val url = a.getString("url").toHttpUrlOrNull() ?: throw IllegalArgumentException("Not a web address")
+        val headers = a.optJSONObject("headers")
+        val body = if (a.has("body")) a.getString("body").toRequestBody(headers?.optString("content-type")?.ifEmpty { null }?.toMediaTypeOrNull()) else null
+        val request = Request.Builder().url(url).method(a.optString("method", "POST"), body).apply {
+            headers?.keys()?.forEach { k -> header(k, headers.getString(k)) }
+        }.build()
         try {
-            conn.requestMethod = a.optString("method", "POST")
-            conn.connectTimeout = 30_000
-            conn.readTimeout = 300_000
-            a.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> conn.setRequestProperty(k, h.getString(k)) } }
-            if (a.has("body")) {
-                conn.doOutput = true
-                conn.outputStream.use { it.write(a.getString("body").toByteArray()) }
-            }
-            val status = conn.responseCode
-            val stream = if (status >= 400) conn.errorStream else conn.inputStream
-            val body = stream?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
-            return JSONObject().put("status", status).put("body", body)
-        } finally {
-            conn.disconnect()
+            client.newCall(request).execute().use { r -> return JSONObject().put("status", r.code).put("body", r.body?.string() ?: "") }
+        } catch (e: UnknownHostException) {
+            throw UnknownHostException("Can't find ${url.host}: neither this device's DNS nor Cloudflare's knows it. If a browser on this device reaches it, check that Tessel may use the network (app info, firewall or VPN apps).")
         }
+    }
+
+    /**
+     * Names are looked up by the system first, and by Cloudflare's DNS over HTTPS when it doesn't know them:
+     * a browser has its own secure DNS, so an address it reaches (a just-made workers.dev name, one a Private
+     * DNS filter drops) can be unknown to the system resolver the app uses.
+     */
+    private val client: OkHttpClient by lazy {
+        val doh = DnsOverHttps.Builder()
+            .client(OkHttpClient())
+            .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(InetAddress.getByName("1.1.1.1"), InetAddress.getByName("1.0.0.1"))
+            .build()
+        OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(300, TimeUnit.SECONDS)
+            .dns { host -> try { Dns.SYSTEM.lookup(host) } catch (e: UnknownHostException) { doh.lookup(host) } }
+            .build()
     }
 
     /** Whether the device has an ambient light sensor (for the "light sensor" theme). */
