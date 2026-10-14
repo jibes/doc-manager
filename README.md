@@ -25,7 +25,7 @@ Live web app: https://jibes.github.io/doc-reader/
 
 Tessel for Android is on the [Releases](https://github.com/jibes/doc-reader/releases) page: download `tessel-x.y.z.apk` on the phone and open it (allow installs from the browser or file manager when Android asks). For automatic updates, add `https://github.com/jibes/doc-reader` in [Obtainium](https://github.com/ImranR98/Obtainium).
 
-The app is the web app bundled in a native shell (`shell/android`): every feature works offline, and it appears under **Open with** and **Share** for PDFs and EPUB books. Releases are signed with this certificate (SHA-256), which Obtainium or AppVerifier can check:
+The app is the web app bundled in a native shell (`shell/android`): every feature works offline, and it appears under **Open with** and **Share** for PDFs and EPUB books. A PDF opened from another app is shown first and filed after: the page starts the PDF engine and reads the file before the app's code runs (`public/index.html`), the app starts on a bare screen, opens the document from the bytes in hand and hands the open document to the reader (`openIncoming`, `src/reader/preopened.ts`); it is stored, copied into Documents/Tessel and given its cover once its first page is up. Releases are signed with this certificate (SHA-256), which Obtainium or AppVerifier can check:
 
 ```
 F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6:A6:F5:8E:E3:94

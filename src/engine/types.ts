@@ -173,4 +173,6 @@ export interface DocumentEngine {
   open(source: DocSource, password?: string): Promise<DocHandle>;
   /** Encoded cover image of page 1 for the library (Blob on web, file URI on native). */
   renderCover(source: DocSource, width: number, password?: string): Promise<{ cover: Blob | string; handle: DocHandle }>;
+  /** Gets the engine going ahead of a document (it loads and compiles PDFium once). */
+  warm?(): void;
 }

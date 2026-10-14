@@ -1,4 +1,5 @@
 import { BASE } from '@/lib/base';
+import { takeEarlyWorker } from '@/lib/shell';
 
 import type { OpenResult, Request, Response, ResultMap } from './pdfium/protocol';
 import type { DocHandle, DocSource, DocumentEngine, OutlineItem, PageLink, Raster, SearchHit, TextRun } from './types';
@@ -13,9 +14,14 @@ class WorkerClient {
   private seq = 1;
   private pending = new Map<number, Pending>();
 
+  /** The worker starts loading PDFium as soon as it exists. */
+  start() {
+    void this.w;
+  }
+
   private get w(): Worker {
     if (!this.worker) {
-      this.worker = new Worker(`${BASE}/engine/pdfium-worker.js`, { type: 'module' });
+      this.worker = takeEarlyWorker() ?? new Worker(`${BASE}/engine/pdfium-worker.js`, { type: 'module' });
       this.worker.onmessage = (e: MessageEvent<Response>) => {
         const msg = e.data;
         const p = this.pending.get(msg.id);
@@ -120,4 +126,5 @@ export const engine: DocumentEngine = {
     const cover = await client.call('cover', { doc: docIds.get(handle)!, width });
     return { cover, handle };
   },
+  warm: () => client.start(),
 };

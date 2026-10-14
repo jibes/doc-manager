@@ -31,6 +31,27 @@
       /* Text fields show the caret and their own box: no ring around the text itself. */
       input:focus-visible, textarea:focus-visible { outline: none; }
     </style>
+    <script>
+      // Android app, opened with a file: the PDF engine starts and the file is read while the app's code
+      // loads (src/lib/shell.ts and src/engine take them over).
+      (function () {
+        var shell = window.TesselShell;
+        if (!shell) return;
+        try {
+          var list = JSON.parse(shell.pending());
+          if (!list.length) return;
+          // A bare first screen: no other screen is built before the document's.
+          history.replaceState(null, '', '/opening');
+          window.__tesselLaunch = {
+            list: list,
+            worker: new Worker('/engine/pdfium-worker.js', { type: 'module' }),
+            files: Promise.all(list.map(function (f) {
+              return fetch(f.url).then(function (r) { return r.blob(); }).then(function (b) { return new File([b], f.name, { type: f.type || b.type }); });
+            })),
+          };
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <noscript>Tessel needs JavaScript to run.</noscript>

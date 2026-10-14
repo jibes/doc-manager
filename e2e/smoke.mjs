@@ -771,6 +771,10 @@ async function shellBridge() {
   check(shared && log.bytes === pdf.length, `shell: share hands the exact file to the app (${log.bytes} of ${pdf.length} bytes)`);
   check(log.calls.some((c) => c[0] === 'theme' && /^#/.test(c[1])), 'shell: system bars follow the theme');
   check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
+  // Shown before it was stored: it is in the library after a restart all the same.
+  await page.goto(BASE);
+  const kept = await page.getByText('Orderly Notes').first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  check(kept, 'shell: the opened file is kept in the library');
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
   await page.getByTestId('home-settings').locator('visible=true').click();
@@ -2137,7 +2141,8 @@ async function places() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
-  await page.waitForTimeout(1500);
+  // Whether it is in the archive is checked after its first pages.
+  await page.waitForTimeout(3000);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-reading').click();
   await page.getByTestId('open-more').click();

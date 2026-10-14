@@ -119,13 +119,17 @@ export function Reader({
   useEffect(() => {
     if (!archive || Platform.OS !== 'web') return;
     let alive = true;
-    (async () => {
-      const key = doc.shareKey ?? (await docKey(await handle.bytes()));
-      const docs = await allDocs();
-      if (alive) setOutside(!docs.some((d) => d.share === key && d.place.kind === 'folder' && d.place.root === archive));
-    })().catch(() => {});
+    // After the first pages: it reads the whole file.
+    const timer = setTimeout(() => {
+      (async () => {
+        const key = doc.shareKey ?? (await docKey(await handle.bytes()));
+        const docs = await allDocs();
+        if (alive) setOutside(!docs.some((d) => d.share === key && d.place.kind === 'folder' && d.place.root === archive));
+      })().catch(() => {});
+    }, 2000);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [archive, doc.shareKey, handle]);
   const keepInArchive = async () => {

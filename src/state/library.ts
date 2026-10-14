@@ -4,7 +4,8 @@ import { errorText, t } from '@/i18n';
 import { openBook } from '@/book';
 import { coverData, readBytes } from '@/book/platform';
 import { asPasswordError, engine } from '@/engine';
-import { askPassword, rememberPassword } from '@/state/password';
+import { preopen } from '@/reader/preopened';
+import { askPassword, passwordFor, rememberPassword } from '@/state/password';
 import type { FileHandle } from '@/lib/fsa';
 import { folders } from '@/lib/folders';
 import { imageSize } from '@/book/image';
@@ -43,6 +44,11 @@ type LibraryState = {
   error: string | null;
   load(): Promise<void>;
   importFiles(items: ImportItem[]): Promise<DocRecord[]>;
+  /**
+   * A file from another app, to read now: opened from its bytes and recorded at once (its reader takes the
+   * open document); copied into the Tessel folder and given its cover afterwards. Null when not opened.
+   */
+  openIncoming(item: ImportItem): Promise<DocRecord | null>;
   remove(id: string): Promise<void>;
   /** `atEnd`: the reader reached the end (page view: scrolled to the bottom); defaults to being on the last page. */
   savePosition(id: string, position: ReadingPosition, atEnd?: boolean): void;
@@ -72,6 +78,8 @@ type LibraryState = {
 const nameOfUri = (uri: string) => decodeURIComponent(uri).split(/[/:]/).pop() ?? uri;
 
 const COVER_WIDTH = 360;
+/** A file from another app is copied and its cover made this long after it opened (its first pages come first). */
+const SETTLE_MS = 2500;
 /** The bundled guide: it stays a copy (it is part of the app, not the user's document). */
 export const SAMPLE_FILE = 'welcome-to-tessel.pdf';
 
@@ -183,6 +191,28 @@ export const useLibrary = create<LibraryState>((set, get) => {
     }
   };
 
+  let loading: Promise<void> | null = null;
+
+  /** After the reader is up: the file into the Tessel folder (as importing does), and the cover. */
+  const settle = async (id: string, item: ImportItem) => {
+    try {
+      const moved = await intoAppFolder(item);
+      if (moved !== item) await get().linkTo(id, moved);
+    } catch {
+      // Stays a copy; moved on the next start.
+    }
+    try {
+      const bytes = await item.file!.arrayBuffer();
+      const { cover, handle } = await engine.renderCover({ kind: 'bytes', bytes }, COVER_WIDTH, passwordFor(id));
+      handle.close();
+      await repo.saveCover(id, cover);
+      const uri = await repo.coverUri(id);
+      set((s) => ({ covers: { ...s.covers, [id]: uri } }));
+    } catch {
+      // No cover: the library shows the title instead.
+    }
+  };
+
   return {
     docs: [],
     covers: {},
@@ -190,13 +220,16 @@ export const useLibrary = create<LibraryState>((set, get) => {
     importing: [],
     error: null,
 
-    async load() {
-      if (get().loaded) return;
-      const docs = (await repo.list()).sort(byRecent);
-      set({ docs, loaded: true });
-      const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
-      set({ covers: Object.fromEntries(entries) });
-      void moveCopies();
+    load() {
+      // Once, however many ask at the same time (a later answer would drop documents added meanwhile).
+      loading ??= (async () => {
+        const docs = (await repo.list()).sort(byRecent);
+        set((s) => ({ docs: [...s.docs.filter((d) => !docs.some((x) => x.id === d.id)), ...docs], loaded: true }));
+        const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
+        set((s) => ({ covers: { ...Object.fromEntries(entries), ...s.covers } }));
+        void moveCopies();
+      })();
+      return loading;
     },
 
     async importFiles(items) {
@@ -250,6 +283,58 @@ export const useLibrary = create<LibraryState>((set, get) => {
         }
       }
       return added;
+    },
+
+    async openIncoming(item) {
+      const file = item.file;
+      if (!file) return (await get().importFiles([item]))[0] ?? null;
+      const bytes = await file.arrayBuffer();
+      if (isEpub(item.name, { kind: 'bytes', bytes })) return (await get().importFiles([item]))[0] ?? null;
+      // Opened while the library loads.
+      const opening = openWithPassword(item.name, (pw) => engine.open({ kind: 'bytes', bytes }, pw));
+      await get().load();
+      const existing = get().docs.find((d) => d.fileName === item.name && d.bytes === item.size);
+      let opened;
+      try {
+        opened = await opening;
+      } catch (e) {
+        set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
+        return null;
+      }
+      if (!opened) return null;
+      const handle = opened.value;
+      if (existing) {
+        preopen(existing.id, handle);
+        return existing;
+      }
+      const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
+      const id = newId();
+      const rec: DocRecord = {
+        id,
+        title: cleanTitle(handle.metadata.title, item.name),
+        author: handle.metadata.author,
+        fileName: item.name,
+        bytes: item.size,
+        pageCount: handle.pageCount,
+        coverAspect: first.height / first.width,
+        addedAt: Date.now(),
+        bookmarks: [],
+      };
+      if (opened.password) rememberPassword(id, opened.password);
+      set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: null } }));
+      preopen(id, handle);
+      // Stored while it opens: a copy for now, the file in the Tessel folder follows.
+      void (async () => {
+        try {
+          await repo.saveFile(id, file);
+          await repo.put(rec);
+        } catch (e) {
+          set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
+          return;
+        }
+        setTimeout(() => void settle(id, item), SETTLE_MS);
+      })();
+      return rec;
     },
 
     async remove(id) {

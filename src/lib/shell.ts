@@ -24,12 +24,26 @@ export type ShellFile = { url: string; name: string; type: string };
 /** Files handed over by the shell since the last call (claimed: the next call won't list them again). */
 export const claimShellFiles = (): ShellFile[] => (shell ? (JSON.parse(shell.pending()) as ShellFile[]) : []);
 
+/** What the page started before the app's code ran, when opened with files (public/index.html). */
+type Launch = { list: ShellFile[]; files: Promise<File[]>; worker?: Worker };
+const early = typeof window !== 'undefined' ? (window as unknown as { __tesselLaunch?: Launch }).__tesselLaunch : undefined;
+
 /**
  * The files the app was started with, claimed as it loads: the first screen knows a document is about to
  * open, so nothing else shows first.
  */
-export const launchFiles: ShellFile[] = claimShellFiles();
+export const launchFiles: ShellFile[] = early?.list ?? claimShellFiles();
 export const openedWithFiles = launchFiles.length > 0;
+
+/** Their contents: being read since the page started, where it could. */
+export const launchContents = (): Promise<File[]> => early?.files ?? fetchShellFiles(launchFiles);
+
+/** The PDF engine's worker, started by the page (once). */
+export function takeEarlyWorker(): Worker | undefined {
+  const worker = early?.worker;
+  if (early) early.worker = undefined;
+  return worker;
+}
 
 /** The files' contents. */
 export async function fetchShellFiles(list: ShellFile[]): Promise<File[]> {
