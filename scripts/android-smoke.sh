@@ -106,10 +106,18 @@ tap "Folders"
 wait_for "Add folder"
 tap "Settings"
 wait_for "Show every document on this device"
-# Below the folders on a small screen: scroll it into view first.
-adb shell input swipe 160 520 160 120 300
-sleep 1
-tap "Show every document on this device"
+# Below the folders on a small screen: scroll it into view, tap, and check it took (a tap during the scroll's
+# fling, or on a switch still off screen, is lost).
+all_on() { ui | sed 's/></>\n</g' | grep -E 'content-desc="Show every document on this device"' | grep -q 'checked="true"'; }
+for _ in 1 2 3 4; do
+  adb shell input swipe 160 520 160 120 300
+  sleep 2
+  all_on && break
+  tap "Show every document on this device"
+  sleep 2
+  all_on && break
+done
+all_on || { echo "All files access didn't turn on"; screen | head -40; exit 1; }
 sleep 2
 adb shell input keyevent KEYCODE_BACK
 wait_for "Internal storage"
