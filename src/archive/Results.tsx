@@ -7,6 +7,7 @@ import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { docDate } from './facets';
+import { realTitle } from './pdfInfo';
 import type { Hit, IndexedDoc, Place } from './search';
 
 /** A file of a folder in the library (opened in place where it can be). */
@@ -80,7 +81,7 @@ export function HitRow({
       width={width}
       testID="archive-hit"
       picture={place.kind === 'folder' ? { kind: 'file', root: place.root, entry: place.entry } : { kind: 'cover', uri: cover, aspect: aspect ?? 1.414 }}
-      title={h.doc.title || h.doc.name.replace(/\.(pdf|epub)$/i, '')}
+      title={realTitle(h.doc.title) || h.doc.name.replace(/\.(pdf|epub)$/i, '')}
       meta={[h.doc.sender, docDate(h.doc), bytes, where].filter(Boolean).join(' · ')}
       extra={
         h.snippet && (

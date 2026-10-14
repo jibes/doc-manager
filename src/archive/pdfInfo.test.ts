@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { buildPdf } from '@/scan/engine/pdf/writer';
-import { infoFor, parseTags, pdfText, readTrailer, real, withInfo } from './pdfInfo';
+import { infoFor, parseTags, pdfText, readTrailer, real, realTitle, withInfo } from './pdfInfo';
 
 const text = (b: Uint8Array) => new TextDecoder('latin1').decode(b);
 const tablePdf = async () =>
@@ -89,3 +89,16 @@ describe('placeholder details', () => {
     expect(real(undefined)).toBe('');
   });
 });
+
+describe('realTitle', () => {
+  it('drops what programs put in place of a title', () => {
+    expect(realTitle('Microsoft Word - Rechnung Oktober.docx')).toBe('Rechnung Oktober');
+    expect(realTitle('Document')).toBe('');
+    expect(realTitle('Slide 1')).toBe('');
+    expect(realTitle('scan0001.pdf')).toBe('');
+    expect(realTitle('IMG_2041.jpg')).toBe('');
+    expect(realTitle('untitled')).toBe('');
+    expect(realTitle('Rechnung 40217')).toBe('Rechnung 40217');
+  });
+});
+

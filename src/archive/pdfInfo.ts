@@ -156,6 +156,20 @@ export const real = (value: string | undefined) => {
   return /^\(?(untitled|anonymous|unknown|unspecified|none|null|n\/a|-+)\)?$/i.test(v) ? '' : v;
 };
 
+/**
+ * A title worth showing: not a placeholder, not what an office program puts there ("Microsoft Word - x.docx",
+ * "Slide 1", "Document"), not a file name. Empty when it isn't (the file name is shown instead).
+ */
+export const realTitle = (value: string | undefined) => {
+  const v = real(value)
+    .replace(/^Microsoft (Word|PowerPoint|Excel) - /i, '')
+    .replace(/\.(docx?|pptx?|xlsx?|odt|rtf|pages)$/i, '')
+    .trim();
+  if (/^(document|title|slide ?\d*|untitled document|microsoft word)$/i.test(v)) return '';
+  if (/\.(pdf|tiff?|jpe?g|png)$/i.test(v) || /^[\w-]+\.[a-z0-9]{2,4}$/i.test(v)) return '';
+  return v.length < 200 ? v : '';
+};
+
 export type Details = { title: string; sender: string; type: string; tags: string[]; date: string };
 
 /** Tags as written in Keywords: comma-separated (semicolons from other tools are read too). */

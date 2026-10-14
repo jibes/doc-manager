@@ -8,7 +8,7 @@ import { describeWithAi, type AiSettings } from '@/scan/ai';
 import { usePrefs } from '@/state/prefs';
 import { allDocs, contentHash, schedule } from './indexer';
 import type { IndexedDoc } from './search';
-import { infoFor, parseTags, readTrailer, real, withInfo, type Details } from './pdfInfo';
+import { infoFor, parseTags, readTrailer, real, realTitle, withInfo, type Details } from './pdfInfo';
 import { makeSearchable, pagesWithoutText, readPages, textOf } from './searchable';
 import { applyRules, DEFAULT_RULES, findDate, parseRules, pathFor, serializeRules, type Rules } from './rules';
 
@@ -120,7 +120,7 @@ export async function propose(archive: string, entry: FolderEntry, rules: Rules)
       text = textOf(read);
     }
     const own: Details = {
-      title: real(m.title) || stem(entry.name),
+      title: realTitle(m.title) || stem(entry.name),
       sender: real(m.author),
       type: real(m.subject),
       tags: parseTags(m.keywords),

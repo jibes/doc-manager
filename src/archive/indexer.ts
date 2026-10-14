@@ -8,7 +8,7 @@ import { folders, type FolderRoot } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
 import { usePrefs } from '@/state/prefs';
 import { repo } from '@/storage';
-import { parseTags, real } from './pdfInfo';
+import { parseTags, real, realTitle } from './pdfInfo';
 import { docKey } from './shared';
 import type { Hit, Indexable, IndexedDoc, Place } from './search';
 import type { Match, SearchRequest, SearchResponse } from './searchProtocol';
@@ -267,7 +267,7 @@ async function read(c: Candidate): Promise<Indexable | null> {
       const runs = await handle.pageText(p).catch(() => []);
       pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ').slice(0, MAX_PAGE_CHARS));
     }
-    return { ...base, hash, share, title: real(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
+    return { ...base, hash, share, title: realTitle(m.title), sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: m.date ?? '', pages };
   } finally {
     handle.close();
   }

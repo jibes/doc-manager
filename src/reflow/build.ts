@@ -223,7 +223,8 @@ export function buildReflow(input: PageLayout[]): Reflow {
         const shortPrev = prev.rect.x + prev.rect.w < edge.left + (edge.right - edge.left) * 0.85 && SENTENCE_END.test(prevText);
         const indented = l.rect.x > edge.left + 0.015 && SENTENCE_END.test(prevText);
         fresh = step > typicalStep * 1.45 || step < 0 || startsList || (cur.kind === 'p' && (shortPrev || indented));
-        if (cur.kind.startsWith('h')) fresh = step > typicalStep * 2.2 || step < 0;
+        // A heading's lines are as far apart as its own (large) type, not the body's.
+        if (cur.kind.startsWith('h')) fresh = step > Math.max(typicalStep * 2.2, prev.rect.h * 1.8) || step < 0;
       }
     }
     if (!fresh && cur && cur.lines.length >= MAX_BLOCK_LINES) fresh = true;

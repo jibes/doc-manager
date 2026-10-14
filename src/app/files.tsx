@@ -148,7 +148,7 @@ export function Roots({ bottom }: { bottom: number }) {
                       </T>
                       {r.id === archive && (
                         <T v="caption" color={p.accent} testID="archive-mark">
-                          {t.archiveSynced}
+                          {/^(archive|archiv)$/i.test(r.name.trim()) ? t.syncedOnly : t.archiveSynced}
                         </T>
                       )}
                     </View>
@@ -370,7 +370,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       {selected ? (
         <SelectBar count={selected.size} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((e) => e.id)))} />
       ) : (
-        <ScreenHeader title={name ?? rootName} over={name ? rootName : t.files}>
+        <ScreenHeader title={name ?? rootName} over={name ? rootName : t.foldersView}>
           {editable && <IconButton testID="new-folder" icon="folderAdd" label={t.newFolder} onPress={newFolder} />}
           <LayoutToggle />
           {entries && entries.length > 0 && <IconButton testID="select" icon="select" label={t.select} onPress={() => setSelected(new Set())} />}

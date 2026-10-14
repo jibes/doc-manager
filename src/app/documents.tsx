@@ -73,7 +73,7 @@ export default function Documents() {
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [undo, setUndo] = useState<(() => void) | null>(null);
   const setClip = useClipboard((s) => s.set);
-  const { count, done } = useIndex();
+  const { count, done, running, total } = useIndex();
   const views = useViews((s) => s.views);
 
   const [all, setAll] = useState<IndexedDoc[]>([]);
@@ -174,12 +174,27 @@ export default function Documents() {
       { key: 'view-remove', icon: 'trash', label: t.viewRemove, destructive: true, onPress: () => void removeView(v.id).catch(() => setNotice(t.viewFailed)) },
     ]);
 
+  // The filters in use, and all of them in one sheet (those without values in these documents left out).
+  const active = (place ? 1 : 0) + FACETS.filter((f) => filter[f]).length;
+  const openFilters = () =>
+    showActions(t.filter, [
+      { key: 'facet-place', icon: 'folder' as IconName, label: `${t.placeFacet}: ${place ? placeName(place) : t.facetAny}`, onPress: choosePlace },
+      ...FACETS.filter((f) => counts[f].length > 0 || filter[f]).map((f) => ({
+        key: `facet-${f}`,
+        icon: facetIcon[f],
+        label: `${facetName[f]}: ${filter[f] ?? t.facetAny}`,
+        onPress: () => choose(f),
+      })),
+      ...(active ? [{ key: 'facet-clear', icon: 'close' as IconName, label: t.clearFilters, onPress: () => (setFilter({}), setPlace(undefined)) }] : []),
+    ]);
   const choosePlace = () =>
     showActions(t.placeFacet, [
       { key: 'place-any', icon: place ? 'close' : 'check', label: t.facetAny, onPress: () => setPlace(undefined) },
       ...PLACES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
     ]);
   // Room for the action bar while picking.
+  // Nothing indexed yet (and not searching): what to do instead of an empty list with its filters.
+  const nothing = all.length === 0 && !searching;
   const layout = useLayout();
   const grid = gridOf(Math.min(mainWidth, MAX_W) - 2 * (space.xl - 4));
   const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0);
@@ -291,73 +306,45 @@ export default function Documents() {
             {!!query && <IconButton icon="close" size={32} label={t.cancel} onPress={() => setQuery('')} />}
           </View>
 
-          {archive && inboxHere && (
-            <Row testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />
-          )}
-          {syncIssues > 0 && <Row testID="sync-banner" icon="copy" label={t.syncBanner(syncIssues)} warn onPress={() => router.push('/sync')} />}
-
-          {(views.length > 0 || canSave) && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
-              {views.map((v) => {
-                const on = v === current;
-                return (
-                  <Pressable
-                    key={v.id}
-                    testID="view-chip"
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                    onPress={() => (on ? viewActions(v) : apply(v))}
-                    onLongPress={() => viewActions(v)}
-                    style={[styles.chip, { backgroundColor: on ? p.ink : p.surface, borderColor: on ? p.ink : p.hairline }]}
-                  >
-                    <T v="label" color={on ? p.canvas : p.ink}>
-                      {v.name}
-                    </T>
-                  </Pressable>
-                );
-              })}
-              {canSave && (
-                <Pressable testID="save-view" accessibilityRole="button" onPress={save} style={[styles.chip, { borderColor: p.hairline, borderStyle: 'dashed' }]}>
-                  <Icon name="plus" size={15} color={p.accent} />
-                  <T v="label" color={p.accent}>
-                    {t.saveView}
-                  </T>
-                </Pressable>
-              )}
-            </ScrollView>
-          )}
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]}>
-            <Pressable
-              testID="facet-place"
-              accessibilityRole="button"
-              accessibilityLabel={place ? `${t.placeFacet}: ${placeName(place)}` : t.placeFacet}
-              onPress={choosePlace}
-              style={[styles.chip, { backgroundColor: place ? p.mark : 'transparent', borderColor: place ? p.markRing : p.hairline }]}
-            >
-              <T v="label" color={place ? p.ink : p.inkSoft}>
-                {place ? placeName(place) : t.placeFacet}
-              </T>
-              <Icon name="chevronDown" size={14} color={p.muted} />
-            </Pressable>
-            {FACETS.map((f) => {
-              const value = filter[f];
+          {nothing ? (
+            <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.supported ? () => useDocsView.setState({ view: 'folders' }) : undefined} />
+          ) : (
+          <>
+          {/* One row: what is waiting (inbox, sync issues), the filters in use, and the saved views. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
+            {archive && inboxHere && <Chip testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />}
+            {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} warn onPress={() => router.push('/sync')} />}
+            <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
+            {place && <Chip testID="facet-place" label={placeName(place)} on onPress={choosePlace} />}
+            {FACETS.filter((f) => filter[f]).map((f) => (
+              <Chip key={f} testID={`facet-${f}`} label={filter[f]!} on onPress={() => choose(f)} />
+            ))}
+            {views.map((v) => {
+              const on = v === current;
               return (
                 <Pressable
-                  key={f}
-                  testID={`facet-${f}`}
+                  key={v.id}
+                  testID="view-chip"
                   accessibilityRole="button"
-                  accessibilityLabel={value ? `${facetName[f]}: ${value}` : facetName[f]}
-                  onPress={() => choose(f)}
-                  style={[styles.chip, { backgroundColor: value ? p.mark : 'transparent', borderColor: value ? p.markRing : p.hairline }]}
+                  accessibilityState={{ selected: on }}
+                  onPress={() => (on ? viewActions(v) : apply(v))}
+                  onLongPress={() => viewActions(v)}
+                  style={[styles.chip, { backgroundColor: on ? p.ink : p.surface, borderColor: on ? p.ink : p.hairline }]}
                 >
-                  <T v="label" color={value ? p.ink : p.inkSoft} numberOfLines={1} style={{ maxWidth: 200 }}>
-                    {value ?? facetName[f]}
+                  <T v="label" color={on ? p.canvas : p.ink}>
+                    {v.name}
                   </T>
-                  <Icon name="chevronDown" size={14} color={p.muted} />
                 </Pressable>
               );
             })}
+            {canSave && (
+              <Pressable testID="save-view" accessibilityRole="button" onPress={save} style={[styles.chip, { borderColor: p.hairline, borderStyle: 'dashed' }]}>
+                <Icon name="plus" size={15} color={p.accent} />
+                <T v="label" color={p.accent}>
+                  {t.saveView}
+                </T>
+              </Pressable>
+            )}
           </ScrollView>
 
           <View style={styles.countRow}>
@@ -386,12 +373,14 @@ export default function Documents() {
               ))}
             </DocList>
           ) : (
-            <T color={p.muted}>{all.length || searching ? t.documentsEmpty : t.documentsNone}</T>
+            <T color={p.muted}>{t.documentsEmpty}</T>
           )}
           {shown.length > limit && (
             <View style={{ flexDirection: 'row', marginTop: space.md }}>
               <Button testID="show-more" kind="quiet" label={t.showMore} onPress={() => setLimit(limit + PAGE)} />
             </View>
+          )}
+          </>
           )}
           </>
           )}
@@ -429,21 +418,32 @@ export default function Documents() {
   );
 }
 
-/** A row leading somewhere (the inbox, sync issues). */
-function Row({ testID, icon, label, count, warn, onPress }: { testID: string; icon: IconName; label: string; count?: number; warn?: boolean; onPress: () => void }) {
+/** No documents yet: where they come from, or how far reading them has got. */
+function Empty({ reading, onAdd }: { reading: string | null; onAdd?: () => void }) {
+  const p = usePalette();
+  return (
+    <View testID="docs-empty" style={styles.empty}>
+      <T style={{ fontFamily: fonts.sansSemi, fontSize: 18 }}>{reading ? t.readingDocsTitle : t.documentsNoneTitle}</T>
+      <T color={p.muted} style={{ textAlign: 'center', maxWidth: 420 }}>
+        {reading ?? t.documentsNone}
+      </T>
+      {!reading && onAdd && <Button testID="docs-add-folder" icon="folderAdd" label={t.addFolder} onPress={onAdd} />}
+    </View>
+  );
+}
+
+/** A small pill: somewhere to go (the inbox, sync issues), the filter button, or a filter in use. */
+function Chip({ testID, icon, label, count, warn, on, onPress }: { testID: string; icon?: IconName; label: string; count?: number; warn?: boolean; on?: boolean; onPress: () => void }) {
   const p = usePalette();
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       onPress={onPress}
-      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-        styles.row,
-        { backgroundColor: warn ? p.mark : hovered ? p.raised : p.surface, borderColor: warn ? p.markRing : p.hairline },
-      ]}
+      style={[styles.chip, { backgroundColor: warn || on ? p.mark : 'transparent', borderColor: warn || on ? p.markRing : p.hairline }]}
     >
-      <Icon name={icon} size={18} color={p.ink} />
-      <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium }}>
+      {icon && <Icon name={icon} size={15} color={p.ink} />}
+      <T v="label" color={p.ink} numberOfLines={1} style={{ maxWidth: 200 }}>
         {label}
       </T>
       {!!count && (
@@ -451,7 +451,7 @@ function Row({ testID, icon, label, count, warn, onPress }: { testID: string; ic
           {count}
         </T>
       )}
-      <Icon name="chevronRight" size={18} color={p.muted} />
+      {!icon && <Icon name="chevronDown" size={14} color={p.muted} />}
     </Pressable>
   );
 }
@@ -466,10 +466,10 @@ const placeOf = (d: IndexedDoc, archive: string | null): Place => (d.place.kind 
 const styles = StyleSheet.create({
   segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },
   segment: { height: 34, justifyContent: 'center', paddingHorizontal: space.lg, borderRadius: radius.pill },
-  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.lg, minHeight: 48, marginTop: space.md },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingLeft: space.md, minHeight: 44 },
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 16, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36 },
+  empty: { alignItems: 'center', gap: space.md, paddingVertical: space.xxxl, paddingHorizontal: space.lg },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.lg, marginBottom: space.sm },
 });

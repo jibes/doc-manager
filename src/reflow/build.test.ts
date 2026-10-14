@@ -63,6 +63,12 @@ describe('buildReflow', () => {
     expect(blocks.map((b) => b.kind)).toEqual(['h1', 'h2', 'p', 'p']);
   });
 
+  it('keeps a large heading set on two lines as one heading', () => {
+    const big = { size: 40, bold: true, h: 0.05 };
+    const { blocks } = reflow([[line('Welcome', 0.3, { ...big, rect: { x: 0.12, y: 0.3, w: 0.4, h: 0.05 } }), line('to Tessel', 0.36, { ...big, rect: { x: 0.12, y: 0.36, w: 0.4, h: 0.05 } }), ...para(0.45, [filler, filler, 'body ends.'])]]);
+    expect(blocks[0]).toMatchObject({ kind: 'h1', text: 'Welcome to Tessel' });
+  });
+
   it('treats long large-type text as a lead paragraph and splits off a following bold heading', () => {
     const lead = { size: 13 };
     const { blocks } = reflow([

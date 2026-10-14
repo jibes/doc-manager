@@ -1670,10 +1670,16 @@ async function documentsScreen() {
   await vis('docs-sort').click();
   await page.getByTestId('action-sort-date').click();
 
-  await vis('facet-type').click();
+  // Filters: one button lists them (those with values here), and the chosen ones show as chips.
+  await vis('docs-filter').click();
+  await page.getByTestId('action-facet-type').waitFor();
+  const offered = await page.getByTestId('action-sheet').innerText();
+  await page.getByTestId('action-facet-type').click();
   await page.getByTestId('action-sheet').getByText('Rechnung · 1').click();
-  check((await count()) === '1 DOCUMENT' && /Old title/.test(await vis('archive-hit').first().innerText()), 'documents: choosing a type narrows the list');
-  await vis('facet-tag').click();
+  check(/Type/.test(offered) && /Place/.test(offered), `documents: the filter button lists the filters (${offered.replace(/\n/g, ' / ')})`);
+  check((await count()) === '1 DOCUMENT' && /Old title/.test(await vis('archive-hit').first().innerText()) && /Rechnung/.test(await vis('facet-type').innerText()), 'documents: choosing a type narrows the list, and shows it');
+  await vis('docs-filter').click();
+  await page.getByTestId('action-facet-tag').click();
   const tagged = await page.getByTestId('action-sheet').getByText('Steuer · 1').waitFor({ timeout: 5000 }).then(() => true, () => false);
   await page.getByTestId('action-any').click();
   check(tagged, 'documents: tags are counted within the chosen type');
@@ -2179,7 +2185,8 @@ async function places() {
   check((await vis('docs-inbox').innerText()).includes('1'), 'places: the inbox is the first row of Documents');
   let all = 0;
   for (let i = 0; i < 40 && all < 2; i++) all = await page.waitForTimeout(500).then(() => vis('archive-hit').count());
-  await vis('facet-place').click();
+  await vis('docs-filter').click();
+  await page.getByTestId('action-facet-place').click();
   await page.getByTestId('action-place-archive').click();
   const archived = await vis('archive-hit').count();
   check(all === 2 && archived === 2, `places: both are in the archive now (${all}, ${archived})`);
