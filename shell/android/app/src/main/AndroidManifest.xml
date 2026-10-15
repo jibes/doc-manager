@@ -10,6 +10,8 @@
     <!-- Network: only for AI reading (Settings → AI reading), sent to the address the user enters. The app itself and
          every document stay on the device. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether there is a network at all, to say "offline" when an AI request fails (granted with the app). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Scan: the camera, asked for the first time the scanner opens. Devices without one can still import photos. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

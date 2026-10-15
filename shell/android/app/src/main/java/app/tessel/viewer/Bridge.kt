@@ -303,7 +303,9 @@ class Bridge(private val activity: MainActivity) {
         }
     }
 
-    private fun online(): Boolean = activity.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null
+    /** Unknown counts as online: the failure is then told by its own cause, never hidden behind this check. */
+    private fun online(): Boolean =
+        runCatching { activity.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null }.getOrDefault(true)
 
     /** This device, the local network (private or link-local addresses) or a .local name. */
     private fun local(host: String): Boolean {

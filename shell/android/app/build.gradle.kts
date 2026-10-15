@@ -50,6 +50,11 @@ android {
         ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
 
+    // A system call without its permission in the manifest fails only at run time: stop the release build instead.
+    lint {
+        fatal += "MissingPermission"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
