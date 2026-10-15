@@ -843,7 +843,7 @@ async function shellBridge() {
   check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
   // Shown before it was stored: it is in the library after a restart all the same.
   await page.goto(BASE);
-  const kept = await page.getByTestId('last-read').filter({ hasText: 'Orderly Notes' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  const kept = await opened(page).filter({ hasText: 'Orderly Notes' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
   check(kept, 'shell: the opened file is kept in the library');
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
