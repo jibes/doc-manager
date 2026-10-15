@@ -10,7 +10,10 @@ import { fonts, radius, space } from '@/design/tokens';
 import type { SearchHit } from '@/engine/types';
 import { t } from '@/i18n';
 import { canDownload, downloadDoc, shareDoc } from '@/lib/fileActions';
+import { onBack } from '@/lib/backGuard';
+import { shortcut, withShortcut } from '@/lib/keys';
 import { goBack } from '@/lib/nav';
+import { useAsk } from '@/state/ask';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
@@ -19,6 +22,7 @@ import { BlockList, type BlockListApi, type FigureSource } from './BlockList';
 import { FindPanel } from './FindPanel';
 import { FindBar } from './FindBar';
 import { MoreMenu, type MenuItem } from './MoreMenu';
+import { useMoving } from './useMoving';
 import { isWide } from './Panel';
 import { Scrubber } from './Scrubber';
 
@@ -40,6 +44,7 @@ function searchBook(book: Book, query: string): SearchHit[] {
       hits.push({ page: b.page, rects: [{ x: 0, y: b.y, w: 0, h: 0 }], snippet, matchStart: i - from + (from > 0 ? 1 : 0), matchLength: q.length });
     }
   }
+  if (hits.length >= MAX_HITS) hits[hits.length - 1].more = true;
   return hits;
 }
 
@@ -51,7 +56,9 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, toggleReading, markOpened, updateFileInfo } = useLibrary();
+  // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
+  const { savePosition, flushPositions, toggleBookmark, toggleReading, markOpened, updateFileInfo } = useLibrary.getState();
+  useEffect(() => () => flushPositions(true), [flushPositions]);
   const readingMode = !!doc.reading;
   const apiRef = useRef<BlockListApi | null>(null);
 
@@ -69,6 +76,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const [editingPage, setEditingPage] = useState(false);
   const [initial] = useState(() => ({ page: doc.position?.page ?? 0, y: doc.position?.offset ?? 0 }));
   const lastDir = useRef({ y: 0, acc: 0 });
+  const { moving, moved } = useMoving(!isWide(winW));
 
   useEffect(() => {
     markOpened(doc.id);
@@ -87,6 +95,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   // Immersive (reading list): hide chrome reading forward, reveal on a deliberate scroll back.
   const onScrollY = useCallback(
     (y: number) => {
+      moved();
       if (!readingMode) return;
       const d = lastDir.current;
       const delta = y - d.y;
@@ -95,7 +104,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
       if (d.acc > 48 && y > 120) setChrome(false);
       else if (d.acc < -64) setChrome(true);
     },
-    [readingMode],
+    [readingMode, moved],
   );
 
   const goToPage = useCallback(
@@ -181,7 +190,15 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
         return openFind(true);
       }
       if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
-      if (e.key === 'Escape') return menu ? setMenu(false) : panel ? setPanel(null) : searchActive ? onQuery('') : goBack();
+      if (e.key === 'Escape') {
+        // A question being asked answers Esc itself; a selection goes before the book does.
+        if (useAsk.getState().request) return;
+        if (menu) return setMenu(false);
+        if (panel) return setPanel(null);
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) return sel.removeAllRanges();
+        return searchActive ? onQuery('') : goBack();
+      }
       if (typing || mod) return;
       const step = vp.h * 0.15;
       const pageStep = vp.h - TOP_BAR - BOTTOM_BAR;
@@ -210,6 +227,17 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
     return () => window.removeEventListener('keydown', onKey);
   }, [vp, menu, panel, searchActive, onQuery, stepHit, goToPage, page, book.pageCount, toggleBookmark, doc]);
 
+  // Android's back button closes what is open first.
+  useEffect(
+    () =>
+      onBack(() => {
+        if (menu) return setMenu(false), true;
+        if (panel) return setPanel(null), true;
+        return false;
+      }),
+    [menu, panel],
+  );
+
   // ---------- chrome ----------
   const chromeShown = chrome || panel != null || menu || !readingMode;
   const chromeV = useSharedValue(1);
@@ -217,20 +245,25 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
     chromeV.set(withTiming(chromeShown ? 1 : 0, { duration: 240 }));
   }, [chromeShown, chromeV]);
   const topStyle = useAnimatedStyle(() => ({ opacity: chromeV.value, transform: [{ translateY: (1 - chromeV.value) * -12 }] }));
-  const bottomStyle = useAnimatedStyle(() => ({ opacity: chromeV.value, transform: [{ translateY: (1 - chromeV.value) * 10 }] }));
+  const pillsShown = chromeShown && !moving;
+  const pillsV = useSharedValue(1);
+  useEffect(() => {
+    pillsV.set(withTiming(pillsShown ? 1 : 0, { duration: pillsShown ? 240 : 160 }));
+  }, [pillsShown, pillsV]);
+  const bottomStyle = useAnimatedStyle(() => ({ opacity: pillsV.value, transform: [{ translateY: (1 - pillsV.value) * 10 }] }));
 
   const wide = isWide(winW);
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
   const bookmarked = doc.bookmarks.includes(page);
   const outline = useMemo(() => book.toc.map((e) => ({ title: e.title, page: e.page, depth: e.depth })), [book.toc]);
   const chapters = useMemo(() => outline.filter((o) => o.depth === 0), [outline]);
-  // 0% on the first page, 100% on the last.
-  const pct = Math.round((page / Math.max(1, book.pageCount - 1)) * 100);
+  // 0% on the first page, 100% on the last (a one-page book is read once it is open).
+  const pct = book.pageCount <= 1 ? 100 : Math.round((page / (book.pageCount - 1)) * 100);
 
   const menuItems: MenuItem[] = [
     { key: 'reading', icon: readingMode ? 'readingOn' : 'readingAdd', label: readingMode ? t.removeFromReadingList : t.addToReadingList, onPress: () => toggleReading(doc.id) },
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc).catch(() => {}) },
-    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
+    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
   ];
 
   const onLayout = (e: LayoutChangeEvent) => {
@@ -270,7 +303,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
           </T>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <IconButton icon="search" label={t.findShortcut} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
+          <IconButton icon="search" label={withShortcut(t.findShortcut, 'F')} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
           <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
         </View>
@@ -278,12 +311,13 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
 
       {/* Bottom bar + spine */}
       <View pointerEvents="box-none" style={[styles.bottomWrap, { paddingBottom: insets.bottom }]}>
-        <Animated.View pointerEvents={chromeShown ? 'box-none' : 'none'} style={[styles.bottomRow, bottomStyle]}>
+        <Animated.View pointerEvents={pillsShown ? 'box-none' : 'none'} style={[styles.bottomRow, bottomStyle]}>
           <View style={[styles.pill, { backgroundColor: p.glass, borderColor: p.hairline }]}>
             {editingPage ? (
               <TextInput
                 autoFocus
                 testID="page-input"
+                accessibilityLabel={t.goToPage}
                 keyboardType="number-pad"
                 defaultValue={String(page + 1)}
                 selectTextOnFocus
@@ -296,7 +330,13 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
                 style={[styles.pageInput, { color: p.ink }]}
               />
             ) : (
-              <Pressable accessibilityRole="button" accessibilityLabel={t.goToPage} onPress={() => setEditingPage(true)} testID="page-label">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${t.pageOf(page + 1, book.pageCount)}${readingMode ? ` · ${t.percentRead(pct)}` : ''}`}
+                accessibilityHint={t.goToPage}
+                onPress={() => setEditingPage(true)}
+                testID="page-label"
+              >
                 <T v="numeral" style={{ fontSize: 13 }}>
                   {page + 1}
                   <T v="numeral" color={p.muted} style={{ fontSize: 13 }}>
@@ -329,6 +369,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
           palette={p}
           query={q}
           count={hits.length}
+          more={hits.some((h) => h.more)}
           active={active}
           searching={false}
           top={insets.top + TOP_BAR + space.sm}

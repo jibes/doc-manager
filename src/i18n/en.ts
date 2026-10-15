@@ -175,7 +175,8 @@ export const en = {
   goToPageN: (n: number) => `Go to page ${n}`,
   // Reader chrome
   library: 'Library',
-  searchShortcut: 'Search (⌘F)',
+  searchShortcut: 'Search',
+  ctrlKey: 'Ctrl+',
   contentsShortcut: 'Contents (T)',
   appearance: 'Appearance',
   goToPage: 'Go to page',
@@ -190,7 +191,7 @@ export const en = {
   // Navigate panel
   navigate: 'Navigate',
   find: 'Find',
-  findShortcut: 'Search and contents (⌘F)',
+  findShortcut: 'Search and contents',
   contents: 'Contents',
   pagesTab: 'Pages',
   bookmarks: 'Bookmarks',

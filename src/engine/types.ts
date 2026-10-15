@@ -40,6 +40,8 @@ export type SearchHit = {
   snippet: string;
   matchStart: number;
   matchLength: number;
+  /** The last of a page's matches that were kept: that page has more than are listed. */
+  more?: boolean;
 };
 
 /** A run of text on one line, for the selectable text layer. */

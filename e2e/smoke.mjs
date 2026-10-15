@@ -516,6 +516,18 @@ async function annotations() {
   await page.waitForFunction(() => document.querySelectorAll('[data-testid=note-row]').length === 1, null, { timeout: 3000 });
   await page.getByTestId('save').click();
   await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
+  // Details written after a save were added to the file as it was opened, losing the saved notes.
+  await page.keyboard.press('Escape');
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('detail-title').fill('Welcome, annotated');
+  await page.getByTestId('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('tab-notes').click();
+  await rows.first().waitFor({ timeout: 5000 });
+  check((await rows.count()) === 1, `annotations: saving details after a save keeps the notes (${await rows.count()})`);
+  await page.keyboard.press('Escape');
   await page.getByTestId('back').click();
   await page.getByTestId('recent-row').first().waitFor();
   await page.reload();
@@ -525,6 +537,21 @@ async function annotations() {
   await rows.first().waitFor({ timeout: 5000 });
   const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Use Open file/.test(await rows.first().innerText());
   check(kept, 'annotations: edits and deletions saved into the PDF');
+  // The browser's Back with unsaved edits left the document and lost them without a word.
+  await page.keyboard.press('Escape');
+  await select(/^Every PDF you open lands in Recent/);
+  await page.getByTestId('highlight-green').click();
+  await page.getByTestId('save').waitFor();
+  await page.goBack();
+  await page.getByTestId('ask-dialog').waitFor({ timeout: 3000 }).catch(() => {});
+  check((await page.getByTestId('ask-dialog').count()) === 1 && (await page.getByTestId('reader').isVisible()), 'annotations: the browser’s Back asks before unsaved edits are lost');
+  await page.getByTestId('ask-cancel').click();
+  await page.waitForTimeout(400);
+  check((await page.getByTestId('save').isVisible()) && /\/read\//.test(page.url()), 'annotations: staying keeps the edits (and the address)');
+  await page.goBack();
+  await page.getByTestId('ask-confirm').click();
+  await page.getByTestId('recent-row').first().waitFor({ timeout: 5000 });
+  check(true, 'annotations: discarding them goes back');
   await ctx.close();
 }
 
@@ -572,6 +599,16 @@ async function regressions() {
   for (let i = 0; i < 25 && (await pageNo()) === 1; i++) await page.waitForTimeout(200);
   await page.waitForTimeout(300);
   check((await pageNo()) === 2, `regression: → in text view goes to the next page (${await pageNo()})`);
+  // The scroll keys moved the (hidden) page view, not the text.
+  const textY = () => page.evaluate(() => {
+    const el = document.querySelector('[data-testid=text-view]');
+    const scroller = [el, ...el.querySelectorAll('*')].find((x) => x.scrollHeight > x.clientHeight + 10 && getComputedStyle(x).overflowY !== 'visible');
+    return scroller ? scroller.scrollTop : -1;
+  });
+  const y0 = await textY();
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(700);
+  check((await textY()) > y0 + 100, `regression: PageDown scrolls text view (${y0} → ${await textY()})`);
   await page.keyboard.press('End');
   await page.waitForTimeout(800);
   check((await pageNo()) === 7, `regression: End in text view reaches the last page (${await pageNo()})`);

@@ -52,8 +52,11 @@ const ANNOT_KINDS: Record<number, Annotation['kind']> = {
   15: 'ink',
 };
 
-/** `form`: PDFium's form-fill environment (null when the PDF has no form); `dirty`: edited since open/save. */
-type Doc = { ptr: number; buf: number; len: number; pageSizes: Size[]; formInfo: number; form: number; dirty: boolean };
+/**
+ * `form`: PDFium's form-fill environment (null when the PDF has no form). `edited`: changed since it was opened
+ * (a save, print or share doesn't undo that: the bytes it was opened from no longer are the document).
+ */
+type Doc = { ptr: number; buf: number; len: number; pageSizes: Size[]; formInfo: number; form: number; edited: boolean };
 type SearchJob = Extract<Request, { type: 'search' }> & { cursor: number; textPtr: number };
 type Job = Exclude<Request, { type: 'cancel' }> | SearchJob;
 
@@ -143,7 +146,7 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
     M.FPDF_SetFormFieldHighlightColor(form, 0, FIELD_HIGHLIGHT);
     M.FPDF_SetFormFieldHighlightAlpha(form, 60);
   }
-  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, dirty: false });
+  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false });
   // Entries kept as they are when Tessel rewrites the details.
   const other: Record<string, string> = {};
   for (const key of ['Creator', 'Producer', 'CreationDate', 'Trapped']) {
@@ -275,7 +278,10 @@ function searchPage(d: Doc, pageIndex: number, textPtr: number): SearchHit[] {
           return M.pdfium.UTF16ToString(p).replace(/[\r\n\t\u0002￾]/g, ' ');
         });
         hits.push({ page: pageIndex, rects, snippet, matchStart: idx - from, matchLength: cnt });
-        if (hits.length >= 200) break;
+        if (hits.length >= 200) {
+          hits[hits.length - 1].more = true;
+          break;
+        }
       }
     });
     M.FPDFText_FindClose(find);
@@ -677,7 +683,7 @@ function setFormField(docId: number, pageIndex: number, index: number, value: Fo
         for (const k of value) M.FORM_SetIndexSelected(d.form, page, k, true);
       }
       M.FORM_ForceToKillFocus(d.form);
-      d.dirty = true;
+      d.edited = true;
     } finally {
       M.FPDFPage_CloseAnnot(annot);
     }
@@ -843,6 +849,12 @@ function annotColor(annot: number, s: number, u: (o: number) => number): string 
 }
 
 function pageAnnotations(d: Doc, pageIndex: number): Annotation[] {
+  // Most pages have none: their text page (slow to build) isn't needed.
+  const bare = M.FPDF_LoadPage(d.ptr, pageIndex);
+  if (!bare) return [];
+  const count = M.FPDFPage_GetAnnotCount(bare);
+  M.FPDF_ClosePage(bare);
+  if (!count) return [];
   return withTextPage(d, pageIndex, [], (page, text, norm) => {
     const out: Annotation[] = [];
     const n = M.FPDFPage_GetAnnotCount(page);
@@ -934,7 +946,7 @@ function addHighlight(docId: number, pageIndex: number, rects: NormRect[], color
       M.FPDFPage_CloseAnnot(annot);
     }
   });
-  d.dirty = true;
+  d.edited = true;
 }
 
 function updateAnnot(docId: number, pageIndex: number, index: number, contents?: string, color?: string) {
@@ -954,13 +966,13 @@ function updateAnnot(docId: number, pageIndex: number, index: number, contents?:
       M.FPDFPage_CloseAnnot(annot);
     }
   });
-  d.dirty = true;
+  d.edited = true;
 }
 
 function removeAnnot(docId: number, pageIndex: number, index: number) {
   const d = getDoc(docId);
   withPage(d, pageIndex, (page) => M.FPDFPage_RemoveAnnot(page, index));
-  d.dirty = true;
+  d.edited = true;
 }
 
 const SAFE_URL = /^(https?:|mailto:)/i;
@@ -1102,7 +1114,7 @@ async function run(job: Job) {
     case 'bytes': {
       const d = getDoc(job.doc);
       // Unedited: the bytes it was opened from, so an update appended to them changes nothing else.
-      const bytes = d.dirty ? save(job.doc) : heap().slice(d.buf, d.buf + d.len).buffer;
+      const bytes = d.edited ? save(job.doc) : heap().slice(d.buf, d.buf + d.len).buffer;
       return post({ id: job.id, ok: true, result: bytes }, [bytes]);
     }
     case 'addText': {
@@ -1111,7 +1123,6 @@ async function run(job: Job) {
     }
     case 'save': {
       const bytes = save(job.doc);
-      getDoc(job.doc).dirty = false;
       return post({ id: job.id, ok: true, result: bytes }, [bytes]);
     }
     case 'close':

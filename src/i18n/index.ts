@@ -34,3 +34,12 @@ export function errorText(e: unknown): string {
   if (/^epub:/.test(m)) return t.bookFailed;
   return t.openFailed;
 }
+
+/** What went wrong with a file operation (rename, move, save, keep), in the user's language where we know it. */
+export function opError(e: unknown): string {
+  const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  const taken = /^exists:(.*)$/.exec(m);
+  if (taken) return `${t.opFailed} ${t.nameTaken(taken[1])}`;
+  if (m === 'denied' || m === t.writeDenied) return `${t.opFailed} ${t.writeDenied}`;
+  return m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
+}

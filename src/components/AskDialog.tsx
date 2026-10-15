@@ -7,6 +7,7 @@ import { t } from '@/i18n';
 import { useAsk } from '@/state/ask';
 import { usePalette } from '@/state/prefs';
 import { Button, T } from './primitives';
+import { useModal } from './useModal';
 
 let backdropPressed = false;
 
@@ -44,6 +45,7 @@ function Card() {
   const hasInput = request.input !== undefined;
   const ok = !hasInput || value.trim().length > 0;
   const submit = () => ok && request.resolve(hasInput ? value.trim() : '');
+  const ref = useModal(() => request.resolve(null));
 
   return (
     <Animated.View
@@ -52,33 +54,36 @@ function Card() {
       testID="ask-dialog"
       style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
     >
-      <T v="headline" accessibilityRole="header" style={{ fontSize: 17 }}>
-        {request.title}
-      </T>
-      {request.body ? (
-        <T v="body" color={p.inkSoft}>
-          {request.body}
+      <View ref={ref} role="dialog" aria-modal aria-label={request.title} tabIndex={-1} style={styles.inner}>
+        <T v="headline" accessibilityRole="header" style={{ fontSize: 17 }}>
+          {request.title}
         </T>
-      ) : null}
-      {hasInput && (
-        <TextInput
-          testID="ask-input"
-          autoFocus
-          value={value}
-          onChangeText={setValue}
-          onSubmitEditing={submit}
-          placeholder={request.placeholder}
-          placeholderTextColor={p.muted}
-          autoComplete="off"
-          autoCorrect={false}
-          selectTextOnFocus
-          returnKeyType="done"
-          style={[styles.input, { color: p.ink, backgroundColor: p.hairline }]}
-        />
-      )}
-      <View style={styles.actions}>
-        <Button label={t.cancel} kind="quiet" onPress={() => request.resolve(null)} />
-        <Button testID="ask-confirm" label={request.confirm} onPress={submit} style={request.destructive ? { backgroundColor: p.markRing } : undefined} />
+        {request.body ? (
+          <T v="body" color={p.inkSoft}>
+            {request.body}
+          </T>
+        ) : null}
+        {hasInput && (
+          <TextInput
+            testID="ask-input"
+            autoFocus
+            value={value}
+            onChangeText={setValue}
+            onSubmitEditing={submit}
+            placeholder={request.placeholder}
+            placeholderTextColor={p.muted}
+            accessibilityLabel={request.placeholder ?? request.title}
+            autoComplete="off"
+            autoCorrect={false}
+            selectTextOnFocus
+            returnKeyType="done"
+            style={[styles.input, { color: p.ink, backgroundColor: p.hairline }]}
+          />
+        )}
+        <View style={styles.actions}>
+          <Button testID="ask-cancel" label={t.cancel} kind="quiet" onPress={() => request.resolve(null)} />
+          <Button testID="ask-confirm" label={request.confirm} onPress={submit} style={request.destructive ? { backgroundColor: p.markRing } : undefined} />
+        </View>
       </View>
     </Animated.View>
   );
@@ -87,7 +92,8 @@ function Card() {
 const styles = StyleSheet.create({
   backdrop: { zIndex: 100 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
-  card: { width: '100%', maxWidth: 400, gap: space.md, padding: space.xl, borderRadius: radius.lg + 2, borderWidth: StyleSheet.hairlineWidth },
+  card: { width: '100%', maxWidth: 400, padding: space.xl, borderRadius: radius.lg + 2, borderWidth: StyleSheet.hairlineWidth },
+  inner: { gap: space.md, outlineStyle: 'none' } as object,
   input: { height: 44, borderRadius: radius.md, paddingHorizontal: space.md, fontFamily: fonts.sans, fontSize: 16, outlineStyle: 'none' } as object,
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.xs },
 });

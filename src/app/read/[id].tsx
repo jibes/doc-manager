@@ -18,9 +18,12 @@ import { FILE_ACCESS, FILE_MOVED, repo } from '@/storage';
 export default function ReadScreen() {
   // `page` and `q`: opened from a search across documents, at the match, highlighted.
   const { id, page: pageParam, q } = useLocalSearchParams<{ id: string; page?: string; q?: string }>();
-  const at = useMemo(() => (pageParam != null && Number.isFinite(Number(pageParam)) ? { page: Number(pageParam), query: q } : undefined), [pageParam, q]);
+  // Only for the first opening: a reload (after saving details, say) continues where the reader is.
+  const [reloaded, setReloaded] = useState(false);
+  const at = useMemo(() => (!reloaded && pageParam != null && Number.isFinite(Number(pageParam)) ? { page: Number(pageParam), query: q } : undefined), [reloaded, pageParam, q]);
   const p = usePalette();
-  const { loaded, load } = useLibrary();
+  const loaded = useLibrary((s) => s.loaded);
+  const load = useLibrary((s) => s.load);
   const doc = useLibrary((s) => s.docs.find((d) => d.id === id));
   const relink = useLibrary((s) => s.relink);
   const [attempt, setAttempt] = useState(0);
@@ -91,7 +94,19 @@ export default function ReadScreen() {
   }
 
   if (state.status === 'ready' && 'book' in state) return <BookReader doc={doc} book={state.book} image={state.image} />;
-  if (state.status === 'ready' && 'handle' in state) return <Reader doc={doc} handle={state.handle} cache={state.cache} onReload={retry} at={at} />;
+  if (state.status === 'ready' && 'handle' in state)
+    return (
+      <Reader
+        doc={doc}
+        handle={state.handle}
+        cache={state.cache}
+        onReload={() => {
+          setReloaded(true);
+          retry();
+        }}
+        at={at}
+      />
+    );
   return null;
 }
 

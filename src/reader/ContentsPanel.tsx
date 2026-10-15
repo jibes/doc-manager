@@ -34,17 +34,22 @@ type Props = {
   tabs?: ContentsTab[];
   /** Highlights and notes in the PDF (null while loading); editable when the callbacks are given. */
   annotations: Annotation[] | null;
+  /** The Notes tab is shown: time to read the annotations. */
+  onShowNotes?: () => void;
   onEditNote?: (a: Annotation) => void;
   onDeleteNote?: (a: Annotation) => void;
   onGo: (page: number) => void;
 };
 
 /** Contents, pages, bookmarks and notes: the lower part of Find while nothing is searched. */
-export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmarks, tabs: only, annotations, onEditNote, onDeleteNote, onGo }: Props) {
+export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmarks, tabs: only, annotations, onShowNotes, onEditNote, onDeleteNote, onGo }: Props) {
   const [picked, setTab] = useState<Tab>('contents');
   // No outline → open on Pages instead of an empty Contents tab.
   const offered = only ?? (['contents', 'pages', 'bookmarks', 'notes'] as Tab[]).filter((k) => k !== 'pages' || (cache && sizes));
   const tab = picked === 'contents' && outline?.length === 0 && offered.includes('pages') ? 'pages' : picked;
+  useEffect(() => {
+    if (tab === 'notes') onShowNotes?.();
+  }, [tab, onShowNotes]);
 
   const currentIdx = useMemo(() => {
     if (!outline) return -1;

@@ -17,12 +17,15 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { t } from '@/i18n';
+import { opError, t } from '@/i18n';
 import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import type { Annotation, DocHandle, PageLink, SearchHit } from '@/engine/types';
 import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
+import { onBack } from '@/lib/backGuard';
+import { shortcut, withShortcut } from '@/lib/keys';
+import { useAsk } from '@/state/ask';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
@@ -44,6 +47,7 @@ import { ReflowView, type ReflowApi } from './ReflowView';
 import { NoteDialog, type NoteRequest } from './NoteDialog';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
+import { useMoving } from './useMoving';
 import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
@@ -57,6 +61,10 @@ let afterReload: string | null = null;
 const TOP_BAR = 56;
 const BOTTOM_BAR = 64;
 const clampZoom = (z: number) => Math.min(4, Math.max(0.5, z));
+/** Text view's type size (as in Aa): ⌘+/⌘− and pinching change it there, not the page zoom it doesn't show. */
+const clampText = (s: number) => Math.min(1.8, Math.max(0.75, Math.round(s * 20) / 20));
+/** Scroll events this soon after a jump (contents, scrubber, a search hit) are the jump's, not reading. */
+const JUMP_MS = 800;
 
 export function Reader({
   doc,
@@ -77,9 +85,14 @@ export function Reader({
   // "Invert colours" (per document): the pages, their thumbnails and text view figures; the app keeps its own colours.
   const pageP = useMemo(() => (doc.invert ? { ...p, page: p.inverted } : p), [p, doc.invert]);
   const fit = usePrefs((s) => s.fit);
+  const textScale = usePrefs((s) => s.textScale);
+  const setPrefs = usePrefs((s) => s.set);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
-  const { savePosition, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = useLibrary();
+  // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
+  const { savePosition, flushPositions, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = useLibrary.getState();
+  // Where it was left: in the library at once when the reader closes.
+  useEffect(() => () => flushPositions(true), [flushPositions]);
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
   const view = doc.view ?? 'page';
   const textApiRef = useRef<ReflowApi | null>(null);
@@ -146,7 +159,7 @@ export function Reader({
       if (onReload) onReload();
       else setReloaded(t.keptInArchive);
     } catch (e) {
-      setReloaded(e instanceof Error ? e.message : String(e));
+      setReloaded(opError(e));
     }
   };
 
@@ -177,7 +190,8 @@ export function Reader({
       if (onReload) onReload();
       else setReloaded(t.searchableDone);
     } catch (e) {
-      setReloaded(t.searchableFailed(e instanceof Error ? e.message : String(e)));
+      const m = e instanceof Error ? e.message : String(e);
+      setReloaded(t.searchableFailed(m === 'denied' ? t.writeDenied : m));
     } finally {
       setReading(null);
     }
@@ -219,10 +233,9 @@ export function Reader({
   // The geometry and zoom the pages were last placed with: a zoom is anchored in the old geometry.
   const placed = useRef<{ layout: PageLayout; zoomed: typeof zoomed } | null>(null);
   const restored = useRef(false);
+  const jumpedAt = useRef(0);
   const lastDir = useRef({ y: 0, acc: 0 });
-  // Phones: the page number and bookmark step aside while the pages move, and come back when they stop.
-  const [moving, setMoving] = useState(false);
-  const stillTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { moving, moved } = useMoving(!isWide(winW));
 
   const layout = useMemo(
     () =>
@@ -306,6 +319,7 @@ export function Reader({
     (n: number, animated = false) => {
       if (!layout) return;
       const target = Math.min(Math.max(0, n), handle.pageCount - 1);
+      jumpedAt.current = Date.now();
       cache.setFocus(target);
       if (view === 'text') textApiRef.current?.scrollToPage(target);
       else scrollTo(layout.offsets[target] - layout.padTop, animated);
@@ -317,11 +331,7 @@ export function Reader({
   // Immersive (reading list only): hide chrome reading forward, reveal on a deliberate scroll back.
   const trackDirection = useCallback(
     (y: number) => {
-      if (!isWide(winW)) {
-        setMoving(true);
-        clearTimeout(stillTimer.current);
-        stillTimer.current = setTimeout(() => setMoving(false), 1200);
-      }
+      moved();
       if (!readingMode) return;
       const d = lastDir.current;
       const delta = y - d.y;
@@ -330,9 +340,8 @@ export function Reader({
       if (d.acc > 48 && y > 120) setChrome(false);
       else if (d.acc < -64) setChrome(true);
     },
-    [readingMode, winW],
+    [readingMode, moved],
   );
-  useEffect(() => () => clearTimeout(stillTimer.current), []);
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -342,8 +351,8 @@ export function Reader({
       scrollY.current = y;
       posRef.current = positionAt(layout, y);
       // The saved position is the top of the viewport, which never reaches a last page shorter than
-      // the screen: the end counts as reached once scrolled to the bottom.
-      const atEnd = y > 0 && y + layoutMeasurement.height >= contentSize.height - 8;
+      // the screen: the end counts as reached once scrolled to the bottom (by reading, not by a jump there).
+      const atEnd = y > 0 && y + layoutMeasurement.height >= contentSize.height - 8 && Date.now() - jumpedAt.current > JUMP_MS;
       savePosition(doc.id, posRef.current, atEnd);
       const rp = readingPage(layout, y, vp.h);
       cache.setFocus(rp);
@@ -378,14 +387,17 @@ export function Reader({
   const [annots, setAnnots] = useState<Annotation[] | null>(null);
   const [annotVersion, setAnnotVersion] = useState(0);
   const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
+  // Reading every page's annotations takes a while on long documents: only once the Notes tab is shown.
+  const [notesShown, setNotesShown] = useState(false);
+  const showNotes = useCallback(() => setNotesShown(true), []);
   useEffect(() => {
-    if (panel !== 'find') return;
+    if (panel !== 'find' || !notesShown) return;
     let alive = true;
     handle.annotations().then((a) => alive && setAnnots(a), () => alive && setAnnots([]));
     return () => {
       alive = false;
     };
-  }, [panel, handle, annotVersion]);
+  }, [panel, notesShown, handle, annotVersion]);
 
   const askNote = useCallback(
     (initial: string, quote: string) =>
@@ -418,19 +430,36 @@ export function Reader({
     },
     [askNote, handle, annotated],
   );
+  // Notes are addressed by their place on the page: one change at a time, and the list kept right meanwhile.
+  const noteBusy = useRef(false);
   const onEditNote = useCallback(
     async (a: Annotation) => {
+      if (noteBusy.current) return;
       const contents = await askNote(a.contents, a.quote);
-      if (contents == null || contents === a.contents) return;
-      await handle.updateAnnotation(a.page, a.index, { contents });
-      annotated([a.page]);
+      if (contents == null || contents === a.contents || noteBusy.current) return;
+      noteBusy.current = true;
+      try {
+        await handle.updateAnnotation(a.page, a.index, { contents });
+        setAnnots((list) => list && list.map((x) => (x === a ? { ...x, contents } : x)));
+        annotated([a.page]);
+      } finally {
+        noteBusy.current = false;
+      }
     },
     [askNote, handle, annotated],
   );
   const onDeleteNote = useCallback(
     async (a: Annotation) => {
-      await handle.removeAnnotation(a.page, a.index);
-      annotated([a.page]);
+      if (noteBusy.current) return;
+      noteBusy.current = true;
+      try {
+        await handle.removeAnnotation(a.page, a.index);
+        // Later annotations on that page move up one place.
+        setAnnots((list) => list && list.filter((x) => x !== a).map((x) => (x.page === a.page && x.index > a.index ? { ...x, index: x.index - 1 } : x)));
+        annotated([a.page]);
+      } finally {
+        noteBusy.current = false;
+      }
     },
     [handle, annotated],
   );
@@ -499,6 +528,7 @@ export function Reader({
       const h = hits[i];
       if (!h || !layout || !vp) return;
       setActive(i);
+      jumpedAt.current = Date.now();
       cache.setFocus(h.page);
       const r = h.rects[0];
       const y = layout.offsets[h.page] + (r ? r.y * layout.heights[h.page] : 0) - vp.h * 0.35;
@@ -531,36 +561,68 @@ export function Reader({
     [hits, active, page, goToHit],
   );
 
+  // Back (Android's button, Esc): what is open closes first; unsaved edits are asked about before leaving.
+  const closeSomething = useCallback(() => {
+    if (noteRequest) return noteRequest.resolve(null), true;
+    if (menu) return setMenu(false), true;
+    if (panel) return setPanel(null), true;
+    return false;
+  }, [noteRequest, menu, panel]);
+  useEffect(
+    () =>
+      onBack(() => {
+        if (closeSomething()) return true;
+        if (!edits.dirty) return false;
+        edits.leave();
+        return true;
+      }),
+    [closeSomething, edits],
+  );
+
   // ---------- keyboard + wheel (web) ----------
   useEffect(() => {
     if (Platform.OS !== 'web' || !vp) return;
+    const text = view === 'text';
+    const sizeText = (f: number) => setPrefs({ textScale: clampText(f === 0 ? 1 : textScale * f) });
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
+      const target = e.target as HTMLElement | null;
+      // Typing, or a form's checkbox or radio (Space ticks it).
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '') || !!target?.closest?.('.fl');
       if (mod && e.key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
       // ⌘S saves edits when there are any; otherwise it downloads, as before.
-      if (mod && e.key === 's') return e.preventDefault(), void (edits.dirty ? edits.save() : downloadDoc(doc).catch(() => {}));
+      if (mod && e.key === 's') return e.preventDefault(), void (edits.dirty ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
       if (mod && e.key === 'f') {
         e.preventDefault();
         setChrome(true);
         return openFind(true);
       }
-      if (mod && (e.key === '=' || e.key === '+')) return e.preventDefault(), setZoom(zoom * 1.2);
-      if (mod && e.key === '-') return e.preventDefault(), setZoom(zoom / 1.2);
-      if (mod && e.key === '0') return e.preventDefault(), setZoom(1);
+      if (mod && (e.key === '=' || e.key === '+')) return e.preventDefault(), text ? sizeText(1.1) : setZoom(zoom * 1.2);
+      if (mod && e.key === '-') return e.preventDefault(), text ? sizeText(1 / 1.1) : setZoom(zoom / 1.2);
+      if (mod && e.key === '0') return e.preventDefault(), text ? sizeText(0) : setZoom(1);
       if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
-      if (e.key === 'Escape') return menu ? setMenu(false) : panel ? setPanel(null) : searchActive ? onQuery('') : edits.leave();
+      if (e.key === 'Escape') {
+        // A question being asked answers Esc itself.
+        if (useAsk.getState().request) return;
+        if (closeSomething()) return;
+        // A selection (its Highlight bubble) goes before the document does.
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) return sel.removeAllRanges();
+        return searchActive ? onQuery('') : edits.leave();
+      }
       if (typing || mod) return;
       const step = vp.h * 0.15;
       const pageStep = vp.h - TOP_BAR - BOTTOM_BAR;
+      // Text view scrolls its own list; page view the pages.
+      const by = (dy: number, animated: boolean) => (text ? textApiRef.current?.scrollBy(dy, animated) : scrollTo(scrollY.current + dy, animated));
       const keys: Record<string, () => void> = {
-        ArrowDown: () => scrollTo(scrollY.current + step, false),
-        ArrowUp: () => scrollTo(scrollY.current - step, false),
-        j: () => scrollTo(scrollY.current + step, false),
-        k: () => scrollTo(scrollY.current - step, false),
-        ' ': () => scrollTo(scrollY.current + (e.shiftKey ? -pageStep : pageStep), true),
-        PageDown: () => scrollTo(scrollY.current + pageStep, true),
-        PageUp: () => scrollTo(scrollY.current - pageStep, true),
+        ArrowDown: () => by(step, false),
+        ArrowUp: () => by(-step, false),
+        j: () => by(step, false),
+        k: () => by(-step, false),
+        ' ': () => by(e.shiftKey ? -pageStep : pageStep, true),
+        PageDown: () => by(pageStep, true),
+        PageUp: () => by(-pageStep, true),
         ArrowRight: () => goToPage(page + 1),
         ArrowLeft: () => goToPage(page - 1),
         Home: () => goToPage(0),
@@ -587,7 +649,12 @@ export function Reader({
       if (!raf)
         raf = requestAnimationFrame(() => {
           raf = 0;
-          setZoom(zoom * pending, cursor);
+          if (text) {
+            // Type sizes go in steps: small pinches add up until they make one.
+            const next = clampText(textScale * pending);
+            if (next === textScale) return;
+            setPrefs({ textScale: next });
+          } else setZoom(zoom * pending, cursor);
           pending = 1;
         });
     };
@@ -603,7 +670,7 @@ export function Reader({
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, menu]);
+  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs]);
 
   // ---------- pinch (native) ----------
   // The pages scale about where the fingers started; on release the zoom keeps that point there.
@@ -652,6 +719,8 @@ export function Reader({
 
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
   const bookmarked = doc.bookmarks.includes(page);
+  // A one-page document is read once it is open.
+  const pct = handle.pageCount <= 1 ? 100 : Math.round((page / (handle.pageCount - 1)) * 100);
   const chapters = useMemo(() => (outline ?? []).filter((o) => o.depth === 0 && o.page >= 0), [outline]);
   const wide = isWide(winW);
   const onPagePress = useCallback(() => {
@@ -661,8 +730,6 @@ export function Reader({
     if (readingMode) setChrome((c) => !c);
   }, [panel, wide, readingMode]);
 
-  const mac = Platform.OS === 'web' && /Mac|iPhone|iPad/.test(navigator.platform);
-  const key = (k: string) => (Platform.OS === 'web' ? `${mac ? '⌘' : 'Ctrl+'}${k}` : undefined);
   const readingItem: MenuItem = {
     key: 'reading',
     icon: readingMode ? 'readingOn' : 'readingAdd',
@@ -677,8 +744,8 @@ export function Reader({
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
     ...(outside && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
-    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: key('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
-    { key: 'print', icon: 'print', label: t.print, hint: key('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
+    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
+    { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
 
   const onLink = useCallback(
@@ -784,7 +851,7 @@ export function Reader({
             <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginRight: space.sm }} />
           )}
           {/* One button per kind: find your way, the form you read in, how it looks, the file itself. */}
-          <IconButton icon="search" label={t.findShortcut} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
+          <IconButton icon="search" label={withShortcut(t.findShortcut, 'F')} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
           <IconButton
             icon="textView"
             label={`${t.textView} (V)`}
@@ -805,6 +872,7 @@ export function Reader({
               <TextInput
                 autoFocus
                 testID="page-input"
+                accessibilityLabel={t.goToPage}
                 keyboardType="number-pad"
                 defaultValue={String(page + 1)}
                 selectTextOnFocus
@@ -817,28 +885,45 @@ export function Reader({
                 style={[styles.pageInput, { color: p.ink }]}
               />
             ) : (
-              <Pressable accessibilityRole="button" accessibilityLabel={t.goToPage} onPress={() => setEditingPage(true)} testID="page-label">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${t.pageOf(page + 1, handle.pageCount)}${readingMode ? ` · ${t.percentRead(pct)}` : ''}`}
+                accessibilityHint={t.goToPage}
+                onPress={() => setEditingPage(true)}
+                testID="page-label"
+              >
                 <T v="numeral" style={{ fontSize: 13 }}>
                   {page + 1}
                   <T v="numeral" color={p.muted} style={{ fontSize: 13 }}>
                     {'  /  '}
                     {handle.pageCount}
-                    {readingMode ? `  ·  ${t.percentRead(Math.round((page / Math.max(1, handle.pageCount - 1)) * 100))}` : ''}
+                    {readingMode ? `  ·  ${t.percentRead(pct)}` : ''}
                   </T>
                 </T>
               </Pressable>
             )}
           </View>
           <View style={[styles.pill, styles.tools, { backgroundColor: p.glass, borderColor: p.hairline }]}>
-            {wide && (
+            {wide && view === 'page' && (
               <>
-                <IconButton icon="zoomOut" label={`${t.zoomOut} (⌘−)`} size={34} onPress={() => setZoom(zoom / 1.2)} />
+                <IconButton icon="zoomOut" label={withShortcut(t.zoomOut, '−')} size={34} onPress={() => setZoom(zoom / 1.2)} />
                 <Pressable accessibilityRole="button" onPress={() => setZoom(1)} accessibilityLabel={t.resetZoom}>
                   <T v="numeral" color={p.muted} style={{ minWidth: 40, textAlign: 'center' }}>
                     {Math.round(zoom * 100)}%
                   </T>
                 </Pressable>
-                <IconButton icon="zoomIn" label={`${t.zoomIn} (⌘+)`} size={34} onPress={() => setZoom(zoom * 1.2)} />
+                <IconButton icon="zoomIn" label={withShortcut(t.zoomIn, '+')} size={34} onPress={() => setZoom(zoom * 1.2)} />
+              </>
+            )}
+            {wide && view === 'text' && (
+              <>
+                <IconButton icon="zoomOut" label={withShortcut(t.smaller, '−')} size={34} onPress={() => setPrefs({ textScale: clampText(textScale - 0.1) })} />
+                <Pressable accessibilityRole="button" onPress={() => setPrefs({ textScale: 1 })} accessibilityLabel={t.size}>
+                  <T v="numeral" color={p.muted} style={{ minWidth: 40, textAlign: 'center' }}>
+                    {Math.round(textScale * 100)}%
+                  </T>
+                </Pressable>
+                <IconButton icon="zoomIn" label={withShortcut(t.larger, '+')} size={34} onPress={() => setPrefs({ textScale: clampText(textScale + 0.1) })} />
               </>
             )}
             <IconButton
@@ -871,6 +956,7 @@ export function Reader({
           palette={p}
           query={query.trim()}
           count={hits.length}
+          more={hits.some((h) => h.more)}
           active={active}
           searching={searching}
           // Fixed below the top bar: moving with the chrome would shift it out from under a pointer.
@@ -892,6 +978,7 @@ export function Reader({
             cache,
             bookmarks: doc.bookmarks,
             annotations: annots,
+            onShowNotes: showNotes,
             onEditNote,
             onDeleteNote,
             onGo: (n) => {

@@ -93,7 +93,7 @@ export function SearchResults({
     if (active >= 0 && active < hits.length) list.current?.scrollToIndex({ index: active, viewPosition: 0.4, animated: true });
   }, [active, hits.length]);
 
-  const more = hits.length >= 200 && !searching;
+  const more = !searching && hits.some((h) => h.more);
   const status =
     searching && !hits.length
       ? t.searching

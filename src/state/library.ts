@@ -50,8 +50,13 @@ type LibraryState = {
    */
   openIncoming(item: ImportItem): Promise<DocRecord | null>;
   remove(id: string): Promise<void>;
-  /** `atEnd`: the reader reached the end (page view: scrolled to the bottom); defaults to being on the last page. */
+  /**
+   * `atEnd`: the reader reached the end (page view: scrolled to the bottom); defaults to being on the last page.
+   * Applied a couple of times a second (scrolling reports every frame); `flushPositions` applies it at once.
+   */
   savePosition(id: string, position: ReadingPosition, atEnd?: boolean): void;
+  /** `now`: written to storage at once too (the reader closes, the page goes away). */
+  flushPositions(now?: boolean): void;
   toggleBookmark(id: string, page: number): void;
   toggleReading(id: string): void;
   setView(id: string, view: 'page' | 'text'): void;
@@ -155,8 +160,22 @@ const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 const dirty = new Set<string>();
+// Positions reported while reading, not yet in the store.
+const positions = new Map<string, { position: ReadingPosition; atEnd?: boolean }>();
+let positionTimer: ReturnType<typeof setTimeout> | undefined;
+const POSITION_MS = 400;
 
 export const useLibrary = create<LibraryState>((set, get) => {
+  // Debounced writes still waiting: written now.
+  const persistNow = () => {
+    clearTimeout(persistTimer);
+    for (const d of get().docs) if (dirty.has(d.id)) repo.put(d);
+    dirty.clear();
+  };
+  if (typeof window !== 'undefined' && typeof document !== 'undefined')
+    // The tab closing or going to the background: where the reader is goes into storage before it does.
+    document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && get().flushPositions(true));
+
   const patch = (id: string, fn: (d: DocRecord) => DocRecord, debounce = false) => {
     const docs = get().docs.map((d) => (d.id === id ? fn(d) : d));
     set({ docs });
@@ -342,16 +361,30 @@ export const useLibrary = create<LibraryState>((set, get) => {
       await repo.remove(id);
     },
 
-    savePosition: (id, position, atEnd) =>
-      patch(
-        id,
-        (d) => {
-          // Reaching the end finishes a reading-list document; it moves to "Finished".
-          const done = d.reading && !d.reading.finishedAt && (atEnd ?? position.page >= d.pageCount - 1);
-          return { ...d, position, reading: done ? { ...d.reading!, finishedAt: Date.now() } : d.reading };
-        },
-        true,
-      ),
+    savePosition: (id, position, atEnd) => {
+      // A finish seen while scrolling is kept even if the next report (still at the bottom) says otherwise.
+      const was = positions.get(id);
+      positions.set(id, { position, atEnd: atEnd || was?.atEnd ? true : atEnd });
+      positionTimer ??= setTimeout(() => get().flushPositions(), POSITION_MS);
+    },
+
+    flushPositions: (now = false) => {
+      clearTimeout(positionTimer);
+      positionTimer = undefined;
+      const pending = [...positions];
+      positions.clear();
+      for (const [id, { position, atEnd }] of pending)
+        patch(
+          id,
+          (d) => {
+            // Reaching the end finishes a reading-list document; it moves to "Finished".
+            const done = d.reading && !d.reading.finishedAt && (atEnd ?? position.page >= d.pageCount - 1);
+            return { ...d, position, reading: done ? { ...d.reading!, finishedAt: Date.now() } : d.reading };
+          },
+          !now,
+        );
+      if (now) persistNow();
+    },
 
     setView: (id, view) => patch(id, (d) => ({ ...d, view })),
 

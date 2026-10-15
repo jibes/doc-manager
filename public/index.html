@@ -59,6 +59,14 @@
     <noscript>Tessel needs JavaScript to run.</noscript>
     <div id="root"></div>
     <script>
+      // The browser's Back while the app holds it (unsaved edits, src/lib/backGuard.ts): this listener comes
+      // before the router's, so the router never sees the step back the app undoes.
+      addEventListener('popstate', function (e) {
+        var hold = window.__tesselPopHold;
+        if (hold && hold()) e.stopImmediatePropagation();
+      });
+    </script>
+    <script>
       // Capture the install prompt before the app mounts; it fires once, early.
       addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();

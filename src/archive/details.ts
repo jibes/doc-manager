@@ -1,11 +1,14 @@
 import type { DocHandle } from '@/engine/types';
 import { repo } from '@/storage';
-import { infoFor, parseTags, withInfo, type Details } from './pdfInfo';
+import { infoFor, parseTags, real, realTitle, withInfo, type Details } from './pdfInfo';
 
-/** The details a PDF carries (falling back to `title` when it has none). */
+/**
+ * The details a PDF carries (falling back to `title` when it has none). Placeholders other programs leave
+ * ("(unspecified)", "Microsoft Word - x.docx") count as none, as everywhere else, so saving drops them.
+ */
 export function detailsOf(handle: DocHandle, title: string): Details {
   const m = handle.metadata;
-  return { title: m.title ?? title, sender: m.author ?? '', type: m.subject ?? '', tags: parseTags(m.keywords), date: m.date ?? '' };
+  return { title: realTitle(m.title) || title, sender: real(m.author), type: real(m.subject), tags: parseTags(m.keywords), date: real(m.date) };
 }
 
 /**

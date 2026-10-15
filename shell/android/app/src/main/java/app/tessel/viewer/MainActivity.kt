@@ -126,10 +126,14 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (web.canGoBack()) web.goBack() else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                    isEnabled = true
+                // The page answers first: it closes a panel, or asks about unsaved edits instead of losing them.
+                web.evaluateJavascript("(function(){try{return !!(window.__tesselBack && window.__tesselBack())}catch(e){return false}})()") { handled ->
+                    if (handled == "true") return@evaluateJavascript
+                    if (web.canGoBack()) web.goBack() else {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
+                    }
                 }
             }
         })

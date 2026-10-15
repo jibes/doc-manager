@@ -13,7 +13,7 @@ import { SelectChip, SortChip } from '@/components/SortChip';
 import { showActions } from '@/state/actions';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
-import { errorText, t } from '@/i18n';
+import { errorText, opError, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
 import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
@@ -201,14 +201,6 @@ export function Roots({ bottom }: { bottom: number }) {
       <Toast message={error} onDismiss={() => setError(null)} above={tabBar ? TAB_BAR_H : 0} />
     </>
   );
-}
-
-/** What went wrong with a file operation, in the user's language where we know it. */
-function opError(e: unknown): string {
-  const m = e instanceof Error ? e.message : '';
-  const taken = /^exists:(.*)$/.exec(m);
-  if (taken) return `${t.opFailed} ${t.nameTaken(taken[1])}`;
-  return m === t.writeDenied || m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
 }
 
 

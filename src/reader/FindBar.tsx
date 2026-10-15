@@ -16,11 +16,13 @@ type Props = {
   onOpen: () => void;
   onStep: (dir: 1 | -1) => void;
   onClear: () => void;
+  /** Some page has more matches than are listed. */
+  more?: boolean;
 };
 
 /** Compact find-in-page bar that keeps a search alive (and highlighted) after the panel closes. */
-export function FindBar({ palette: p, query, count, active, searching, top, onOpen, onStep, onClear }: Props) {
-  const status = count ? t.nOf(active >= 0 ? active + 1 : '–', count, count >= 200 && !searching) : searching ? t.searching : t.noMatches;
+export function FindBar({ palette: p, query, count, more, active, searching, top, onOpen, onStep, onClear }: Props) {
+  const status = count ? t.nOf(active >= 0 ? active + 1 : '–', count, !!more && !searching) : searching ? t.searching : t.noMatches;
   return (
     <Animated.View
       entering={FadeInUp.duration(200)}
