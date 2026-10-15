@@ -77,10 +77,11 @@ export async function listCameras(): Promise<CameraDevice[]> {
 
 function request(deviceId: string | null): Promise<MediaStream> {
   const video: MediaTrackConstraints = {
-    // Ask for as much as the camera will stream; the video frame is the
-    // fallback still on browsers without ImageCapture.
-    width: { ideal: 3840 },
-    height: { ideal: 2160 },
+    // A first guess at a phone sensor's full picture (4:3); `fullPicture` then
+    // asks for the camera's own largest size. A 16:9 request would cut the top
+    // and bottom off a 4:3 sensor.
+    width: { ideal: 4096 },
+    height: { ideal: 3072 },
   };
   if (deviceId) video.deviceId = { exact: deviceId };
   else video.facingMode = { ideal: 'environment' };
@@ -139,7 +140,23 @@ export async function openCamera(deviceId: string | null): Promise<OpenCamera> {
   return finishOpen(stream);
 }
 
-/** Check the stream and pin the standard zoom and continuous focus. */
+/**
+ * The camera's whole picture: its largest size, uncropped and unscaled. The
+ * preview then shows everything the sensor sees (black bars where its shape
+ * differs from the screen's), and the video frame, the still on browsers
+ * without ImageCapture, has every pixel the camera streams.
+ */
+export function fullPicture(caps: MediaTrackCapabilities): MediaTrackConstraints {
+  const width = caps.width?.max;
+  const height = caps.height?.max;
+  const native = (caps as { resizeMode?: string[] }).resizeMode?.includes('none');
+  return {
+    ...(width && height ? { width: { ideal: width }, height: { ideal: height } } : {}),
+    ...(native ? { resizeMode: { ideal: 'none' } } : {}),
+  } as MediaTrackConstraints;
+}
+
+/** Check the stream; ask for the camera's whole picture, the standard zoom and continuous focus. */
 async function finishOpen(stream: MediaStream): Promise<OpenCamera> {
   const track = stream.getVideoTracks()[0];
   if (!track) {
@@ -152,8 +169,11 @@ async function finishOpen(stream: MediaStream): Promise<OpenCamera> {
   // A logical multi-camera can start at 0.5x; documents want the 1x lens.
   if (caps.zoom && caps.zoom.min < 1 && caps.zoom.max >= 1) advanced.push({ zoom: 1 });
   if (caps.focusMode?.includes('continuous')) advanced.push({ focusMode: 'continuous' });
-  if (advanced.length) {
-    await track.applyConstraints({ advanced } as MediaTrackConstraints).catch(() => undefined);
+  // One call with everything: applying constraints replaces all earlier ones,
+  // so zoom and focus alone would drop the size asked for when opening.
+  const full = fullPicture(caps);
+  if (advanced.length || Object.keys(full).length) {
+    await track.applyConstraints({ ...full, ...(advanced.length ? { advanced } : {}) } as MediaTrackConstraints).catch(() => undefined);
   }
 
   return { stream, track, label: track.label || 'Camera', torch: caps.torch === true };

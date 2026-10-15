@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickCamera, scoreCamera } from '../engine/camera/camera';
+import { fullPicture, pickCamera, scoreCamera } from '../engine/camera/camera';
 import { heatmapsToQuad } from '../engine/detect/heatmap';
 
 /** Four Gaussian blobs at normalised positions, DocAligner's output layout. */
@@ -111,5 +111,16 @@ describe('camera selection', () => {
   it('defers to facingMode when labels are hidden', () => {
     expect(pickCamera([{ deviceId: 'q', label: '' }])).toBeNull();
     expect(scoreCamera('', 0)).toBe(-0);
+  });
+});
+
+describe('fullPicture', () => {
+  it("asks for the camera's largest size, uncropped", () => {
+    const caps = { width: { min: 1, max: 4000 }, height: { min: 1, max: 3000 }, resizeMode: ['none', 'crop-and-scale'] };
+    expect(fullPicture(caps as MediaTrackCapabilities)).toEqual({ width: { ideal: 4000 }, height: { ideal: 3000 }, resizeMode: { ideal: 'none' } });
+  });
+
+  it('asks for nothing a camera does not report', () => {
+    expect(fullPicture({})).toEqual({});
   });
 });

@@ -454,7 +454,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
             autoPlay
             onLoadedMetadata={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
             onResize={(e) => setVideoSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+            // The frame has the picture's shape; until both sizes are known, the whole picture is shown all the same.
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
           />
           {flash && <div style={{ position: 'absolute', inset: 0, background: '#fff', opacity: 0.85 }} />}
         </div>
