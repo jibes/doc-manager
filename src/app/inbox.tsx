@@ -1,9 +1,9 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { destination, fileDocument, inboxFiles, loadRules, propose, suggest, useRules, withRules, type Proposal } from '@/archive/inbox';
+import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, withRules, type Proposal } from '@/archive/inbox';
 import type { Details } from '@/archive/pdfInfo';
 import { openDoc } from '@/archive/Results';
 import { discard } from '@/archive/trash';
@@ -15,6 +15,7 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { aiReady } from '@/scan/ai';
+import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 820;
@@ -47,6 +48,9 @@ export default function Inbox() {
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
   const [edits, setEdits] = useState<Record<string, Edits>>({});
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  // Being filed now (a second tap, or File all, leaves them be).
+  const filing = useRef(new Set<string>());
+  const [filingAll, setFilingAll] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // While filing makes a document searchable: how far reading its text has come.
   const [progress, setProgress] = useState<Record<string, string>>({});
@@ -80,31 +84,65 @@ export default function Inbox() {
     return !d.date || DATE.test(d.date);
   };
 
+  const gone = (item: Proposal) => {
+    setItems((list) => (list ?? []).filter((x) => x.entry.id !== item.entry.id));
+    void refreshInboxCount();
+  };
+  /** Files one; false when it failed (it says why). */
   const fileOne = async (item: Proposal) => {
-    if (!archive || !valid(item)) return false;
+    const id = item.entry.id;
+    if (!archive || !valid(item) || filing.current.has(id)) return true;
+    filing.current.add(id);
     const path = pathOf(item);
-    setBusy((b) => new Set(b).add(item.entry.id));
+    setBusy((b) => new Set(b).add(id));
     try {
-      await fileDocument(archive, dir, item, detailsOf(item, edits[item.entry.id]), path, (done, total) =>
-        setProgress((all) => ({ ...all, [item.entry.id]: t.searchableProgress(done, total) })),
+      await fileDocument(
+        archive,
+        dir,
+        item,
+        detailsOf(item, edits[id]),
+        path,
+        (done, total) => setProgress((all) => ({ ...all, [id]: t.searchableProgress(done, total) })),
+        useLibrary.getState().followEntry,
       );
-      setItems((list) => (list ?? []).filter((x) => x.entry.id !== item.entry.id));
+      gone(item);
       setNotice(t.inboxFiled(path.join('/')));
       return true;
     } catch (e) {
       setNotice(t.inboxFailed(message(e)));
       return false;
     } finally {
+      filing.current.delete(id);
       setBusy((b) => {
         const next = new Set(b);
-        next.delete(item.entry.id);
+        next.delete(id);
         return next;
       });
-      setProgress(({ [item.entry.id]: _done, ...rest }) => rest);
+      setProgress(({ [id]: _done, ...rest }) => rest);
     }
   };
+  // One after the other; those whose date isn't valid stay (and it says so), a failure stops it.
   const fileAll = async () => {
-    for (const item of proposals) if (!(await fileOne(item))) break;
+    setFilingAll(true);
+    try {
+      const skipped = proposals.filter((item) => !valid(item)).length;
+      for (const item of proposals.filter(valid)) if (!(await fileOne(item))) return;
+      if (skipped) setNotice(t.inboxSkipped(skipped));
+    } finally {
+      setFilingAll(false);
+    }
+  };
+  // A copy that is already filed: the library's documents of it become the filed one, then it goes.
+  const discardOne = async (item: Proposal) => {
+    if (!archive) return;
+    try {
+      const filed = item.duplicateOf?.place;
+      if (filed?.kind === 'folder') await useLibrary.getState().followEntry(item.entry, filed.entry).catch(() => {});
+      await discard(archive, dir, [item.entry]);
+      gone(item);
+    } catch (e) {
+      setNotice(message(e));
+    }
   };
   const askAi = async (item: Proposal) => {
     setBusy((b) => new Set(b).add(item.entry.id));
@@ -128,7 +166,7 @@ export default function Inbox() {
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
           <ScreenHeader title={t.inboxTitle}>
             {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push('/rules')} />}
-            {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} onPress={() => void fileAll()} />}
+            {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} disabled={filingAll} onPress={() => void fileAll()} />}
           </ScreenHeader>
 
           {!archive ? (
@@ -162,12 +200,7 @@ export default function Inbox() {
                     busy={busy.has(item.entry.id)}
                     progress={progress[item.entry.id]}
                     onFile={() => void fileOne(item)}
-                    onDiscard={() =>
-                      void discard(archive, dir, [item.entry]).then(
-                        () => setItems((list) => (list ?? []).filter((x) => x.entry.id !== item.entry.id)),
-                        (e) => setNotice(message(e)),
-                      )
-                    }
+                    onDiscard={() => void discardOne(item)}
                     onSuggest={aiReady(ai) ? () => void askAi(item) : undefined}
                     onOpen={() => void openDoc({ key: item.entry.id, place: { kind: 'folder', root: archive, rootName: '', entry: item.entry }, name: item.entry.name, size: item.entry.size, modified: item.entry.modified, ...detailsOf(item) }, 0, '').catch((e) => setNotice(message(e)))}
                   />

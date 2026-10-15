@@ -14,7 +14,12 @@ export const DEFAULT_TEMPLATE = '{year}/{sender}/{date} {title}';
 export const DEFAULT_RULES: Rules = { template: DEFAULT_TEMPLATE, rules: [] };
 export const PLACEHOLDERS = ['year', 'month', 'day', 'date', 'sender', 'type', 'title'] as const;
 
-const fold = (s: string) => s.toLocaleLowerCase().normalize('NFC');
+/** Case, Unicode form and ß/SS don't matter ("Straße" is "STRASSE"). */
+const fold = (s: string) => s.normalize('NFC').toLocaleLowerCase().replace(/ß/g, 'ss');
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Shorter words than this must start a word ("AOK" isn't in "Kakaokekse"); longer ones may end one ("Stromrechnung"). */
+const INFIX_MIN = 4;
+const wordIn = (hay: string, w: string) => (w.length >= INFIX_MIN ? hay.includes(w) : new RegExp(`(?:^|[^\\p{L}\\p{N}])${escape(w)}`, 'u').test(hay));
 
 /** Whether a rule applies: any comma-separated alternative whose words all occur in the text (ignoring case). */
 export function ruleMatches(text: string, rule: Rule): boolean {
@@ -22,7 +27,7 @@ export function ruleMatches(text: string, rule: Rule): boolean {
   return rule.match
     .split(',')
     .map((alt) => fold(alt).split(/\s+/).filter(Boolean))
-    .some((words) => words.length > 0 && words.every((w) => hay.includes(w)));
+    .some((words) => words.length > 0 && words.every((w) => wordIn(hay, w)));
 }
 
 /** Details with the matching rules applied: what the document already has stays; tags are added. */
@@ -52,42 +57,56 @@ const MONTHS: Record<string, number> = {
   dez: 12, dec: 12, dezember: 12, december: 12,
 };
 
-const iso = (y: number, m: number, d: number) => {
+const iso = (y: number, m: number, d: number, now: Date) => {
   const date = new Date(Date.UTC(y, m - 1, d));
-  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d || y < 1900 || y > 2100) return '';
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d || y < 1900) return '';
+  // A document isn't dated more than a year ahead (a due date, maybe; not the date it was written).
+  if (date.getTime() > now.getTime() + 366 * 86_400_000) return '';
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 };
 
+/** "26" → 2026, "98" → 1998: the century that doesn't put it more than a year ahead. */
+const fullYear = (yy: string, now: Date) => {
+  if (yy.length === 4) return +yy;
+  const y = 2000 + +yy;
+  return y > now.getFullYear() + 1 ? y - 100 : y;
+};
+
+/** Dates that aren't the document's: someone's birthday. */
+const BIRTH = /(?:geb\.?|geboren(?:\s+am)?|geburtsdatum:?|born(?:\s+on)?|date\s+of\s+birth:?|dob:?)\s*$/i;
+
 /** The first date in a text, as YYYY-MM-DD: 02.10.2026, 2.10.26, 2026-10-02, 2. Oktober 2026, October 2, 2026. */
-export function findDate(text: string): string {
+export function findDate(text: string, now = new Date()): string {
   const patterns: [RegExp, (m: RegExpExecArray) => string][] = [
-    [/\b(\d{4})-(\d{2})-(\d{2})\b/, (m) => iso(+m[1], +m[2], +m[3])],
-    [/\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/, (m) => iso(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1])],
-    [/\b(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü]{3,9})\.?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[2])] ? iso(+m[3], MONTHS[fold(m[2])], +m[1]) : '')],
-    [/\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[1])] ? iso(+m[3], MONTHS[fold(m[1])], +m[2]) : '')],
+    [/\b(\d{4})-(\d{2})-(\d{2})\b/, (m) => iso(+m[1], +m[2], +m[3], now)],
+    [/\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/, (m) => iso(fullYear(m[3], now), +m[2], +m[1], now)],
+    [/\b(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü]{3,9})\.?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[2])] ? iso(+m[3], MONTHS[fold(m[2])], +m[1], now) : '')],
+    [/\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[1])] ? iso(+m[3], MONTHS[fold(m[1])], +m[2], now) : '')],
   ];
   // The earliest valid date in the text wins (letters put theirs near the top).
   let best = { at: Infinity, date: '' };
   for (const [re, toDate] of patterns) {
     const global = new RegExp(re.source, 'g');
     for (let m = global.exec(text); m; m = global.exec(text)) {
+      if (BIRTH.test(text.slice(Math.max(0, m.index - 24), m.index))) continue;
       const date = toDate(m);
-      if (date && m.index < best.at) best = { at: m.index, date };
-      if (date) break;
+      if (!date) continue;
+      if (m.index < best.at) best = { at: m.index, date };
+      break;
     }
   }
   return best.date;
 }
 
-/** A path part that is safe on every system Syncthing may sync to. */
+/** A path part that is safe on every system Syncthing may sync to (no name ends in a dot or space, even cut short). */
 const safe = (s: string) =>
   s
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\.+/, '')
-    .replace(/[. ]+$/, '')
-    .slice(0, 120);
+    .slice(0, 120)
+    .replace(/[. ]+$/, '');
 
 /**
  * Where a filed document goes, from the template: folders and the file name (with ".pdf"). Missing details are
@@ -110,7 +129,8 @@ export function pathFor(template: string, d: Details, fallback: { title: string;
       safe(
         part
           .replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? values[key as keyof typeof values] : all))
-          // A missing value leaves no stray separators: "2026-10-02  – " → "2026-10-02".
+          // A missing value leaves no stray separators: "2026-10-02  – " → "2026-10-02", "A -  - B" → "A - B".
+          .replace(/(\s*[-–·_])(?:\s*[-–·_])+(?=\s|$)/g, '$1')
           .replace(/\s*[-–·_]\s*$/, '')
           .replace(/^\s*[-–·_]\s*/, ''),
       ),

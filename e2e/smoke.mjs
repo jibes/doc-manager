@@ -1744,7 +1744,7 @@ async function documentsScreen() {
     const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
     const h = await (await root.getDirectoryHandle('.tessel')).getFileHandle('views.json');
     const data = JSON.parse(await (await h.getFile()).text());
-    data.views.push({ id: 'other', name: 'Columns', query: 'Orderly', filter: {}, sort: 'name' });
+    data.views.push({ id: 'other', name: 'Columns', query: 'Orderly', filter: {}, sort: 'name' }, { id: 'here', name: 'Here', query: '', filter: {}, sort: 'name', place: 'device' });
     const w = await h.createWritable();
     await w.write(JSON.stringify(data));
     await w.close();
@@ -1754,7 +1754,11 @@ async function documentsScreen() {
   await vis('docs-count').waitFor();
   // Read from the file as the screen opens.
   await page.getByTestId('view-chip').filter({ hasText: 'Columns' }).waitFor({ timeout: 5000 }).catch(() => {});
-  check((await vis('view-chip').allInnerTexts()).join() === 'Invoices,Columns', `documents: views from the archive folder are listed (${await vis('view-chip').allInnerTexts()})`);
+  check((await vis('view-chip').allInnerTexts()).join() === 'Invoices,Columns,Here', `documents: views from the archive folder are listed (${await vis('view-chip').allInnerTexts()})`);
+  await vis('view-chip').filter({ hasText: 'Here' }).click();
+  const placeShown = await vis('facet-place').innerText().catch(() => '');
+  const hereOn = await vis('view-chip').filter({ hasText: 'Here' }).getAttribute('aria-pressed');
+  check(/device/i.test(placeShown) && hereOn === 'true', `documents: a view brings back where the documents are (${placeShown}, ${hereOn})`);
   await vis('view-chip').filter({ hasText: 'Columns' }).click();
   let byText = '';
   for (let i = 0; i < 10 && byText !== '1 DOCUMENT'; i++) byText = await page.waitForTimeout(300).then(count);
@@ -1765,7 +1769,7 @@ async function documentsScreen() {
   await vis('view-chip').filter({ hasText: 'Invoices' }).click();
   await page.getByTestId('action-view-remove').click();
   await page.waitForTimeout(500);
-  check((await vis('view-chip').allInnerTexts()).join() === 'Columns', 'documents: a view can be removed');
+  check((await vis('view-chip').allInnerTexts()).join() === 'Columns,Here', 'documents: a view can be removed');
   await ctx.close();
 }
 
@@ -2045,6 +2049,7 @@ async function syncSafety() {
   const back = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
   check(before === 2 && back.length === 2, `sync: a trashed document is restored where it was (${back})`);
   await vis('trash-item').first().getByTestId('trash-delete').click();
+  await page.getByTestId('ask-confirm').click();
   await page.waitForTimeout(800);
   check((await vis('trash-item').count()) === 0 && !(await names('.tessel/trash')).length, 'sync: and deleted for good from the trash');
   const manifest = await page.evaluate(async () => {
@@ -2501,6 +2506,7 @@ async function batch() {
   await hit('Orderly Notes').click({ button: 'right' });
   await hit('Old title').click();
   check(/2 selected/.test(await page.getByText(/selected$/).locator('visible=true').innerText()), 'batch: documents are picked with a right click and a tap');
+  check((await hit('Old title').getAttribute('aria-checked')) === 'true' && (await vis('select').count()) === 0, 'batch: picked rows say so, and Select steps aside while picking');
   await vis('act-move').click();
   check(await vis('paste-bar').isVisible(), 'batch: Move goes on to the folders to choose where');
   await vis('folder-root').filter({ hasText: 'Archive' }).click();

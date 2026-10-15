@@ -58,6 +58,8 @@ export interface LibraryRepo {
   saveCover(id: string, cover: Blob | string): Promise<void>;
   /** Library documents linked to these files, or to files inside these folders (Android app), by their own URI. */
   linkedTo(uris: string[]): Promise<Map<string, string[]>>;
+  /** Library documents linked to this file (browsers, by its handle). */
+  linkedToHandle(handle: FileHandle): Promise<string[]>;
   /** Points documents linked to a file at its new place (renamed or moved in the file browser). */
   relink(id: string, uri: string): Promise<void>;
   /** Android app: the URI of the file a document is linked to (to hand it to other apps); undefined for a copy. */

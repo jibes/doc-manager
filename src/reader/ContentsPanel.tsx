@@ -74,7 +74,7 @@ export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmark
           <Pressable
             key={k}
             accessibilityRole="tab"
-            accessibilityState={{ selected: tab === k }}
+            aria-selected={tab === k}
             testID={`tab-${k}`}
             onPress={() => setTab(k)}
             style={[styles.segBtn, tab === k && [{ backgroundColor: p.raised }, styles.segActive]]}

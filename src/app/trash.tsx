@@ -2,18 +2,17 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { deleteForever, purge, restore, useTrash } from '@/archive/trash';
+import { deleteForever, purge, restore, useTrash, type TrashItem } from '@/archive/trash';
 import { Icon } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { opError, t } from '@/i18n';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 820;
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The archive's trash: restore what was deleted, or delete it for good (it goes by itself after 30 days). */
 export default function Trash() {
@@ -28,14 +27,18 @@ export default function Trash() {
     if (!archive) return;
     purge(archive).then(
       () => setLoaded(true),
-      (e) => (setLoaded(true), setNotice(message(e))),
+      (e) => (setLoaded(true), setNotice(opError(e))),
     );
   }, [archive]);
 
-  const run = (op: () => Promise<void>) => op().catch((e) => setNotice(message(e)));
+  const run = (op: () => Promise<void>) => op().catch((e) => setNotice(opError(e)));
   const emptyAll = async () => {
     if (!archive || (await ask({ title: t.trashEmptyAsk(items.length), confirm: t.trashEmptyAll, destructive: true })) === null) return;
     await run(() => deleteForever(archive, items.map((i) => i.name)));
+  };
+  const deleteOne = async (item: TrashItem) => {
+    if (!archive || (await ask({ title: t.trashEmptyAsk(1), body: item.original, confirm: t.trashDeleteForever, destructive: true })) === null) return;
+    await run(() => deleteForever(archive, [item.name]));
   };
 
   return (
@@ -60,11 +63,11 @@ export default function Trash() {
                           {item.original}
                         </T>
                         <T v="caption" color={p.muted}>
-                          {t.trashDeletedAt(new Date(item.deletedAt).toLocaleDateString())}
+                          {t.trashDeletedAt(t.day(item.deletedAt))}
                         </T>
                       </View>
                       <Button testID="trash-restore" kind="quiet" label={t.trashRestore} onPress={() => void run(() => restore(archive, [item]))} />
-                      <IconButton testID="trash-delete" icon="trash" size={36} label={t.trashDeleteForever} onPress={() => void run(() => deleteForever(archive, [item.name]))} />
+                      <IconButton testID="trash-delete" icon="trash" size={36} label={t.trashDeleteForever} onPress={() => void deleteOne(item)} />
                     </View>
                   ))}
                 </View>

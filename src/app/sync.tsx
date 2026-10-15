@@ -6,23 +6,21 @@ import { allDocs, forget, useIndex, type Conflict } from '@/archive/indexer';
 import { openDoc, whereIs } from '@/archive/Results';
 import type { IndexedDoc } from '@/archive/search';
 import { duplicates } from '@/archive/sync';
-import { discard } from '@/archive/trash';
+import { discard, trashes } from '@/archive/trash';
 import { Icon } from '@/components/Icon';
 import { Button, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { opError, t } from '@/i18n';
 import { folders } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
+import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 820;
 /** Groups shown at first, and added by "Show more". */
 const PAGE = 20;
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const when = (ms: number) => (ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
-const kb = (n: number) => `${Math.max(1, Math.round(n / 1024))} KB`;
 
 /** A conflict copy with the file it conflicts with (null when that one is gone). */
 type Pair = { conflict: Conflict; original: FolderEntry | null };
@@ -63,16 +61,20 @@ export default function Sync() {
   }, [conflicts, done, round, archive]);
 
   // Resolved files leave the lists (and the index) at once; the next pass reads the folders again.
-  const act = async (op: () => Promise<unknown>, after: () => void) => {
+  const act = async (op: () => Promise<string>, after: () => void) => {
     try {
-      await op();
+      const done = await op();
       after();
-      setNotice(t.syncKept);
+      setNotice(done);
     } catch (e) {
-      setNotice(message(e));
+      setNotice(opError(e));
     }
     setRound((r) => r + 1);
   };
+  /** Whether `name` in `root` may go: to the trash in the archive; elsewhere for good, once that is confirmed. */
+  const mayDelete = async (root: string, name: string) =>
+    trashes(root) || (await ask({ title: t.syncDeleteAsk, body: t.syncDeleteBody(name), confirm: t.delete, destructive: true })) !== null;
+  const kept = (root: string) => (trashes(root) ? t.syncKept : t.syncKeptDeleted);
   /** `replaced`: the original went to the trash (the copy took its name): read again on the next pass. */
   const dropPair = (pair: Pair, replaced = false) => {
     const { root, entry } = pair.conflict;
@@ -80,23 +82,33 @@ export default function Sync() {
     setPairs((ps) => ps?.filter((p) => p.conflict.entry.id !== entry.id) ?? null);
   };
 
-  const keepOriginal = (pair: Pair) => act(() => discard(pair.conflict.root, pair.conflict.dir, [pair.conflict.entry]), () => dropPair(pair));
-  const keepCopy = (pair: Pair) =>
-    act(async () => {
-      const { root, dir, entry, name } = pair.conflict;
+  const keepOriginal = async (pair: Pair) => {
+    const { root, dir, entry } = pair.conflict;
+    if (!(await mayDelete(root, entry.name))) return;
+    await act(async () => (await discard(root, dir, [entry]), kept(root)), () => dropPair(pair));
+  };
+  const keepCopy = async (pair: Pair) => {
+    const { root, dir, entry, name } = pair.conflict;
+    if (pair.original && !(await mayDelete(root, pair.original.name))) return;
+    await act(async () => {
       if (pair.original) await discard(root, dir, [pair.original]);
       await folders.rename(root, dir, entry, name.original);
+      return pair.original ? kept(root) : t.syncKeptDeleted;
     }, () => dropPair(pair, true));
+  };
   const keepBoth = (pair: Pair) =>
     act(async () => {
       const { root, dir, entry, name } = pair.conflict;
       const dot = name.original.lastIndexOf('.');
       const [stem, ext] = dot > 0 ? [name.original.slice(0, dot), name.original.slice(dot)] : [name.original, ''];
-      await folders.rename(root, dir, entry, `${stem} (${name.device})${ext}`);
+      const both = `${stem} (${name.device})${ext}`;
+      await folders.rename(root, dir, entry, both);
+      return t.syncKeptBoth(both);
     }, () => dropPair(pair));
   const keepOne = (group: IndexedDoc[], keep: IndexedDoc) =>
     act(async () => {
       for (const d of group) if (d !== keep && d.place.kind === 'folder') await discard(d.place.root, d.place.dir, [d.place.entry]);
+      return t.syncKept;
     }, () => {
       forget(group.filter((d) => d !== keep).map((d) => d.key));
       setGroups((gs) => gs.filter((g) => g !== group));
@@ -125,7 +137,7 @@ export default function Sync() {
                     <Version
                       label={t.syncThisVersion}
                       entry={pair.original}
-                      onOpen={() => void open(pair.conflict.root, pair.conflict.rootName, pair.original!).catch((e) => setNotice(message(e)))}
+                      onOpen={() => void open(pair.conflict.root, pair.conflict.rootName, pair.original!).catch((e) => setNotice(opError(e)))}
                       onKeep={() => void keepOriginal(pair)}
                       testID="sync-keep-original"
                     />
@@ -137,7 +149,7 @@ export default function Sync() {
                   <Version
                     label={t.syncOtherVersion(pair.conflict.name.device, pair.conflict.name.at)}
                     entry={pair.conflict.entry}
-                    onOpen={() => void open(pair.conflict.root, pair.conflict.rootName, pair.conflict.entry).catch((e) => setNotice(message(e)))}
+                    onOpen={() => void open(pair.conflict.root, pair.conflict.rootName, pair.conflict.entry).catch((e) => setNotice(opError(e)))}
                     onKeep={() => void keepCopy(pair)}
                     testID="sync-keep-copy"
                   />
@@ -169,7 +181,7 @@ export default function Sync() {
                         label={d.name}
                         where={whereIs(d.place)}
                         entry={d.place.entry}
-                        onOpen={() => void openDoc(d, 0, '').catch((e) => setNotice(message(e)))}
+                        onOpen={() => void openDoc(d, 0, '').catch((e) => setNotice(opError(e)))}
                         onKeep={() => void keepOne(group, d)}
                         testID="sync-keep-one"
                       />
@@ -208,7 +220,7 @@ function Version({ label, where, entry, onOpen, onKeep, testID }: { label: strin
             {label}
           </T>
           <T v="caption" color={p.muted}>
-            {[when(entry.modified), entry.size ? kb(entry.size) : ''].filter(Boolean).join(' · ')}
+            {[entry.modified ? t.dayTime(entry.modified) : '', entry.size ? t.fileSize(entry.size) : ''].filter(Boolean).join(' · ')}
           </T>
         </View>
       </View>

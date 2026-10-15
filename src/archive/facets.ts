@@ -8,10 +8,16 @@ export const SORTS: Sort[] = ['date', 'oldest', 'name', 'size'];
 export type Facet = keyof Filter;
 export const FACETS: Facet[] = ['tag', 'sender', 'type', 'year'];
 
+/** A moment as the local date, YYYY-MM-DD (a file saved at 00:30 in Berlin is of that day, not the day before). */
+export function localDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** A document's own date (its details), else the file's: YYYY-MM-DD. */
 export function docDate(d: IndexedDoc): string {
   if (d.date) return d.date;
-  return d.modified > 0 ? new Date(d.modified).toISOString().slice(0, 10) : '';
+  return d.modified > 0 ? localDate(d.modified) : '';
 }
 
 /** The values a document has for a facet (a document can have several tags). */
@@ -30,8 +36,13 @@ export function valuesOf(d: IndexedDoc, facet: Facet): string[] {
   }
 }
 
+// Made once: thousands of documents are compared on every change (a collator per comparison was the slow part).
+const accent = new Intl.Collator(undefined, { sensitivity: 'accent' });
+const plain = new Intl.Collator();
+const natural = new Intl.Collator(undefined, { numeric: true });
+
 /** Case-insensitive: "Rechnung" and "rechnung" are one value. */
-const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
+const same = (a: string, b: string) => accent.compare(a, b) === 0;
 
 export function matches(d: IndexedDoc, filter: Filter): boolean {
   return FACETS.every((f) => !filter[f] || valuesOf(d, f).some((v) => same(v, filter[f]!)));
@@ -56,7 +67,7 @@ export function facetCounts(docs: IndexedDoc[], filter: Filter): Record<Facet, {
       }
     }
     out[facet] = [...counts.values()].sort((a, b) =>
-      facet === 'year' ? b.value.localeCompare(a.value) : b.count - a.count || a.value.localeCompare(b.value),
+      facet === 'year' ? (b.value < a.value ? -1 : b.value > a.value ? 1 : 0) : b.count - a.count || plain.compare(a.value, b.value),
     );
   }
   return out;
@@ -64,7 +75,10 @@ export function facetCounts(docs: IndexedDoc[], filter: Filter): Record<Facet, {
 
 const titleOf = (d: IndexedDoc) => d.title || d.name.replace(/\.pdf$/i, '');
 
-const byName = (a: IndexedDoc, b: IndexedDoc) => titleOf(a).localeCompare(titleOf(b), undefined, { numeric: true });
+const byName = (a: IndexedDoc, b: IndexedDoc) => natural.compare(titleOf(a), titleOf(b));
+
+/** Dates are YYYY-MM-DD: compared as they are. */
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc): T[];
 export function sortDocs(items: IndexedDoc[], sort: Sort): IndexedDoc[];
@@ -76,16 +90,23 @@ export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedD
       case 'size':
         return b.size - a.size || byName(a, b);
       case 'oldest':
-        return docDate(a).localeCompare(docDate(b)) || byName(a, b);
+        return cmp(docDate(a), docDate(b)) || byName(a, b);
       case 'date':
-        return docDate(b).localeCompare(docDate(a)) || byName(a, b);
+        return cmp(docDate(b), docDate(a)) || byName(a, b);
     }
   };
   return [...items].sort((a, b) => compare(docOf(a), docOf(b)));
 }
 
-/** A named filter, kept with the archive so every device has it. */
-export type SavedView = { id: string; name: string; query: string; filter: Filter; sort: Sort };
+/** Where a document is: the archive (synced), another folder, or only on this device. */
+export type Where = 'archive' | 'folders' | 'device';
+export const WHERES: Where[] = ['archive', 'folders', 'device'];
+
+/**
+ * A named filter, kept with the archive so every device has it. `place`: only documents there; `relevance`: a
+ * search's best matches first (else in `sort` order).
+ */
+export type SavedView = { id: string; name: string; query: string; filter: Filter; sort: Sort; place?: Where; relevance?: boolean };
 
 /** Views as stored: anything malformed is dropped rather than breaking the screen. */
 export function parseViews(json: string): SavedView[] {
@@ -100,6 +121,8 @@ export function parseViews(json: string): SavedView[] {
         query: typeof v.query === 'string' ? v.query : '',
         filter: Object.fromEntries(FACETS.filter((f) => typeof v.filter?.[f] === 'string').map((f) => [f, v.filter[f]])) as Filter,
         sort: SORTS.includes(v.sort) ? v.sort : 'date',
+        ...(WHERES.includes(v.place!) ? { place: v.place } : {}),
+        ...(typeof v.relevance === 'boolean' ? { relevance: v.relevance } : {}),
       }));
   } catch {
     return [];

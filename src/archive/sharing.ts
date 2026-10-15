@@ -58,7 +58,7 @@ async function withKeys() {
 }
 
 async function pass(): Promise<void> {
-  const { archive, shareReading } = usePrefs.getState();
+  const { archive, shareReading, unshared } = usePrefs.getState();
   if (!archive || !shareReading || Platform.OS !== 'web') return;
   const device = deviceId();
   const docs = await withKeys();
@@ -66,6 +66,8 @@ async function pass(): Promise<void> {
   const before = states.find((s) => s.device === device)?.docs ?? {};
   // What changed here since the last pass, stamped; then the newest over all devices.
   const own: Record<string, SharedDoc> = record(before, docs, Date.now());
+  // Removed from this library while on the reading list (and not back since): off the list everywhere.
+  for (const u of unshared) if (!docs.some((d) => d.key === u.key)) own[u.key] = { ...own[u.key], title: own[u.key]?.title ?? '', reading: { v: null, at: u.at } };
   const others = states.filter((s) => s.device !== device);
   const merged = merge([...others, { device, docs: own }]);
   const { patchDoc } = useLibrary.getState();
@@ -97,6 +99,11 @@ async function pass(): Promise<void> {
   useSharing.setState({ devices: others.length, at: Date.now() });
   if (serializeState({ device, docs: own }) !== serializeState({ device, docs: before })) {
     await folders.writeText(archive, [...STATE, `${device}.json`], serializeState({ device, docs: own }));
+  }
+  // Shared now: forgotten (those removed during this pass stay for the next).
+  if (unshared.length) {
+    const now = usePrefs.getState();
+    now.set({ unshared: now.unshared.filter((u) => !unshared.includes(u)) });
   }
 }
 

@@ -130,7 +130,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
       <Pressable
         testID={testID}
         accessibilityRole={picking ? 'checkbox' : 'button'}
-        accessibilityState={picking ? { checked: selected } : undefined}
+        aria-checked={picking ? selected : undefined}
         accessibilityLabel={label ?? title}
         onPress={picking ? onToggle : onOpen}
         onLongPress={onSelect}
@@ -193,7 +193,7 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, sele
     <Pressable
       testID={testID}
       accessibilityRole={picking ? 'checkbox' : 'button'}
-      accessibilityState={picking ? { checked: selected } : undefined}
+      aria-checked={picking ? selected : undefined}
       accessibilityLabel={label ?? title}
       onPress={picking ? onToggle : onOpen}
       onLongPress={onSelect}

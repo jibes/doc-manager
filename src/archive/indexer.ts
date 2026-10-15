@@ -35,7 +35,7 @@ const metaStore = () => (metaDb ??= createStore('tessel-docs', 'meta'));
 /** A Syncthing conflict copy found in a folder: kept out of the index, listed to be resolved. */
 export type Conflict = { root: string; rootName: string; dir?: string; entry: FolderEntry; name: ConflictName };
 
-export const useIndex = create<{ running: boolean; done: number; total: number; count: number; conflicts: Conflict[]; duplicates: number }>(() => ({
+export const useIndex = create<{ running: boolean; done: number; total: number; count: number; conflicts: Conflict[]; duplicates: number; changed: number }>(() => ({
   running: false,
   done: 0,
   total: 0,
@@ -43,7 +43,10 @@ export const useIndex = create<{ running: boolean; done: number; total: number; 
   conflicts: [],
   /** Groups of documents in the archive with the same content. */
   duplicates: 0,
+  /** Counts every change to what is indexed (added, gone, moved): what shows it reads it again. */
+  changed: 0,
 }));
+const changedNow = (more: Partial<ReturnType<typeof useIndex.getState>> = {}) => useIndex.setState((s) => ({ ...more, changed: s.changed + 1 }));
 
 /* ------------------------------------------------------- search worker ---- */
 
@@ -95,7 +98,7 @@ function load(): Promise<void> {
   loading ??= (async () => {
     await migrate().catch(() => {});
     for (const d of await values<IndexedDoc>(metaStore()).catch(() => [])) docs.set(d.key, d);
-    useIndex.setState({ count: countDocs(), duplicates: archiveDuplicates() });
+    changedNow({ count: countDocs(), duplicates: archiveDuplicates() });
   })();
   return loading;
 }
@@ -111,14 +114,21 @@ function put(doc: Indexable) {
   docs.set(doc.key, meta);
   // The worker stores both, and indexes it.
   void ask({ type: 'put', doc }).catch(() => {});
-  useIndex.setState({ count: countDocs() });
+  changedNow({ count: countDocs() });
+}
+
+/** Where a document is changed (now known to be in the inbox, say): stored as such, its text not read again. */
+function moved(doc: IndexedDoc) {
+  docs.set(doc.key, doc);
+  void ask({ type: 'meta', doc }).catch(() => {});
+  changedNow();
 }
 
 function drop(keys: string[]) {
   if (!keys.length) return;
   for (const key of keys) docs.delete(key);
   void ask({ type: 'drop', keys }).catch(() => {});
-  useIndex.setState({ count: countDocs() });
+  changedNow({ count: countDocs() });
 }
 
 /**
@@ -139,7 +149,7 @@ export function forget(keys: string[], conflicts: Conflict[] = []) {
 }
 const settledSince = (key: string, since: number) => (settled.get(key) ?? 0) >= since;
 
-/** Best matches for `query` in every indexed document. */
+/** Every match for `query` in the indexed documents, best first (the words around a match only for the first few). */
 export async function searchAll(query: string): Promise<Hit[]> {
   if (Platform.OS !== 'web' || query.trim().length < 2) return [];
   await load();
@@ -148,6 +158,13 @@ export async function searchAll(query: string): Promise<Hit[]> {
     const doc = docs.get(key);
     return doc ? [{ doc, ...m }] : [];
   });
+}
+
+/** The page and the words around the match for these documents (by key), for rows about to be shown. */
+export async function snippetsFor(query: string, keys: string[]): Promise<Map<string, Pick<Hit, 'page' | 'snippet'>>> {
+  if (Platform.OS !== 'web' || !keys.length) return new Map();
+  const matches = await ask<Match[]>({ type: 'snippets', query, keys });
+  return new Map(matches.map(({ key, page, snippet }) => [key, { page, snippet: snippet ?? null }]));
 }
 
 /** Every indexed document's details (for the Documents screen's filters); their text isn't read. */
@@ -178,44 +195,72 @@ type Candidate = { key: string; place: Place; name: string; size: number; modifi
 
 /**
  * The places to index: the archive first, the picked folders and Tessel's own; then, with all files access,
- * every other document on the device (those already found in a folder above are left out of it).
+ * every other document on the device (those already found in a folder above are left out of it). Locked ones
+ * (the browser wants the user's OK again) can't be read now: their records stay. Null: the places are unknown.
  */
-async function rootsToWalk(): Promise<FolderRoot[]> {
-  if (!folders.supported) return [];
-  const roots = (await folders.roots(true).catch(() => [] as FolderRoot[])).filter((r) => !r.locked && r.kind !== 'device');
+async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[] } | null> {
+  if (!folders.supported) return { roots: [], locked: [] };
+  const all = await folders.roots(true).catch(() => null);
+  if (!all) return null;
   const archive = usePrefs.getState().archive;
   const rank = (r: FolderRoot) => (r.id === archive ? 0 : r.kind === 'all' ? 2 : 1);
-  return roots.sort((a, b) => rank(a) - rank(b));
+  const roots = all.filter((r) => !r.locked && r.kind !== 'device').sort((a, b) => rank(a) - rank(b));
+  return { roots, locked: all.filter((r) => r.locked).map((r) => r.id) };
 }
 
-async function walk(root: FolderRoot, dir: string | undefined, depth: number, out: Candidate[], conflicts: Conflict[]): Promise<void> {
+/** A folder whose listing failed: what is known in it (and below it) is kept until it can be listed again. */
+type Unlisted = { root: string; dir?: string };
+
+async function walk(root: FolderRoot, dir: string | undefined, depth: number, inbox: boolean, out: Candidate[], conflicts: Conflict[], failed: Unlisted[]): Promise<void> {
   await whileOpen();
   const listed = await folders.list(root.id, dir);
   // "All documents" is every file on the device: those in a folder walked already are in the index as that.
   const known = root.kind === 'all' ? new Set(out.map((c) => `${c.name}|${c.size}`)) : null;
+  // The archive's Inbox (its documents aren't filed yet).
+  const archive = usePrefs.getState().archive;
   for (const e of listed) {
     if (known?.has(`${e.name}|${e.size}`)) continue;
     // Hidden folders (Syncthing's versions, Tessel's own .tessel and trash) and files Syncthing is still writing.
     if (syncTemporary(e.name)) continue;
     if (e.kind === 'dir') {
-      if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, out, conflicts).catch(() => {});
+      const intoInbox = inbox || (depth === 0 && root.id === archive && e.name.toLocaleLowerCase() === 'inbox');
+      if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, intoInbox, out, conflicts, failed).catch(() => failed.push({ root: root.id, dir: e.id }));
     } else if (e.kind === 'pdf') {
       const conflict = parseConflict(e.name);
       // Conflict copies are resolved in the folders Tessel works in ("All documents" has no folders to work in).
       if (conflict) {
         if (root.kind !== 'all') conflicts.push({ root: root.id, rootName: root.name, dir, entry: e, name: conflict });
-      } else out.push({ key: `${root.id}:${e.id}`, place: { kind: 'folder', root: root.id, rootName: root.name, dir, entry: e }, name: e.name, size: e.size, modified: e.modified });
+      } else
+        out.push({
+          key: `${root.id}:${e.id}`,
+          place: { kind: 'folder', root: root.id, rootName: root.name, dir, entry: e, ...(inbox ? { inbox } : {}) },
+          name: e.name,
+          size: e.size,
+          modified: e.modified,
+        });
     }
   }
 }
 
-/** Everything to index now, and the roots whose listing failed (their records are kept, not dropped). */
-async function candidates(): Promise<{ list: Candidate[]; unlisted: Set<string>; conflicts: Conflict[] }> {
+/** Whether a record is in a folder that couldn't be listed this time (kept, not dropped). */
+const inUnlisted = (d: IndexedDoc, failed: Unlisted[]) =>
+  d.place.kind === 'folder' &&
+  failed.some((f) => {
+    if (d.place.kind !== 'folder' || f.root !== d.place.root) return false;
+    if (!f.dir) return true;
+    const at = d.place.dir ?? '';
+    return at === f.dir || at.startsWith(`${f.dir}/`) || d.place.entry.id.startsWith(`${f.dir}/`);
+  });
+
+/** Everything to index now, and the folders whose listing failed (their records are kept, not dropped). */
+async function candidates(): Promise<{ list: Candidate[]; unlisted: Unlisted[]; conflicts: Conflict[] } | null> {
   const list: Candidate[] = [];
-  const unlisted = new Set<string>();
   const conflicts: Conflict[] = [];
-  for (const root of await rootsToWalk()) {
-    await walk(root, undefined, 0, list, conflicts).catch(() => unlisted.add(root.id));
+  const places = await rootsToWalk();
+  if (!places) return null;
+  const unlisted: Unlisted[] = places.locked.map((root) => ({ root }));
+  for (const root of places.roots) {
+    await walk(root, undefined, 0, false, list, conflicts, unlisted).catch(() => unlisted.push({ root: root.id }));
   }
   // Library documents that aren't files in those folders already (a document opened from a folder is linked to it).
   const uris = list.map((c) => (c.place.kind === 'folder' ? c.place.entry.uri : undefined)).filter((u): u is string => !!u);
@@ -324,21 +369,22 @@ async function run(): Promise<void> {
   await whileOpen();
   await load();
   const started = (lastWalk = Date.now());
-  const { list: listed, unlisted, conflicts } = await candidates();
+  const found = await candidates();
+  // The places themselves couldn't be listed: nothing is known to be gone.
+  if (!found) return;
+  const { list: listed, unlisted, conflicts } = found;
   // What was resolved while the folders were being listed is gone already.
   const list = listed.filter((c) => !settledSince(c.key, started));
   useIndex.setState({ conflicts: conflicts.filter((c) => !settledSince(conflictKey(c), started)) });
   const seen = new Set(list.map((c) => c.key));
-  drop(
-    [...docs.keys()].filter((key) => {
-      const root = key.startsWith('lib:') ? null : key.slice(0, key.indexOf(':'));
-      return !seen.has(key) && !(root && unlisted.has(root));
-    }),
-  );
+  drop([...docs.values()].filter((d) => !seen.has(d.key) && !inUnlisted(d, unlisted)).map((d) => d.key));
   const todo = list.filter((c) => {
     const known = docs.get(c.key);
     // Records from before content hashes are read again once.
-    return !known || known.size !== c.size || known.modified !== c.modified || !known.hash || !known.share;
+    const read = !known || known.size !== c.size || known.modified !== c.modified || !known.hash || !known.share;
+    // Only where it is changed (found to be in the inbox, the folder renamed): no need to read it again.
+    if (!read && known && JSON.stringify(known.place) !== JSON.stringify(c.place)) moved({ ...known, place: c.place, name: c.name });
+    return read;
   });
   useIndex.setState({ running: todo.length > 0, done: 0, total: todo.length });
   for (const [i, c] of todo.entries()) {

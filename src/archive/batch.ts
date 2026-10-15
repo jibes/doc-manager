@@ -70,24 +70,33 @@ export async function shareAll(docs: IndexedDoc[]) {
 /** Whether deleting them can't be undone: anything outside the archive (files elsewhere, library copies). */
 export const deletesForGood = (docs: IndexedDoc[]) => docs.some((d) => !inFolder(d) || !trashes(d.place.root));
 
+const urisOf = (entries: FolderEntry[]) => entries.flatMap((e) => (e.uri ? [e.uri] : []));
+
 /**
  * Deletes them: files in the archive go to its trash, files elsewhere are deleted, library copies leave the
- * library. Returns what went to the trash, to undo.
+ * library. Returns what went to the trash, to undo, and `settle` for when that can't be undone any more: then the
+ * library forgets its documents of those files too (until then Undo brings them back as they were).
  */
-export async function deleteAll(docs: IndexedDoc[]): Promise<{ root: string; items: Trashed[] }[]> {
+export async function deleteAll(docs: IndexedDoc[]): Promise<{ trashed: { root: string; items: Trashed[] }[]; settle: () => void }> {
   const trashed: { root: string; items: Trashed[] }[] = [];
+  const [gone, kept]: string[][] = [[], []];
   for (const { from, entries } of byFolder(docs)) {
-    if (trashes(from.root)) trashed.push({ root: from.root, items: await moveToTrash(from.root, from.dir, entries) });
-    else await folders.delete(from.root, from.dir, entries);
+    if (trashes(from.root)) {
+      trashed.push({ root: from.root, items: await moveToTrash(from.root, from.dir, entries) });
+      kept.push(...urisOf(entries));
+    } else {
+      await folders.delete(from.root, from.dir, entries);
+      gone.push(...urisOf(entries));
+    }
   }
   const library = useLibrary.getState();
-  await library.forgetFiles(docs.filter(inFolder).flatMap((d) => (d.place.entry.uri ? [d.place.entry.uri] : [])));
+  await library.forgetFiles(gone);
   for (const d of docs) {
     const rec = libraryDoc(d);
     if (rec) await library.remove(rec.id);
   }
   forget(docs.map((d) => d.key));
-  return trashed;
+  return { trashed, settle: () => void library.forgetFiles(kept).catch(() => {}) };
 }
 
 /** Renames a file (in its folder; library documents linked to it follow). */

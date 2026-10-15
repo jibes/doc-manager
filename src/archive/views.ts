@@ -4,21 +4,25 @@ import { folders } from '@/lib/folders';
 import { INBOX_TARGET, usePrefs } from '@/state/prefs';
 import { parseViews, serializeViews, type SavedView } from './facets';
 import { schedule } from './indexer';
+import { readSettings } from './settingsFile';
 
 /** Where saved views are kept in the archive folder: synced with the documents, so every device has them. */
 const PATH = ['.tessel', 'views.json'];
 
 export const useViews = create<{ views: SavedView[] }>(() => ({ views: usePrefs.getState().views }));
 
+/** The views as stored; throws when the file is there but can't be read (see readSettings). */
 async function read(archive: string): Promise<SavedView[]> {
-  const text = await folders.readText(archive, PATH).catch(() => null);
+  const text = await readSettings(archive, PATH);
   return text ? parseViews(text) : [];
 }
 
-/** The views as stored now (another device may have changed them). */
+/** The views as stored now (another device may have changed them); those shown stay when it can't be read now. */
 export async function loadViews(): Promise<void> {
   const { archive, views } = usePrefs.getState();
-  useViews.setState({ views: archive ? await read(archive) : views });
+  if (!archive) return useViews.setState({ views });
+  const stored = await read(archive).catch(() => null);
+  if (stored) useViews.setState({ views: stored });
 }
 
 /** Reads, changes and writes back at once, so a view another device added in the meantime is kept. */
@@ -30,6 +34,8 @@ async function change(edit: (views: SavedView[]) => SavedView[]): Promise<void> 
     useViews.setState({ views: next });
     return;
   }
+  // Read access first (it may need the user's OK again), while the tap still counts.
+  await folders.unlock(archive).catch(() => false);
   const next = edit(await read(archive));
   await folders.writeText(archive, PATH, serializeViews(next));
   useViews.setState({ views: next });

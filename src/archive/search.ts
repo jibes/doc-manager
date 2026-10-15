@@ -7,9 +7,11 @@ import type { FolderEntry } from '@/lib/folderTypes';
  * own from the files). One record per document: where it is, how it was when read, its details and its text.
  */
 
-/** Where a document is: in the library (a copy, or linked), or a file in one of the user's folders. */
-/** Where a document is: in the library, or a file in a folder (`dir`: its parent folder's ID, undefined at the top). */
-export type Place = { kind: 'library'; id: string } | { kind: 'folder'; root: string; rootName: string; dir?: string; entry: FolderEntry };
+/**
+ * Where a document is: in the library, or a file in a folder (`dir`: its parent folder's ID, undefined at the top;
+ * `inbox`: in the archive's Inbox, not filed yet).
+ */
+export type Place = { kind: 'library'; id: string } | { kind: 'folder'; root: string; rootName: string; dir?: string; entry: FolderEntry; inbox?: boolean };
 
 export type IndexedDoc = {
   /** "lib:<id>" or "<root>:<entry id>". */
@@ -34,7 +36,8 @@ export type IndexedDoc = {
 /** A document with its text (per page, capped): what the index is built from. Kept apart from the details. */
 export type Indexable = IndexedDoc & { pages: string[] };
 
-export type Hit = { doc: IndexedDoc; score: number; page: number; snippet: { before: string; match: string; after: string } | null };
+/** `snippet`: null when the text has none; undefined until asked for (only rows shown get theirs). */
+export type Hit = { doc: IndexedDoc; score: number; page: number; snippet?: { before: string; match: string; after: string } | null };
 
 /** Letters, digits and dots inside numbers stay together ("02.10.2026", "NKL4471902"). */
 const tokenize = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+(?:[.,][\p{N}]+)*/gu) ?? [];
@@ -63,6 +66,13 @@ export const indexOptions: Options<Indexable> = {
 
 export const createIndex = (): MiniSearch<Indexable> => new MiniSearch<Indexable>(indexOptions);
 
+const wordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}]/u.test(c);
+/** Where `term` first starts a word in `lower` (as the index matched it: "bahn" in "Deutsche Bahn", not "Autobahn"). */
+function wordAt(lower: string, term: string): number {
+  for (let i = lower.indexOf(term); i >= 0; i = lower.indexOf(term, i + 1)) if (!wordChar(lower[i - 1])) return i;
+  return -1;
+}
+
 /** The page where a query's terms first appear, with the words around the first of them. */
 export function snippetFor(pages: string[], terms: string[]): Pick<Hit, 'page' | 'snippet'> {
   const lowered = terms.map((t) => t.toLowerCase()).filter(Boolean);
@@ -72,7 +82,7 @@ export function snippetFor(pages: string[], terms: string[]): Pick<Hit, 'page' |
     let at = -1;
     let len = 0;
     for (const term of lowered) {
-      const i = lower.indexOf(term);
+      const i = wordAt(lower, term);
       if (i >= 0 && (at < 0 || i < at)) [at, len] = [i, term.length];
     }
     if (at < 0) continue;
@@ -93,8 +103,8 @@ export function snippetFor(pages: string[], terms: string[]): Pick<Hit, 'page' |
   return { page: 0, snippet: null };
 }
 
-/** Best matches first: keys with the terms they matched. */
-export function rank(index: MiniSearch<Indexable>, query: string, limit = 50): { key: string; score: number; terms: string[] }[] {
+/** Best matches first (all of them unless `limit`): keys with the terms they matched. */
+export function rank(index: MiniSearch<Indexable>, query: string, limit = Infinity): { key: string; score: number; terms: string[] }[] {
   const q = query.trim();
   if (q.length < 2) return [];
   return index

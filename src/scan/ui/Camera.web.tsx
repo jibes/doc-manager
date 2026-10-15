@@ -493,7 +493,7 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
             {!retakeId && (
               <Pressable
                 accessibilityRole="switch"
-                accessibilityState={{ checked: autoCapture }}
+                aria-checked={autoCapture}
                 onPress={() => onAutoCapture(!autoCapture)}
                 style={[styles.auto, autoCapture && { backgroundColor: 'rgba(255,255,255,0.92)' }]}
               >

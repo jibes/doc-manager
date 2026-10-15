@@ -181,7 +181,7 @@ export default function Home() {
                     <View style={{ marginTop: space.lg }}>
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityState={{ expanded: showFinished }}
+                        aria-expanded={showFinished}
                         onPress={() => setShowFinished((v) => !v)}
                         style={styles.finishedHead}
                       >

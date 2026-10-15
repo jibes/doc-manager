@@ -1,20 +1,19 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { changeRules, useRules } from '@/archive/inbox';
+import { changeRules, loadRules, useRules } from '@/archive/inbox';
 import type { Rule } from '@/archive/rules';
 import { Field } from '@/components/Field';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { opError, t } from '@/i18n';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 820;
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const tagsOf = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
 /** The inbox's rules and file name template, on their own screen. */
@@ -29,7 +28,7 @@ export default function Rules() {
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
           <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} />
           {archive ? (
-            <RulesEditor archive={archive} onError={(e) => setNotice(message(e))} />
+            <RulesEditor archive={archive} onError={(e) => setNotice(opError(e))} />
           ) : (
             <View style={{ gap: space.md, alignItems: 'flex-start' }}>
               <T color={p.muted}>{t.inboxNoArchive}</T>
@@ -47,6 +46,8 @@ export default function Rules() {
 function RulesEditor({ archive, onError }: { archive: string; onError: (e: unknown) => void }) {
   const p = usePalette();
   const rules = useRules();
+  // As stored now (another device may have changed them; opened directly, nothing has read them yet).
+  useEffect(() => void loadRules(archive), [archive]);
   const [template, setTemplate] = useState<string | null>(null);
   const [draft, setDraft] = useState({ match: '', sender: '', type: '', tags: '' });
   const saveTemplate = () => {

@@ -6,7 +6,10 @@ import type { FolderEntry } from '@/lib/folderTypes';
 import type { PageWords } from '@/engine/types';
 import { describeWithAi, type AiSettings } from '@/scan/ai';
 import { usePrefs } from '@/state/prefs';
+import { localDate } from './facets';
 import { allDocs, contentHash, schedule } from './indexer';
+import { readSettings } from './settingsFile';
+import { docKey } from './shared';
 import type { IndexedDoc } from './search';
 import { infoFor, parseTags, readTrailer, real, realTitle, withInfo, type Details } from './pdfInfo';
 import { makeSearchable, pagesWithoutText, readPages, textOf } from './searchable';
@@ -62,7 +65,8 @@ export const useInboxCount = create<{ count: number }>(() => ({ count: 0 }));
 export async function refreshInboxCount(): Promise<void> {
   const { archive, inboxHere } = usePrefs.getState();
   if (!archive || !inboxHere) return useInboxCount.setState({ count: 0 });
-  const dir = await folders.dirAt(archive, [INBOX], false).catch(() => null);
+  // Found as filing finds it ("inbox" counts too); not made just to be counted.
+  const dir = await childDir(archive, undefined, INBOX).catch(() => null);
   const files = dir === null ? [] : await folders.list(archive, dir).catch(() => []);
   useInboxCount.setState({ count: files.filter((e) => e.kind === 'pdf' && !e.name.startsWith('.')).length });
 }
@@ -71,16 +75,23 @@ export async function refreshInboxCount(): Promise<void> {
 
 export const useRules = create<Rules>(() => DEFAULT_RULES);
 
+/** The rules as stored; those last read when the file can't be read now (no access yet), so nothing is lost. */
 export async function loadRules(archive: string): Promise<Rules> {
-  const text = await folders.readText(archive, RULES_PATH).catch(() => null);
+  const text = await readSettings(archive, RULES_PATH).catch(() => undefined);
+  if (text === undefined) return useRules.getState();
   const rules = text ? parseRules(text) : DEFAULT_RULES;
   useRules.setState(rules, true);
   return rules;
 }
 
-/** Reads, changes and writes back at once, so a rule another device added meanwhile is kept. */
+/**
+ * Reads, changes and writes back at once, so a rule another device added meanwhile is kept. A file that is
+ * there but can't be read stops it (writing would replace every device's rules with these few).
+ */
 export async function changeRules(archive: string, edit: (r: Rules) => Rules): Promise<void> {
-  const next = edit(await loadRules(archive));
+  await folders.unlock(archive).catch(() => false);
+  const text = await readSettings(archive, RULES_PATH);
+  const next = edit(text ? parseRules(text) : DEFAULT_RULES);
   await folders.writeText(archive, RULES_PATH, serializeRules(next));
   useRules.setState(next, true);
 }
@@ -101,9 +112,12 @@ const stem = (name: string) => name.replace(/\.pdf$/i, '');
 
 export async function propose(archive: string, entry: FolderEntry, rules: Rules): Promise<Proposal> {
   const bytes = await (await folders.read(archive, entry)).arrayBuffer();
-  // The same document already filed (same content, outside the inbox).
-  const hash = await contentHash(bytes);
-  const duplicateOf = (await allDocs()).find((d) => d.hash === hash && d.place.kind === 'folder' && d.place.root === archive && d.key !== `${archive}:${entry.id}`);
+  // The same document already filed (outside the inbox): the same bytes, or the same document with the details
+  // filing added to it (its key stays through them).
+  const [hash, share] = await Promise.all([contentHash(bytes), docKey(bytes)]);
+  const duplicateOf = (await allDocs()).find(
+    (d) => (d.hash === hash || d.share === share) && d.place.kind === 'folder' && d.place.root === archive && !d.place.inbox && d.key !== `${archive}:${entry.id}`,
+  );
   const handle = await engine.open({ kind: 'bytes', bytes });
   try {
     const m = handle.metadata;
@@ -147,13 +161,14 @@ export async function suggest(p: Proposal, ai: AiSettings, signal?: AbortSignal)
 
 /** Where a document would be filed, as folders and a file name. */
 export function destination(details: Details, entry: FolderEntry, rules: Rules, unknownSender: string): string[] {
-  const fileDate = new Date(entry.modified || Date.now()).toISOString().slice(0, 10);
+  const fileDate = localDate(entry.modified || Date.now());
   return pathFor(rules.template, details, { title: stem(entry.name), date: fileDate, sender: unknownSender });
 }
 
 /**
  * Files a document: its details written into it (left as they are in a protected PDF), saved where the
  * template says (a free name if one is taken), then removed from the inbox. Returns the filed file.
+ * `follow`: documents in the library that are the inbox file (a scan saved there) become the filed one.
  */
 export async function fileDocument(
   archive: string,
@@ -162,6 +177,7 @@ export async function fileDocument(
   details: Details,
   path: string[],
   onProgress?: (done: number, total: number) => void,
+  follow?: (from: FolderEntry, to: FolderEntry) => Promise<void>,
 ): Promise<FolderEntry> {
   let bytes = new Uint8Array(await (await folders.read(archive, p.entry)).arrayBuffer());
   if (!readTrailer(bytes).encrypted) {
@@ -178,6 +194,7 @@ export async function fileDocument(
   const out: Uint8Array<ArrayBuffer> = bytes;
   const dir = await ensureDir(archive, path.slice(0, -1));
   const filed = await folders.create({ root: archive, dir }, path[path.length - 1], new Blob([out], { type: 'application/pdf' }));
+  await follow?.(p.entry, filed).catch(() => {});
   // Only once the copy is safely written.
   await folders.delete(archive, inbox, [p.entry]);
   schedule(1000);

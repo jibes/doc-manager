@@ -25,14 +25,18 @@ export const syncTemporary = (name: string) => name.startsWith('.') || name.star
 export function duplicates(docs: IndexedDoc[], archive: string | null): IndexedDoc[][] {
   const groups = new Map<string, IndexedDoc[]>();
   for (const d of docs) {
-    if (!d.hash || d.place.kind !== 'folder' || d.place.root !== archive) continue;
+    // The inbox's own documents aren't filed yet: it points out what is already in the archive itself.
+    if (!d.hash || d.place.kind !== 'folder' || d.place.root !== archive || d.place.inbox) continue;
     groups.set(d.hash, [...(groups.get(d.hash) ?? []), d]);
   }
   return [...groups.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => a.modified - b.modified));
 }
 
-/** What the trash remembers of a file: its name there, the folder it came from (an ID), and when. */
-export type Trashed = { name: string; root: string; dir?: string; original: string; deletedAt: number };
+/**
+ * What the trash remembers of a file: its name there, the folder it came from (an ID on the device that trashed
+ * it, and as names below the archive for the others), and when.
+ */
+export type Trashed = { name: string; root: string; dir?: string; path?: string[]; original: string; deletedAt: number };
 
 /** Days a file stays in the trash. */
 export const KEEP_DAYS = 30;
@@ -42,7 +46,14 @@ export function parseTrash(json: string): Trashed[] {
     const raw = JSON.parse(json) as { items?: unknown };
     return (Array.isArray(raw?.items) ? raw.items : []).filter(
       (t): t is Trashed => !!t && typeof t === 'object' && typeof (t as Trashed).name === 'string' && typeof (t as Trashed).root === 'string' && typeof (t as Trashed).deletedAt === 'number',
-    ).map((t) => ({ name: t.name, root: t.root, dir: typeof t.dir === 'string' ? t.dir : undefined, original: typeof t.original === 'string' ? t.original : t.name, deletedAt: t.deletedAt }));
+    ).map((t) => ({
+      name: t.name,
+      root: t.root,
+      dir: typeof t.dir === 'string' ? t.dir : undefined,
+      ...(Array.isArray(t.path) && t.path.every((x) => typeof x === 'string') ? { path: t.path } : {}),
+      original: typeof t.original === 'string' ? t.original : t.name,
+      deletedAt: t.deletedAt,
+    }));
   } catch {
     return [];
   }

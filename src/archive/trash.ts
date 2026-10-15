@@ -2,8 +2,11 @@ import { create } from 'zustand';
 
 import { folders } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
+import { sameOrRenamed } from '@/lib/names';
 import { usePrefs } from '@/state/prefs';
+import { ensureDir } from './inbox';
 import { schedule } from './indexer';
+import { readSettings } from './settingsFile';
 import { expired, parseTrash, serializeTrash, type Trashed } from './sync';
 
 /**
@@ -15,20 +18,36 @@ import { expired, parseTrash, serializeTrash, type Trashed } from './sync';
 const TRASH = ['.tessel', 'trash'];
 const MANIFEST = ['.tessel', 'trash.json'];
 
-/** An item in the trash: what is remembered of it, and its file there. */
-export type TrashItem = Trashed & { entry: FolderEntry };
+/** An item in the trash: what is remembered of it, and its file there. `unrecorded`: no date known for it yet. */
+export type TrashItem = Trashed & { entry: FolderEntry; unrecorded?: boolean };
 
 export const useTrash = create<{ items: TrashItem[] }>(() => ({ items: [] }));
 
-const readManifest = async (root: string) => parseTrash((await folders.readText(root, MANIFEST).catch(() => null)) ?? '');
+/** The manifest; null when it is there but can't be read now (then it isn't written either: that would lose it). */
+const readManifest = async (root: string): Promise<Trashed[] | null> => {
+  try {
+    return parseTrash((await readSettings(root, MANIFEST)) ?? '');
+  } catch {
+    return null;
+  }
+};
 const writeManifest = (root: string, items: Trashed[]) => folders.writeText(root, MANIFEST, serializeTrash(items));
+/** Reads, changes and writes back the manifest; nothing when it can't be read. */
+async function changeManifest(root: string, edit: (items: Trashed[]) => Trashed[]) {
+  const items = await readManifest(root);
+  if (items) await writeManifest(root, edit(items));
+}
 
-/** "name (2).pdf" for "name.pdf": the name a file gets when its own is taken. */
-function renamedFrom(name: string, original: string): boolean {
-  if (name === original) return true;
-  const dot = original.lastIndexOf('.');
-  const [stem, ext] = dot > 0 ? [original.slice(0, dot), original.slice(dot)] : [original, ''];
-  return name.startsWith(`${stem} (`) && name.endsWith(`)${ext}`) && /^\d+$/.test(name.slice(stem.length + 2, name.length - ext.length - 1));
+/**
+ * A folder's place below the root as names, which every device understands (IDs are this device's own), where it
+ * can be told from its ID: browsers' IDs are those paths; Android's documents have the tree's path in theirs.
+ */
+function namesOf(root: string, dir: string | undefined): string[] | undefined {
+  if (!dir) return [];
+  if (!root.startsWith('content://')) return dir.startsWith('/') ? undefined : dir.split('/').filter(Boolean);
+  const tree = /\/tree\/([^/]+)/.exec(root)?.[1];
+  const treeId = tree ? decodeURIComponent(tree) : '';
+  return treeId && dir.startsWith(`${treeId}/`) ? dir.slice(treeId.length + 1).split('/').filter(Boolean) : undefined;
 }
 
 /** Whether deleting in `root` goes to the trash (the archive folder) rather than for good. */
@@ -41,12 +60,13 @@ export async function moveToTrash(root: string, dir: string | undefined, entries
   await folders.transfer({ root, dir }, entries, { root, dir: trash }, true);
   const arrived = (await folders.list(root, trash)).filter((e) => !before.has(e.name));
   const now = Date.now();
+  const path = namesOf(root, dir);
   const items = entries.map((e) => {
-    const found = arrived.find((a) => renamedFrom(a.name, e.name));
+    const found = arrived.find((a) => sameOrRenamed(a.name, e.name));
     if (found) arrived.splice(arrived.indexOf(found), 1);
-    return { name: found?.name ?? e.name, root, dir, original: e.name, deletedAt: now };
+    return { name: found?.name ?? e.name, root, dir, ...(path ? { path } : {}), original: e.name, deletedAt: now };
   });
-  await writeManifest(root, [...(await readManifest(root)), ...items]);
+  await changeManifest(root, (known) => [...known, ...items]);
   schedule(1000);
   return items;
 }
@@ -58,7 +78,11 @@ export async function discard(root: string, dir: string | undefined, entries: Fo
   return null;
 }
 
-/** What is in the trash now: its files, with what the manifest remembers of them (newest first). */
+/**
+ * What is in the trash now: its files, with what the manifest remembers of them (newest first). A file it doesn't
+ * know (trashed on a device whose manifest hasn't arrived) is dated when first seen, and that date recorded:
+ * its own file date may be years old, and must not have it deleted for good at once.
+ */
 export async function loadTrash(root: string): Promise<TrashItem[]> {
   const trash = await folders.dirAt(root, TRASH, false);
   if (trash === null) {
@@ -66,29 +90,48 @@ export async function loadTrash(root: string): Promise<TrashItem[]> {
     return [];
   }
   const [files, manifest] = await Promise.all([folders.list(root, trash), readManifest(root)]);
+  const now = Date.now();
+  const unknown: Trashed[] = [];
   const items = files
     .map((entry) => {
-      const known = manifest.find((t) => t.name === entry.name);
-      // Trashed on a device whose manifest didn't sync: it came from the top of the archive.
-      return { ...(known ?? { name: entry.name, root, original: entry.name, deletedAt: entry.modified || Date.now() }), entry };
+      const known = manifest?.find((t) => t.name === entry.name);
+      if (known) return { ...known, entry };
+      // Its folder isn't known: it goes back to the top of the archive.
+      const first = { name: entry.name, root, original: entry.name, deletedAt: now };
+      unknown.push(first);
+      return { ...first, entry, unrecorded: !manifest };
     })
     .sort((a, b) => b.deletedAt - a.deletedAt);
+  if (manifest && unknown.length) await writeManifest(root, [...manifest, ...unknown]).catch(() => {});
   useTrash.setState({ items });
   return items;
 }
 
 async function forget(root: string, names: string[]) {
-  await writeManifest(root, (await readManifest(root)).filter((t) => !names.includes(t.name)));
+  await changeManifest(root, (items) => items.filter((t) => !names.includes(t.name)));
 }
 
-/** Puts items back where they came from (the top of the archive if that folder is gone). */
+/**
+ * Puts items back where they came from: the same folder (made again if it's gone), else the top of the archive;
+ * under their own name again when it is free.
+ */
 export async function restore(root: string, items: Trashed[]): Promise<void> {
   const trash = (await folders.dirAt(root, TRASH, false)) ?? undefined;
   const files = await folders.list(root, trash);
   for (const item of items) {
     const entry = files.find((f) => f.name === item.name);
     if (!entry) continue;
-    await folders.transfer({ root, dir: trash }, [entry], { root, dir: item.dir }, true).catch(() => folders.transfer({ root, dir: trash }, [entry], { root }, true));
+    const to = item.path ? await ensureDir(root, item.path).catch(() => item.dir) : item.dir;
+    let dir = to;
+    await folders.transfer({ root, dir: trash }, [entry], { root, dir: to }, true).catch(async () => {
+      dir = undefined;
+      await folders.transfer({ root, dir: trash }, [entry], { root }, true);
+    });
+    if (item.original !== item.name) {
+      const here = await folders.list(root, dir).catch(() => [] as FolderEntry[]);
+      const back = here.find((f) => f.name === item.name);
+      if (back && !here.some((f) => f.name === item.original)) await folders.rename(root, dir, back, item.original).catch(() => {});
+    }
   }
   await forget(root, items.map((i) => i.name));
   schedule(1000);
@@ -104,8 +147,8 @@ export async function deleteForever(root: string, names: string[]): Promise<void
   await loadTrash(root);
 }
 
-/** Deletes what has been in the trash longer than 30 days. */
+/** Deletes what has been in the trash longer than 30 days (only items whose date is recorded). */
 export async function purge(root: string): Promise<void> {
-  const old = expired(await loadTrash(root));
+  const old = expired((await loadTrash(root)).filter((t) => !t.unrecorded));
   if (old.length) await deleteForever(root, old.map((t) => t.name));
 }

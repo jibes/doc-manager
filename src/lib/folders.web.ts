@@ -241,8 +241,10 @@ const browserFolders: FoldersApi = {
       let dir = await folderHandle(root);
       for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
       return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
-    } catch {
-      return null;
+    } catch (e) {
+      // Not there is no text; not allowed (after a browser restart) or unreadable is an error, not "empty".
+      if (e instanceof DOMException && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return null;
+      throw e;
     }
   },
   async writeText(root, path, text) {

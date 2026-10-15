@@ -10,10 +10,12 @@ import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
 import { shareNow, useSharing } from '@/archive/sharing';
+import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
 import { AppearancePicker } from '@/reader/AppearancePanel';
 import { testAi, type AiApi } from '@/scan/ai';
 import { hasLightSensor } from '@/state/ambient';
+import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 720;
@@ -48,10 +50,17 @@ export default function Settings() {
   const add = async () => {
     await folders.add().catch(() => setError(t.opFailed));
     refresh();
+    schedule(1000);
   };
-  const remove = async (id: string) => {
-    await folders.forget(id).catch(() => setError(t.opFailed));
+  // The archive folder: asked first, and it stops being the archive.
+  const remove = async (f: FolderRoot) => {
+    if (f.id === archive) {
+      if ((await ask({ title: t.removeArchiveAsk(f.name), body: t.removeArchiveBody, confirm: t.remove, destructive: true })) === null) return;
+      await setArchive(null).catch(() => {});
+    }
+    await folders.forget(f.id).catch(() => setError(t.opFailed));
     refresh();
+    schedule(1000);
   };
   const chooseArchive = (id: string | null) => setArchive(id).catch(() => setError(t.viewFailed));
   const allOn = allFiles && granted === true;
@@ -128,7 +137,6 @@ export default function Settings() {
                           testID="archive-root"
                           accessibilityRole="switch"
                           accessibilityLabel={t.archiveUse(f.name)}
-                          accessibilityState={{ checked: isArchive }}
                           aria-checked={isArchive}
                           onPress={() => chooseArchive(isArchive ? null : f.id)}
                           hitSlop={6}
@@ -140,7 +148,7 @@ export default function Settings() {
                           </T>
                         </Pressable>
                       )}
-                      <IconButton testID="remove-folder" icon="close" size={36} label={t.removeFolder(f.name)} onPress={() => remove(f.id)} />
+                      <IconButton testID="remove-folder" icon="close" size={36} label={t.removeFolder(f.name)} onPress={() => void remove(f)} />
                     </View>
                   );
                 })}
@@ -165,7 +173,6 @@ export default function Settings() {
               testID="all-files"
               accessibilityRole="switch"
               accessibilityLabel={t.allFilesSwitch}
-              accessibilityState={{ checked: allOn }}
               aria-checked={allOn}
               onPress={() => toggleAll(!allOn)}
               style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
@@ -235,7 +242,6 @@ function SyncSection() {
             testID="inbox-here-switch"
             accessibilityRole="switch"
             accessibilityLabel={t.inboxHere}
-            accessibilityState={{ checked: inboxHere }}
             aria-checked={inboxHere}
             onPress={() => setPrefs({ inboxHere: !inboxHere })}
             style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
@@ -258,7 +264,6 @@ function SyncSection() {
             testID="share-reading-switch"
             accessibilityRole="switch"
             accessibilityLabel={t.shareReading}
-            accessibilityState={{ checked: shareReading }}
             aria-checked={shareReading}
             onPress={() => {
               setPrefs({ shareReading: !shareReading });

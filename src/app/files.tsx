@@ -12,6 +12,7 @@ import { DocItem, gridOf, LayoutToggle, useLayout } from '@/components/DocItems'
 import { SelectChip, SortChip } from '@/components/SortChip';
 import { showActions } from '@/state/actions';
 import { Toast } from '@/components/Toast';
+import { useNotice } from '@/components/useNotice';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, opError, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
@@ -224,9 +225,8 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const [query, setQuery] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string> | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  // Undo for the last move to the trash.
-  const [undo, setUndo] = useState<(() => void) | null>(null);
+  // What the last operation did, with Undo for a move to the trash.
+  const { notice: message, say: setMessage, dismiss, action } = useNotice();
   const { importFiles, error, clearError, followFiles, forgetFiles } = useLibrary();
   const version = useClipboard((s) => s.version);
   const setClip = useClipboard((s) => s.set);
@@ -312,9 +312,12 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
     if (trashes(root)) {
       await run(async () => {
         const items = await moveToTrash(root, dir, list);
-        await forgetFiles(list.flatMap((e) => (e.uri ? [e.uri] : [])));
-        setUndo(() => () => void restore(root, items).then(changed, (e) => setMessage(opError(e))));
-        return t.trashedN(list.length);
+        // The library forgets its documents of them once Undo is gone (Undo brings them back as they were).
+        const uris = list.flatMap((e) => (e.uri ? [e.uri] : []));
+        setMessage(t.trashedN(list.length), {
+          undo: () => void restore(root, items).then(changed, (e) => setMessage(opError(e))),
+          settle: () => void forgetFiles(uris).catch(() => {}),
+        });
       });
       return;
     }
@@ -436,8 +439,8 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       )}
       <Toast
         message={message ?? error}
-        onDismiss={() => (message ? (setMessage(null), setUndo(null)) : clearError())}
-        action={undo && message ? { label: t.undo, onPress: () => (undo(), setMessage(null), setUndo(null)) } : undefined}
+        onDismiss={() => (message ? dismiss() : clearError())}
+        action={message ? action : undefined}
       />
     </>
   );

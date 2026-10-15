@@ -69,6 +69,13 @@ export const repo: LibraryRepo = {
     }
     return out;
   },
+  async linkedToHandle(handle) {
+    const ids: string[] = [];
+    for (const [id, data] of await entries<string, unknown>(files)) {
+      if (isFileHandle(data) && (await data.isSameEntry(handle).catch(() => false))) ids.push(id);
+    }
+    return ids;
+  },
   async relink(id, uri) {
     await set(id, { kind: 'shell', uri }, files);
   },

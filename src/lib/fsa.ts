@@ -9,6 +9,7 @@ export type FileHandle = {
   queryPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
   requestPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
   createWritable(): Promise<{ write(data: BufferSource | Blob): Promise<void>; close(): Promise<void> }>;
+  isSameEntry(other: FileHandle): Promise<boolean>;
 };
 
 type Picker = (o: object) => Promise<FileHandle[]>;

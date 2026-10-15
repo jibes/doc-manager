@@ -189,7 +189,7 @@ export default function ScanReview() {
                   key={page.id}
                   testID="scan-tile"
                   accessibilityRole={selected ? 'checkbox' : 'button'}
-                  accessibilityState={selected ? { checked: on } : undefined}
+                  aria-checked={selected ? on : undefined}
                   accessibilityLabel={t.scanPageN(i + 1)}
                   onPress={() => (selected ? toggle(page.id) : router.push({ pathname: '/scan/page', params: { id: page.id } }))}
                   style={({ pressed }) => [
@@ -255,7 +255,7 @@ export default function ScanReview() {
 
               {!selected && (
               <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                <Pressable accessibilityRole="switch" accessibilityState={{ checked: scan.ocr }} onPress={() => setPrefs({ scan: { ...scan, ocr: !scan.ocr } })} style={styles.row}>
+                <Pressable accessibilityRole="switch" aria-checked={scan.ocr} onPress={() => setPrefs({ scan: { ...scan, ocr: !scan.ocr } })} style={styles.row}>
                   <View style={{ flex: 1 }}>
                     <T>{t.scanRecognise}</T>
                     <T v="caption" color={p.muted}>
@@ -267,7 +267,7 @@ export default function ScanReview() {
                 {aiOffered && (
                   <>
                     <View style={{ height: 1, backgroundColor: p.hairline }} />
-                    <Pressable testID="scan-ai" accessibilityRole="switch" accessibilityState={{ checked: ai.read }} aria-checked={ai.read} onPress={() => setPrefs({ ai: { ...ai, read: !ai.read } })} style={styles.row}>
+                    <Pressable testID="scan-ai" accessibilityRole="switch" aria-checked={ai.read} onPress={() => setPrefs({ ai: { ...ai, read: !ai.read } })} style={styles.row}>
                       <View style={{ flex: 1 }}>
                         <T>{t.scanAi}</T>
                         <T v="caption" color={p.muted}>
@@ -356,7 +356,7 @@ export default function ScanReview() {
 function Choice({ icon, label, note, on, onPress }: { icon: 'pages' | 'folder' | 'folderAdd' | 'inbox'; label: string; note?: string; on?: boolean; onPress: () => void }) {
   const p = usePalette();
   return (
-    <Pressable accessibilityRole="radio" accessibilityState={{ checked: !!on }} onPress={onPress} style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.choice, pressed && { opacity: 0.7 }, hovered && { backgroundColor: p.hairline }]}>
+    <Pressable accessibilityRole="radio" aria-checked={!!on} onPress={onPress} style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.choice, pressed && { opacity: 0.7 }, hovered && { backgroundColor: p.hairline }]}>
       <Icon name={icon} color={on ? p.accent : p.inkSoft} size={20} />
       <View style={{ flex: 1 }}>
         <T color={on ? p.accent : p.ink} numberOfLines={1}>

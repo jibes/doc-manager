@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { DocItem, type Layout } from '@/components/DocItems';
 import { T } from '@/components/primitives';
 import { fonts } from '@/design/tokens';
-import { t } from '@/i18n';
+import { errorText, t } from '@/i18n';
 import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
@@ -74,7 +74,7 @@ export function HitRow({
   const cover = useLibrary((s) => (place.kind === 'library' ? s.covers[place.id] : undefined));
   const aspect = useLibrary((s) => (place.kind === 'library' ? s.docs.find((d) => d.id === place.id)?.coverAspect : undefined));
   const where = place.kind === 'folder' ? whereIs(place) : t.placeDevice;
-  const bytes = size && h.doc.size ? `${(h.doc.size / 1_048_576).toFixed(h.doc.size < 10_485_760 ? 1 : 0)} MB` : '';
+  const bytes = size && h.doc.size ? t.fileSize(h.doc.size) : '';
   return (
     <DocItem
       layout={layout}
@@ -98,7 +98,7 @@ export function HitRow({
       first={first}
       last={last}
       selected={selected}
-      onOpen={() => void openDoc(h.doc, h.page, query).catch((e) => onError(e instanceof Error ? e.message : String(e)))}
+      onOpen={() => void openDoc(h.doc, h.page, query).catch((e) => onError(errorText(e)))}
       onSelect={onSelect}
       onToggle={onToggle}
     />

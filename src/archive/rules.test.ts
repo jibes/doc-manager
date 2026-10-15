@@ -15,6 +15,14 @@ describe('rules', () => {
     expect(ruleMatches(text, rule({ match: ' , ' }))).toBe(false);
   });
 
+  it('match short words only at a word start, and ß as ss', () => {
+    expect(ruleMatches('Kakaokekse 200 g', rule({ match: 'AOK' }))).toBe(false);
+    expect(ruleMatches('Ihre AOK Bayern', rule({ match: 'aok' }))).toBe(true);
+    expect(ruleMatches('HAUPTSTRASSE 5, Zürich', rule({ match: 'Hauptstraße' }))).toBe(true);
+    // Longer words may end a compound.
+    expect(ruleMatches('Ihre Stromrechnung', rule({ match: 'rechnung' }))).toBe(true);
+  });
+
   it('fill in what is missing and add tags', () => {
     const rules = [rule({ match: 'korn', sender: 'Nordkorn', type: 'Lieferschein', tags: ['Lebensmittel'] }), rule({ match: 'gmbh', sender: 'Other', tags: ['lebensmittel', 'Firma'] })];
     expect(applyRules('Nordkorn Handels GmbH', none, rules)).toEqual({ ...none, sender: 'Nordkorn', type: 'Lieferschein', tags: ['Lebensmittel', 'Firma'] });
@@ -33,6 +41,13 @@ describe('dates', () => {
     expect(findDate('Total CHF 96.00, Tel. 044 123 45 67')).toBe('');
     expect(findDate('31.02.2026')).toBe('');
   });
+
+  it('puts two-digit years in the right century, skips birthdays and far-off dates', () => {
+    const now = new Date('2026-10-14T12:00:00Z');
+    expect(findDate('geb. 03.04.67, Rechnung vom 02.10.26', now)).toBe('2026-10-02');
+    expect(findDate('Vertrag vom 15.09.98', now)).toBe('1998-09-15');
+    expect(findDate('Gültig bis 01.01.2031, ausgestellt 12.10.2026', now)).toBe('2026-10-12');
+  });
 });
 
 describe('file paths', () => {
@@ -45,6 +60,7 @@ describe('file paths', () => {
   it('uses fallbacks, drops empty folders and stray separators', () => {
     expect(pathFor('{year}/{type}/{date} – {title}', none, fallback)).toEqual(['2026', '2026-01-05 – Scan.pdf']);
     expect(pathFor('{type}/{title} - {sender}', { ...none, title: 'X', sender: '' }, { ...fallback, sender: '' })).toEqual(['X.pdf']);
+    expect(pathFor('{sender} - {type} - {title}', { ...none, title: 'Rechnung', sender: 'Telekom' }, fallback)).toEqual(['Telekom - Rechnung.pdf']);
   });
 
   it('keeps names safe to sync', () => {

@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FACETS, facetCounts, matches, SORTS, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/archive/facets';
-import { allDocs, searchAll, useIndex, warmSearch } from '@/archive/indexer';
+import { FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
+import { allDocs, searchAll, snippetsFor, useIndex, warmSearch } from '@/archive/indexer';
 import { HitRow } from '@/archive/Results';
 import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
@@ -17,8 +17,10 @@ import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/
 import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
 import { Toast } from '@/components/Toast';
+import { useNotice } from '@/components/useNotice';
 import { fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { opError, t } from '@/i18n';
+import { useThrottled } from '@/lib/useThrottled';
 import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -29,6 +31,8 @@ import { Roots } from './files';
 const MAX_W = 820;
 /** Rows shown at first, and added by "Show more". */
 const PAGE = 100;
+/** While indexing, the list and the search are read again at most this often. */
+const REFRESH_MS = 1500;
 
 const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
 const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'documents', type: 'pages', year: 'sort' };
@@ -37,8 +41,16 @@ const sortName: Record<Sort, string> = { date: t.sortDate, oldest: t.sortOldest,
 
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
-const sameView = (v: SavedView, query: string, filter: Filter, sort: Sort) =>
-  v.query === query.trim() && v.sort === sort && FACETS.every((k) => (v.filter[k] ?? '') === (filter[k] ?? ''));
+/** What the screen shows: the search, filters and place, and the order. */
+type Showing = { query: string; filter: Filter; sort: Sort; place?: Where; relevance: boolean };
+/** Views from before the order was kept: a search by date was best matches first. */
+const byRelevanceIn = (v: SavedView) => !!v.query && (v.relevance ?? v.sort === 'date');
+const sameView = (v: SavedView, s: Showing) =>
+  v.query === s.query &&
+  (v.place ?? null) === (s.place ?? null) &&
+  FACETS.every((k) => (v.filter[k] ?? '') === (s.filter[k] ?? '')) &&
+  byRelevanceIn(v) === s.relevance &&
+  (s.relevance || v.sort === s.sort);
 
 /**
  * Every document in the library and the folders: searched, narrowed by tag, sender, type and year, sorted, and
@@ -55,7 +67,7 @@ export default function Documents() {
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
   const tabBar = useTabBar();
   const mainWidth = useMainWidth();
-  const [place, setPlace] = useState<Place | undefined>(undefined);
+  const [place, setPlace] = useState<Where | undefined>(undefined);
   // Opened on Folders (from an old Files link), then counted and remembered as the place last used.
   useEffect(() => {
     if (params.view === 'folders') useDocsView.setState({ view: 'folders' });
@@ -68,12 +80,14 @@ export default function Documents() {
   // Search results come best match first, until another order is chosen for them.
   const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);
-  const [notice, setNotice] = useState<string | null>(null);
-  // Picked documents (by key), while picking; Undo for the last move to the trash.
+  const { notice, say, dismiss, action } = useNotice();
+  // Picked documents (by key), while picking.
   const [selected, setSelected] = useState<Set<string> | null>(null);
-  const [undo, setUndo] = useState<(() => void) | null>(null);
   const setClip = useClipboard((s) => s.set);
-  const { count, done, running, total } = useIndex();
+  const { done, running, total } = useIndex();
+  // Read again as indexing adds, moves and drops documents (not with each one).
+  const indexed = useIndex((s) => s.changed);
+  const changed = useThrottled(indexed, REFRESH_MS);
   const views = useViews((s) => s.views);
 
   const [all, setAll] = useState<IndexedDoc[]>([]);
@@ -83,8 +97,7 @@ export default function Documents() {
     return () => {
       alive = false;
     };
-    // Read again as indexing adds documents.
-  }, [count, done]);
+  }, [changed]);
 
   useEffect(() => {
     loadViews().catch(() => {});
@@ -106,7 +119,7 @@ export default function Documents() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [q, done]);
+  }, [q, changed]);
 
   // With a query, best matches first; without, every document by date or name.
   const base = useMemo(() => {
@@ -116,6 +129,30 @@ export default function Documents() {
   }, [searching, found, q, all, sort, bestFirst, place, archive]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
+
+  // The words around the match, for rows shown that came without them (the search has them for its best few).
+  const [around, setAround] = useState<{ query: string; of: Map<string, Pick<Hit, 'page' | 'snippet'>> }>({ query: '', of: new Map() });
+  const visible = useMemo(() => {
+    const rows = shown.slice(0, limit);
+    return around.query === q ? rows.map((h) => (h.snippet === undefined && around.of.has(h.doc.key) ? { ...h, ...around.of.get(h.doc.key) } : h)) : rows;
+  }, [shown, limit, around, q]);
+  const missing = useMemo(() => (searching ? visible.filter((h) => h.snippet === undefined).map((h) => h.doc.key) : []), [visible, searching]);
+  useEffect(() => {
+    if (!missing.length) return;
+    let alive = true;
+    snippetsFor(q, missing).then(
+      (of) => {
+        if (!alive) return;
+        // Asked once: those without an answer show none.
+        for (const key of missing) if (!of.has(key)) of.set(key, { page: 0, snippet: null });
+        setAround((a) => ({ query: q, of: new Map([...(a.query === q ? a.of : []), ...of]) }));
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [missing, q]);
 
   const choose = (facet: Facet) => {
     const chosen = filter[facet];
@@ -152,26 +189,26 @@ export default function Documents() {
     setQuery(v.query);
     setFilter(v.filter);
     setSort(v.sort);
-    setBestFirst(!!v.query && v.sort === 'date');
+    setPlace(v.place);
+    setBestFirst(byRelevanceIn(v));
     setLimit(PAGE);
   };
-  const current = views.find((v) => sameView(v, query, filter, sort));
-  const canSave = !current && (!!q || !isEmpty(filter));
+  const current = views.find((v) => sameView(v, { query: q, filter, sort, place, relevance: byRelevance }));
+  const canSave = !current && (!!q || !isEmpty(filter) || !!place);
+  // Settings that couldn't be read say so; anything else, that it wasn't saved.
+  const viewFailed = (e: unknown) => say(e instanceof Error && e.message === t.settingsUnreadable ? e.message : t.viewFailed);
 
   const save = async () => {
-    const suggested = [...FACETS.map((f) => filter[f]).filter(Boolean), q].filter(Boolean).join(' · ');
+    const suggested = [place ? placeName(place) : '', ...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
     const name = (await ask({ title: t.saveView, input: suggested, placeholder: t.viewName, confirm: t.saveView }))?.trim();
     if (!name) return;
-    const view: SavedView = { id: `v-${Date.now().toString(36)}`, name, query: q, filter, sort };
-    saveView(view).then(
-      () => setNotice(t.viewSaved(name)),
-      () => setNotice(t.viewFailed),
-    );
+    const view: SavedView = { id: `v-${Date.now().toString(36)}`, name, query: q, filter, sort, ...(place ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
+    saveView(view).then(() => say(t.viewSaved(name)), viewFailed);
   };
   const viewActions = (v: SavedView) =>
     showActions(v.name, [
       { key: 'view-open', icon: 'check', label: t.viewOpen, onPress: () => apply(v) },
-      { key: 'view-remove', icon: 'trash', label: t.viewRemove, destructive: true, onPress: () => void removeView(v.id).catch(() => setNotice(t.viewFailed)) },
+      { key: 'view-remove', icon: 'trash', label: t.viewRemove, destructive: true, onPress: () => void removeView(v.id).catch(viewFailed) },
     ]);
 
   // The filters in use, and all of them in one sheet (those without values in these documents left out).
@@ -190,7 +227,7 @@ export default function Documents() {
   const choosePlace = () =>
     showActions(t.placeFacet, [
       { key: 'place-any', icon: place ? 'close' : 'check', label: t.facetAny, onPress: () => setPlace(undefined) },
-      ...PLACES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
+      ...WHERES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
     ]);
   // Room for the action bar while picking.
   // Nothing indexed yet (and not searching): what to do instead of an empty list with its filters.
@@ -210,11 +247,16 @@ export default function Documents() {
   const batch = async (op: () => Promise<string | void>) => {
     try {
       const done = await op();
-      if (done) setNotice(done);
+      if (done) say(done);
       setSelected(null);
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : String(e));
+      say(opError(e));
     }
+  };
+  // Deleted documents leave the list at once (the index follows).
+  const dropShown = (keys: Set<string>) => {
+    setAll((a) => a.filter((d) => !keys.has(d.key)));
+    setFound((f) => f && { ...f, hits: f.hits.filter((h) => !keys.has(h.doc.key)) });
   };
   const clip = (move: boolean) => {
     setClip({ move, items: byFolder(picked) });
@@ -235,12 +277,14 @@ export default function Documents() {
       if (yes == null) return;
     }
     await batch(async () => {
-      const trashed = await deleteAll(list);
+      const { trashed, settle } = await deleteAll(list);
+      dropShown(new Set(list.map((d) => d.key)));
       const n = trashed.reduce((k, g) => k + g.items.length, 0);
       if (n && n === list.length) {
-        setUndo(() => () => void undoDelete(trashed).catch(() => {}));
-        return t.trashedN(n);
+        say(t.trashedN(n), { undo: () => void undoDelete(trashed).catch((e) => say(opError(e))), settle });
+        return;
       }
+      settle();
       return t.deletedN(list.length);
     });
   };
@@ -325,7 +369,7 @@ export default function Documents() {
                   key={v.id}
                   testID="view-chip"
                   accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
+                  aria-pressed={on}
                   onPress={() => (on ? viewActions(v) : apply(v))}
                   onLongPress={() => viewActions(v)}
                   style={[styles.chip, { backgroundColor: on ? p.ink : p.surface, borderColor: on ? p.ink : p.hairline }]}
@@ -350,12 +394,12 @@ export default function Documents() {
             <T v="kicker" color={p.muted} testID="docs-count" style={{ flex: 1 }}>
               {t.documentsCount(shown.length)}
             </T>
-            {shown.length > 0 && <SelectChip onPress={() => setSelected(new Set())} />}
+            {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
             <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} onPress={chooseSort} />
           </View>
           {shown.length > 0 ? (
             <DocList layout={layout} gap={grid.gap}>
-              {shown.slice(0, limit).map((h, i) => (
+              {visible.map((h, i) => (
                 <HitRow
                   key={h.doc.key}
                   hit={h}
@@ -363,12 +407,12 @@ export default function Documents() {
                   layout={layout}
                   width={grid.tile}
                   first={i === 0}
-                  last={i === Math.min(shown.length, limit) - 1}
+                  last={i === visible.length - 1}
                   size={!byRelevance && sort === 'size'}
                   selected={selected ? selected.has(h.doc.key) : undefined}
                   onSelect={() => hold(h.doc.key)}
                   onToggle={() => tap(h.doc.key)}
-                  onError={setNotice}
+                  onError={say}
                 />
               ))}
             </DocList>
@@ -410,8 +454,8 @@ export default function Documents() {
       )}
       <Toast
         message={notice}
-        onDismiss={() => (setNotice(null), setUndo(null))}
-        action={undo && notice ? { label: t.undo, onPress: () => (undo(), setNotice(null), setUndo(null)) } : undefined}
+        onDismiss={dismiss}
+        action={action}
         above={tabBar ? TAB_BAR_H : 0}
       />
     </AppFrame>
@@ -456,12 +500,9 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
   );
 }
 
-type Place = 'archive' | 'folders' | 'device';
-const PLACES: Place[] = ['archive', 'folders', 'device'];
-const placeIcon: Record<Place, IconName> = { archive: 'folder', folders: 'folder', device: 'device' };
-const placeName = (pl: Place) => (pl === 'archive' ? t.placeArchive : pl === 'folders' ? t.placeFolders : t.placeDevice);
-/** Where a document is: the archive (synced), another folder, or only on this device. */
-const placeOf = (d: IndexedDoc, archive: string | null): Place => (d.place.kind === 'library' ? 'device' : d.place.root === archive ? 'archive' : 'folders');
+const placeIcon: Record<Where, IconName> = { archive: 'folder', folders: 'folder', device: 'device' };
+const placeName = (pl: Where) => (pl === 'archive' ? t.placeArchive : pl === 'folders' ? t.placeFolders : t.placeDevice);
+const placeOf = (d: IndexedDoc, archive: string | null): Where => (d.place.kind === 'library' ? 'device' : d.place.root === archive ? 'archive' : 'folders');
 
 const styles = StyleSheet.create({
   segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },

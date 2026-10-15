@@ -6,8 +6,12 @@ import { coverData, readBytes } from '@/book/platform';
 import { asPasswordError, engine } from '@/engine';
 import { preopen } from '@/reader/preopened';
 import { askPassword, passwordFor, rememberPassword } from '@/state/password';
+import { usePrefs } from '@/state/prefs';
 import type { FileHandle } from '@/lib/fsa';
+import type { FolderEntry } from '@/lib/folderTypes';
 import { folders } from '@/lib/folders';
+import { sameOrRenamed } from '@/lib/names';
+import { docKey } from '@/archive/shared';
 import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
 import { repo, type DocRecord, type ReadingPosition } from '@/storage';
@@ -75,6 +79,8 @@ type LibraryState = {
   clearError(): void;
   /** The file browser renamed or moved files: documents linked to them follow. */
   followFiles(moves: { from: string; to: string }[]): Promise<void>;
+  /** A file is now another (filed from the inbox, a duplicate kept instead): documents linked to it follow. */
+  followEntry(from: FolderEntry, to: FolderEntry): Promise<void>;
   /** The file browser deleted files: documents linked to them leave the library. */
   forgetFiles(uris: string[]): Promise<void>;
 };
@@ -212,6 +218,30 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
   let loading: Promise<void> | null = null;
 
+  /**
+   * The library's document of this item already: the same file, for a file in a folder; else (a picked or shared
+   * file) the same content, as told by its share key (read for documents that may be it).
+   */
+  const findExisting = async (item: ImportItem): Promise<DocRecord | undefined> => {
+    const docs = get().docs;
+    const among = (ids: string[]) => docs.find((d) => ids.includes(d.id));
+    if (item.link) return among((await repo.linkedTo([item.link])).get(item.link) ?? []);
+    if (item.handle) return among(await repo.linkedToHandle(item.handle).catch(() => []));
+    const named = (d: DocRecord) => d.bytes === item.size && sameOrRenamed(d.fileName, item.name);
+    if (!item.file) return docs.find(named);
+    const key = await docKey(await item.file.arrayBuffer());
+    const known = docs.find((d) => d.shareKey === key);
+    if (known) return known;
+    for (const d of docs.filter((x) => !x.shareKey && named(x))) {
+      const src = await repo.source(d.id).catch(() => null);
+      if (src?.kind !== 'bytes') continue;
+      const k = await docKey(src.bytes);
+      patch(d.id, (x) => ({ ...x, shareKey: k }));
+      if (k === key) return get().docs.find((x) => x.id === d.id);
+    }
+    return undefined;
+  };
+
   /** After the reader is up: the file into the Tessel folder (as importing does), and the cover. */
   const settle = async (id: string, item: ImportItem) => {
     try {
@@ -254,7 +284,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
     async importFiles(items) {
       const added: DocRecord[] = [];
       for (let item of items) {
-        const existing = get().docs.find((d) => d.fileName === item.name && d.bytes === item.size);
+        const existing = await findExisting(item).catch(() => undefined);
         if (existing) {
           added.push(existing);
           continue;
@@ -312,7 +342,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       // Opened while the library loads.
       const opening = openWithPassword(item.name, (pw) => engine.open({ kind: 'bytes', bytes }, pw));
       await get().load();
-      const existing = get().docs.find((d) => d.fileName === item.name && d.bytes === item.size);
+      const existing = await findExisting(item).catch(() => undefined);
       let opened;
       try {
         opened = await opening;
@@ -357,7 +387,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     async remove(id) {
+      const gone = get().docs.find((d) => d.id === id);
       set((s) => ({ docs: s.docs.filter((d) => d.id !== id) }));
+      // Off the reading list shared with the other devices too (else it would come back from there).
+      const { archive, shareReading, unshared, set: setPrefs } = usePrefs.getState();
+      if (archive && shareReading && gone?.shareKey && gone.reading && !gone.reading.finishedAt)
+        setPrefs({ unshared: [...unshared.filter((u) => u.key !== gone.shareKey), { key: gone.shareKey, at: Date.now() }] });
       await repo.remove(id);
     },
 
@@ -438,6 +473,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
           patch(id, (d) => ({ ...d, fileName: nameOfUri(to) }));
         }
       }
+    },
+
+    async followEntry(from, to) {
+      if (from.uri && to.uri) return get().followFiles([{ from: from.uri, to: to.uri }]);
+      if (!from.handle || !to.handle) return;
+      for (const id of await repo.linkedToHandle(from.handle)) await get().relink(id, to.handle);
     },
 
     async forgetFiles(uris) {

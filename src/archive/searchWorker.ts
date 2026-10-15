@@ -119,13 +119,24 @@ async function handle(req: SearchRequest | { id: 0; type: 'save' }): Promise<unk
       noteChanged([meta.key]);
       return;
     }
+    case 'meta':
+      await set(req.doc.key, req.doc, metaStore);
+      return;
     case 'drop':
       await Promise.all([delMany(req.keys, metaStore), delMany(req.keys, textStore)]);
       for (const key of req.keys) change(key);
       noteChanged(req.keys);
       return;
     case 'search': {
-      const ranked = rank(await ready(), req.query, req.limit);
+      // Every match (counts, filters and sorting need them all); the text is read only for the first few.
+      const ranked = rank(await ready(), req.query);
+      const n = Math.min(ranked.length, req.snippets ?? 40);
+      const texts = await getMany<string[] | undefined>(ranked.slice(0, n).map((r) => r.key), textStore);
+      return ranked.map((r, i) => ({ key: r.key, score: r.score, ...(i < n ? snippetFor(texts[i] ?? [], r.terms) : { page: 0 }) }));
+    }
+    case 'snippets': {
+      const want = new Set(req.keys);
+      const ranked = rank(await ready(), req.query).filter((r) => want.has(r.key));
       const texts = await getMany<string[] | undefined>(ranked.map((r) => r.key), textStore);
       return ranked.map((r, i) => ({ key: r.key, score: r.score, ...snippetFor(texts[i] ?? [], r.terms) }));
     }

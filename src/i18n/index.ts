@@ -41,5 +41,6 @@ export function opError(e: unknown): string {
   const taken = /^exists:(.*)$/.exec(m);
   if (taken) return `${t.opFailed} ${t.nameTaken(taken[1])}`;
   if (m === 'denied' || m === t.writeDenied) return `${t.opFailed} ${t.writeDenied}`;
+  if (m === t.settingsUnreadable) return m;
   return m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
 }
