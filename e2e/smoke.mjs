@@ -1440,6 +1440,9 @@ async function aiReading() {
   await openFolders(page);
   await vis('home-settings').click();
   await vis('ai-api-anthropic').click();
+  // An address without its scheme would send the key to the app's own site: refused.
+  await vis('ai-url').fill('ai.test');
+  check((await vis('ai-url-bad').count()) === 1 && (await vis('ai-test').getAttribute('aria-disabled')) === 'true', 'ai: an address without https:// is refused');
   await vis('ai-url').fill('https://ai.test');
   await vis('ai-key').fill('sk-test');
   await vis('ai-model').fill('test-model');
@@ -1453,6 +1456,7 @@ async function aiReading() {
   await page.getByTestId('scan').click();
   await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
   await vis('scan-tile').first().waitFor({ timeout: 120000 });
+  check((await vis('scan-ai').getAttribute('aria-checked')) === 'false', 'ai: reading with AI starts off for a scan');
   await vis('scan-ai').click();
   check((await vis('scan-ai').getAttribute('aria-checked')) === 'true' && (await page.getByText(/Sends the pages to ai\.test/).count()) > 0, 'ai: the scan offers AI reading, naming the host');
   await vis('scan-save').click();
@@ -1482,6 +1486,8 @@ async function aiReading() {
   await page.getByTestId('scan').click();
   await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
   await vis('scan-tile').first().waitFor({ timeout: 120000 });
+  check((await vis('scan-ai').getAttribute('aria-checked')) === 'false', 'ai: switched on for one scan only, not the next');
+  await vis('scan-ai').click();
   await vis('scan-title').fill('Offline');
   await vis('scan-save').click();
   await page.getByText('AI reading failed').waitFor({ timeout: 300000 }).then(() => check(true, 'ai: a failure is reported'), () => check(false, 'ai: a failure is reported'));
@@ -2351,6 +2357,15 @@ async function scanner() {
   await vis('bulk-delete').click();
   await page.waitForTimeout(500);
   check((await vis('scan-tile').count()) === 1, 'scanner: selected pages can be deleted');
+  // Deleting the last page on its own screen goes back to the document, with Undo there.
+  await vis('scan-tile').first().click();
+  await vis('scan-delete').click();
+  await page.waitForURL(/\/scan\/review/);
+  // The page screen's toast fades out as the document's comes in.
+  await page.waitForTimeout(600);
+  await vis('toast-action').click({ timeout: 10000 });
+  await page.waitForTimeout(500);
+  check((await vis('scan-tile').count()) === 1, 'scanner: a page deleted on its own screen can be undone');
 
   await vis('scan-title').fill('Invoice ACME');
   await vis('scan-destination').click();

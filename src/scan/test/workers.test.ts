@@ -40,6 +40,7 @@ class FakeWorker {
 const job: RenderJob = {
   pageId: 'p',
   source: new Blob(),
+  sourceKey: 's1',
   sourceWidth: 10,
   sourceHeight: 10,
   spec: {} as RenderJob['spec'],

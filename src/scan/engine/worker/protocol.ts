@@ -10,6 +10,11 @@ import type { PageSpec } from '../pipeline';
 export interface RenderJob {
   pageId: string;
   source: Blob;
+  /**
+   * Names this photo (a page's retake gets a new one): the worker's caches know it by this, as the Blob it gets
+   * is a new copy with every message.
+   */
+  sourceKey: string;
   /** Full pixel size of `source`, so it can be decoded at a reduced size. */
   sourceWidth: number;
   sourceHeight: number;

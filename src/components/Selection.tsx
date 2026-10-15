@@ -83,7 +83,7 @@ export function Action({ icon, label, disabled, onPress, testID }: { icon: IconN
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      aria-disabled={!!disabled}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [

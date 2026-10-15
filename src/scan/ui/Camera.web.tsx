@@ -23,6 +23,8 @@ export type CameraProps = {
   defaultFilter: FilterId;
   /** The capture replaces this page's photo instead of adding a page. */
   retakeId: string | null;
+  /** The screen is in front: the camera runs only then (not under the crop screen). */
+  active: boolean;
   onAutoCapture: (on: boolean) => void;
   onClose: () => void;
   /** No page edges were found on a photo taken by hand: crop it. */
@@ -79,7 +81,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * The camera: finds the page in the live picture, takes it by itself once the phone is held steady (or on
  * the shutter), and adds it to the document. Photos can be imported instead.
  */
-export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoCapture, onClose, onCrop, onRetaken, say }: CameraProps) {
+export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active, onAutoCapture, onClose, onCrop, onRetaken, say }: CameraProps) {
   const insets = useSafeAreaInsets();
   const pages = useScan((s) => s.pages);
   const video = useRef<HTMLVideoElement>(null);
@@ -150,8 +152,9 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
     setSteady(0);
   };
 
-  // Camera: open, follow the track, close in the background (leave it to other apps).
+  // Camera: open, follow the track, close in the background (leave it to other apps) and under another screen.
   useEffect(() => {
+    if (!active) return;
     let token = 0;
     let stream: MediaStream | null = null;
     let lastRestart = 0;
@@ -222,7 +225,7 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
       document.removeEventListener('visibilitychange', visibility);
       close();
     };
-  }, [deviceId, restart]);
+  }, [deviceId, restart, active]);
 
   // Detection loop and the outline's easing.
   useEffect(() => {
@@ -378,6 +381,7 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
     const l = live.current;
     l.capturing = true;
     setCapturing(true);
+    const before = useScan.getState().pages.length;
     const summary = await importPhotos(l.detector, files, { filter: defaultFilter, retakeId });
     l.capturing = false;
     setCapturing(false);
@@ -385,7 +389,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
     else if (summary.missing) say(t.scanImportNoEdges(summary.missing));
     else if (summary.cut) say(t.scanImportCut(summary.cut));
     if (retakeId) onRetaken(retakeId);
-    else onClose();
+    // Nothing came of it: the camera stays, with what went wrong.
+    else if (useScan.getState().pages.length > before) onClose();
   };
 
   const toggleTorch = async () => {

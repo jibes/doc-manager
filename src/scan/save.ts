@@ -1,3 +1,4 @@
+import { aiMessage } from '@/i18n';
 import { folders, type Place } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import type { DocRecord } from '@/storage';
@@ -24,7 +25,8 @@ async function aiImage(page: Page): Promise<Blob> {
  * Builds the PDF (with its text layer when recognition is on), writes it into the folder (or keeps it in the
  * library only), and adds it to the library, linked to the file where it has one. With `ai`, the pages are also
  * read by the model set up in Settings, whose text replaces the device's and whose title names the file when the
- * user gave none; if that fails, the scan is saved with the device's text and `aiError` says why.
+ * user gave none; if that fails, the scan is saved with the device's text and `aiError` says why. `unread`: pages
+ * saved without text because recognition couldn't run. Throws when the PDF was kept nowhere.
  */
 export async function saveScan(
   pages: Page[],
@@ -37,9 +39,10 @@ export async function saveScan(
   onProgress: (p: SaveProgress) => void,
   signal?: AbortSignal,
   ai?: AiSettings,
-): Promise<{ doc?: DocRecord; aiError?: string }> {
+): Promise<{ doc?: DocRecord; aiError?: string; unread: number }> {
   let found = '';
   let aiError: string | undefined;
+  let unread = 0;
   const enrich =
     ai && settings.ocr
       ? async (done: { pdf: PdfPage; page: Page }[]) => {
@@ -57,7 +60,7 @@ export async function saveScan(
             return { author: reading.sender || undefined, subject: reading.type || undefined, keywords: reading.keywords, date: reading.date || undefined };
           } catch (e) {
             if (signal?.aborted) throw e;
-            aiError = e instanceof Error ? e.message : String(e);
+            aiError = aiMessage(e);
             return undefined;
           }
         }
@@ -68,10 +71,21 @@ export async function saveScan(
     onReading: (page, total) => onProgress({ phase: 'read', done: page, total }),
     signal,
     enrich,
+    onUnread: () => unread++,
   });
   const file = pdfFilename(name());
-  const { importFiles } = useLibrary.getState();
-  if (!to) return { doc: (await importFiles([{ name: file, size: pdf.size, file: pdf }]))[0], aiError };
+  const library = useLibrary.getState();
+  if (!to) {
+    // Only the library keeps it: not kept there is not saved at all (the scan stays, to try again).
+    const [doc] = await library.importFiles([{ name: file, size: pdf.size, file: pdf }]);
+    if (!doc) {
+      const why = useLibrary.getState().error;
+      library.clearError();
+      throw new Error(why ?? 'The document could not be kept.');
+    }
+    return { doc, aiError, unread };
+  }
+  // In a folder it is saved, even if the library can't take it in (it says so).
   const entry = await folders.create(to, file, pdf);
-  return { doc: (await importFiles([{ name: entry.name, size: pdf.size, file: pdf, handle: entry.handle, link: entry.uri }]))[0], aiError };
+  return { doc: (await library.importFiles([{ name: entry.name, size: pdf.size, file: pdf, handle: entry.handle, link: entry.uri }]))[0], aiError, unread };
 }

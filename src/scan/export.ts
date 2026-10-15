@@ -65,6 +65,7 @@ export async function exportPdf(
     latest,
     signal,
     enrich,
+    onUnread,
   }: {
     searchable?: boolean;
     /** Called while waiting for a page's text recognition. */
@@ -82,6 +83,8 @@ export async function exportPdf(
      * their words, and returns details for the PDF's information.
      */
     enrich?: (pages: { pdf: PdfPage; page: Page }[]) => Promise<Omit<PdfInfo, 'title' | 'created'> | undefined>;
+    /** Called for each page whose text couldn't be recognised (it goes in without). */
+    onUnread?: () => void;
   } = {},
 ): Promise<Blob> {
   let skipped = false;
@@ -100,6 +103,7 @@ export async function exportPdf(
       searchable && reading && !skipped
         ? await unlessAborted(waitForText(reading, i, total), signal)
         : undefined;
+    if (text?.failed) onUnread?.();
     let found = text?.words;
     if (text?.turn) {
       // OCR found the page sideways or upside down: put it in upright.

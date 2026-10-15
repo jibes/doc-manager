@@ -18,7 +18,8 @@ declare const self: {
  * and the warp. Sizes are deliberately tiny: a decoded 12 MP photo is ~48 MB.
  */
 interface Decoded {
-  blob: Blob;
+  /** The photo it was decoded from (RenderJob.sourceKey). */
+  sourceKey: string;
   image: RGBAImage;
   /** Decoded pixels per source pixel. */
   scale: number;
@@ -30,7 +31,7 @@ interface Decoded {
  */
 interface Rectified {
   page: RGBAImage;
-  blob: Blob;
+  sourceKey: string;
   /** Decoded pixels per source pixel. */
   scale: number;
   /** Size of the decoded image. */
@@ -58,7 +59,7 @@ async function getSource(job: RenderJob, cache = true): Promise<Decoded> {
   const bucket = needed <= 0.25 ? 0.25 : needed <= 0.5 ? 0.5 : 1;
   const key = `${job.pageId}|${bucket}`;
   const hit = sources.get(key);
-  if (hit && hit.blob === job.source) {
+  if (hit && hit.sourceKey === job.sourceKey) {
     touch(sources, key, hit, MAX_SOURCES);
     return hit;
   }
@@ -86,7 +87,7 @@ async function getSource(job: RenderJob, cache = true): Promise<Decoded> {
   }
   // Browsers without resize support decode at full size; measure, don't assume.
   const decoded: Decoded = {
-    blob: job.source,
+    sourceKey: job.sourceKey,
     image: { data, width, height },
     scale: width / job.sourceWidth,
   };
@@ -106,7 +107,7 @@ async function getRectified(job: RenderJob, cache: boolean): Promise<Rectified> 
     .map((v) => v.toFixed(2))
     .join(',')}|${spec.rotation}|${job.longEdge}`;
   const hit = rectified.get(key);
-  if (hit && hit.blob === job.source) {
+  if (hit && hit.sourceKey === job.sourceKey) {
     touch(rectified, key, hit, MAX_RECTIFIED);
     return hit;
   }
@@ -114,7 +115,7 @@ async function getRectified(job: RenderJob, cache: boolean): Promise<Rectified> 
   const decoded = await getSource(job, cache);
   const page = rectifyPage(decoded.image, scaledSpec(spec, decoded.scale), job.longEdge);
   const { width, height } = decoded.image;
-  const entry = { page, blob: job.source, scale: decoded.scale, decodedSize: { width, height } };
+  const entry = { page, sourceKey: job.sourceKey, scale: decoded.scale, decodedSize: { width, height } };
   if (cache) touch(rectified, key, entry, MAX_RECTIFIED);
   return entry;
 }

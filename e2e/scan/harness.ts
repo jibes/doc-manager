@@ -300,6 +300,7 @@ export async function runCase(id: string, options: CaseOptions): Promise<CaseRes
     const enc = await proc.encode({
       pageId: page.id,
       source: photo.blob,
+      sourceKey: page.id,
       sourceWidth: still.width,
       sourceHeight: still.height,
       spec: defaultSpec(quad, filter),
@@ -337,6 +338,7 @@ export async function runCase(id: string, options: CaseOptions): Promise<CaseRes
       const e = await proc.encode({
         pageId: `${page.id}-true`,
         source: photo.blob,
+        sourceKey: page.id,
         sourceWidth: still.width,
         sourceHeight: still.height,
         spec: defaultSpec(trueQuad, filter),
@@ -366,6 +368,7 @@ export async function runCase(id: string, options: CaseOptions): Promise<CaseRes
     proc.encode({
       pageId: `${page.id}-truth`,
       source: photo.blob,
+      sourceKey: page.id,
       sourceWidth: still.width,
       sourceHeight: still.height,
       spec: defaultSpec(trueQuad, 'document'),

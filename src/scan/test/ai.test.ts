@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { aiTitle, anthropicReply, applyReading, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -77,6 +77,9 @@ describe('replies', () => {
     expect(anthropicReply(JSON.stringify({ content: [{ type: 'text', text: 'whole' }] }))).toBe('whole');
     expect(() => anthropicReply(sse([{ type: 'error', error: { message: 'Overloaded' } }]))).toThrow('Overloaded');
     expect(() => anthropicReply(sse([{ type: 'message_delta', delta: { stop_reason: 'refusal' } }]))).toThrow(/declined/);
+    // Cut off at the length limit: said so, not a broken JSON error later.
+    expect(() => anthropicReply(sse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: '{"ti' } }, { type: 'message_delta', delta: { stop_reason: 'max_tokens' } }]))).toThrow(AI_CUT_OFF);
+    expect(() => anthropicReply(JSON.stringify({ content: [{ type: 'text', text: '{"ti' }], stop_reason: 'max_tokens' }))).toThrow(AI_CUT_OFF);
   });
 
   it('read a Chat Completions stream, or a whole reply', () => {
@@ -84,5 +87,19 @@ describe('replies', () => {
     expect(openAiReply(stream)).toBe('hello');
     expect(openAiReply(JSON.stringify({ choices: [{ message: { content: 'whole' } }] }))).toBe('whole');
     expect(() => openAiReply(sse([{ choices: [{ delta: { refusal: 'no' } }] }]))).toThrow(/declined/);
+    expect(() => openAiReply(sse([{ choices: [{ delta: { content: '{"ti' }, finish_reason: 'length' }] }]))).toThrow(AI_CUT_OFF);
+    expect(() => openAiReply(JSON.stringify({ choices: [{ message: { content: '{"ti' }, finish_reason: 'length' }] }))).toThrow(AI_CUT_OFF);
+  });
+
+  it('take only a whole web address, and say when a reply is no JSON', () => {
+    const s = { ...DEFAULT_AI, model: 'm' };
+    expect(aiReady({ ...s, url: 'https://api.anthropic.com' })).toBe(true);
+    expect(aiReady({ ...s, url: 'http://localhost:11434/v1' })).toBe(true);
+    // Without a scheme it would be a path on the app's own site.
+    expect(aiReady({ ...s, url: 'api.anthropic.com' })).toBe(false);
+    expect(aiReady({ ...s, url: 'ftp://example.com' })).toBe(false);
+    expect(aiHost({ ...s, url: ' https://api.anthropic.com/v1 ' })).toBe('api.anthropic.com');
+    expect(() => parseResult('no json here', 1)).toThrow(AI_NO_JSON);
+    expect(() => parseResult('{"title": "A", "pages": [', 1)).toThrow(AI_NO_JSON);
   });
 });

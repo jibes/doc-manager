@@ -16,22 +16,35 @@ export type AiSettings = {
   url: string;
   key: string;
   model: string;
-  /** Read new scans with it (the switch on the scan). */
-  read: boolean;
 };
 
-export const DEFAULT_AI: AiSettings = { api: 'anthropic', url: '', key: '', model: '', read: false };
+export const DEFAULT_AI: AiSettings = { api: 'anthropic', url: '', key: '', model: '' };
 
-export const aiReady = (s: AiSettings) => !!(s.url.trim() && s.model.trim());
-
-/** The host pages are sent to, for the note on the switch. */
-export function aiHost(s: AiSettings): string {
+/**
+ * The address, when it is a whole web address (http or https, with a host). Anything else would be taken as a
+ * path on the app's own site: the key and the pages would go there.
+ */
+export function aiUrl(s: AiSettings): URL | null {
   try {
-    return new URL(s.url.trim()).host;
+    const url = new URL(s.url.trim());
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.host ? url : null;
   } catch {
-    return s.url.trim();
+    return null;
   }
 }
+
+export const aiReady = (s: AiSettings) => !!aiUrl(s) && !!s.model.trim();
+
+/** The host pages are sent to, for the note on the switch. */
+export const aiHost = (s: AiSettings) => aiUrl(s)?.host ?? s.url.trim();
+
+/** What went wrong, as codes (put in words by aiMessage in i18n). */
+export const AI_DECLINED = 'ai:declined';
+export const AI_CUT_OFF = 'ai:cut-off';
+export const AI_NO_JSON = 'ai:no-json';
+export const AI_BAD_URL = 'ai:bad-url';
+/** "ai:server <status> <what it said>". */
+export const AI_SERVER = 'ai:server';
 
 /** A page as sent: its image (upright, as exported) and its lines as read on the device. */
 export type AiPage = { jpeg: Blob; lines: { id: string; text: string }[] };
@@ -93,8 +106,13 @@ const base64 = async (blob: Blob) => {
 export function parseResult(text: string, pageCount: number): AiResult {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start < 0 || end < start) throw new Error('The reply has no JSON in it.');
-  const raw = JSON.parse(text.slice(start, end + 1)) as Partial<AiResult>;
+  if (start < 0 || end < start) throw new Error(AI_NO_JSON);
+  let raw: Partial<AiResult>;
+  try {
+    raw = JSON.parse(text.slice(start, end + 1)) as Partial<AiResult>;
+  } catch {
+    throw new Error(AI_NO_JSON);
+  }
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const pages = Array.isArray(raw.pages) ? raw.pages : [];
   return {
@@ -122,7 +140,6 @@ async function post(url: string, init: { headers: Record<string, string>; body: 
   return new Response(r.body, { status: r.status });
 }
 
-const DECLINED = 'The model declined to read this document.';
 
 /** The data of each server-sent event ("data: …" lines), or null when the reply isn't a stream. */
 function events(raw: string): unknown[] | null {
@@ -144,41 +161,55 @@ function events(raw: string): unknown[] | null {
 /** The text of an Anthropic reply, streamed (as asked) or whole (a server that doesn't stream). */
 export function anthropicReply(raw: string): string {
   type Event = { type: string; delta?: { type?: string; text?: string; stop_reason?: string }; error?: { message?: string } };
+  // Declined, or cut off at the length limit (the JSON would be broken).
+  const stopped = (reason?: string) => {
+    if (reason === 'refusal') throw new Error(AI_DECLINED);
+    if (reason === 'max_tokens') throw new Error(AI_CUT_OFF);
+  };
   const stream = events(raw) as Event[] | null;
   if (!stream) {
     const message = JSON.parse(raw) as { content?: { type: string; text?: string }[]; stop_reason?: string };
-    if (message.stop_reason === 'refusal') throw new Error(DECLINED);
+    stopped(message.stop_reason);
     return (message.content ?? []).map((b) => (b.type === 'text' ? (b.text ?? '') : '')).join('');
   }
   let text = '';
   for (const e of stream) {
-    if (e.type === 'error') throw new Error(e.error?.message ?? 'The model stopped with an error.');
+    if (e.type === 'error') throw new Error(e.error?.message ?? AI_SERVER);
     if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') text += e.delta.text ?? '';
-    if (e.type === 'message_delta' && e.delta?.stop_reason === 'refusal') throw new Error(DECLINED);
+    if (e.type === 'message_delta') stopped(e.delta?.stop_reason);
   }
   return text;
 }
 
 /** The text of a Chat Completions reply, streamed or whole. */
 export function openAiReply(raw: string): string {
-  type Choice = { delta?: { content?: string | null; refusal?: string | null }; message?: { content?: string | null; refusal?: string | null } };
+  type Choice = {
+    delta?: { content?: string | null; refusal?: string | null };
+    message?: { content?: string | null; refusal?: string | null };
+    finish_reason?: string | null;
+  };
   const stream = events(raw) as { choices?: Choice[]; error?: { message?: string } }[] | null;
   if (!stream) {
-    const msg = (JSON.parse(raw) as { choices?: Choice[] }).choices?.[0]?.message;
-    if (msg?.refusal) throw new Error(DECLINED);
-    return msg?.content ?? '';
+    const choice = (JSON.parse(raw) as { choices?: Choice[] }).choices?.[0];
+    if (choice?.message?.refusal) throw new Error(AI_DECLINED);
+    if (choice?.finish_reason === 'length') throw new Error(AI_CUT_OFF);
+    return choice?.message?.content ?? '';
   }
   let text = '';
   for (const e of stream) {
-    if (e.error) throw new Error(e.error.message ?? 'The model stopped with an error.');
-    const delta = e.choices?.[0]?.delta;
-    if (delta?.refusal) throw new Error(DECLINED);
-    text += delta?.content ?? '';
+    if (e.error) throw new Error(e.error.message ?? AI_SERVER);
+    const choice = e.choices?.[0];
+    if (choice?.delta?.refusal) throw new Error(AI_DECLINED);
+    if (choice?.finish_reason === 'length') throw new Error(AI_CUT_OFF);
+    text += choice?.delta?.content ?? '';
   }
   return text;
 }
 
 const trimSlash = (url: string) => url.trim().replace(/\/+$/, '');
+
+/** A rejection worth another try without the structured output: the server doesn't know that part of the request (not a bad key, model or image). */
+const FORMAT_REJECTED = /output_config|response_format|json_schema|json_object|structured|schema|format|guided|grammar/i;
 
 /**
  * Anthropic's Messages API over fetch. (The official SDK can't initialise in this app's web bundle: Metro trips
@@ -192,7 +223,8 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
   const body = (structured: boolean) =>
     JSON.stringify({
       model: s.model.trim(),
-      max_tokens: 16000,
+      // Room for thinking and every line of every page given back (a stream allows this much).
+      max_tokens: 32000,
       // Streamed: the reply starts at once, so a proxy on the way (Cloudflare gives up after ~100 s without a
       // byte) doesn't cut off a long reading. The whole stream is read before it is used.
       stream: true,
@@ -214,10 +246,11 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
       signal,
     });
     if (res.ok) return anthropicReply(await res.text());
-    last = `${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`;
-    if (res.status !== 400) break;
+    const said = await res.text().catch(() => '');
+    last = `${res.status} ${said.slice(0, 200)}`;
+    if (res.status !== 400 || !FORMAT_REJECTED.test(said)) break;
   }
-  throw new Error(`The server answered ${last}`);
+  throw new Error(`${AI_SERVER} ${last}`);
 }
 
 async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Promise<string> {
@@ -238,15 +271,19 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
       signal,
     });
     if (res.ok) return openAiReply(await res.text());
-    last = `${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`;
+    const said = await res.text().catch(() => '');
+    last = `${res.status} ${said.slice(0, 200)}`;
     // Only a rejected request format is worth another try.
-    if (res.status !== 400 && res.status !== 422) break;
+    if ((res.status !== 400 && res.status !== 422) || !FORMAT_REJECTED.test(said)) break;
   }
-  throw new Error(`The server answered ${last}`);
+  throw new Error(`${AI_SERVER} ${last}`);
 }
 
 /** Sends the pages and returns what the model read. Throws with a message for the user on any failure. */
-const send = (s: AiSettings, req: Request, signal?: AbortSignal) => (s.api === 'anthropic' ? viaAnthropic(s, req, signal) : viaOpenAi(s, req, signal));
+const send = (s: AiSettings, req: Request, signal?: AbortSignal) => {
+  if (!aiUrl(s)) throw new Error(AI_BAD_URL);
+  return s.api === 'anthropic' ? viaAnthropic(s, req, signal) : viaOpenAi(s, req, signal);
+};
 
 export async function readWithAi(s: AiSettings, pages: AiPage[], signal?: AbortSignal): Promise<AiResult> {
   const text = await send(s, { images: pages.map((p) => p.jpeg), text: prompt(pages), schema: RESULT_SCHEMA }, signal);
@@ -272,12 +309,12 @@ export async function describeWithAi(s: AiSettings, text: string, signal?: Abort
 }
 
 /** A small request (a blank page) that checks the address, key and model, for Settings. */
-export async function testAi(s: AiSettings): Promise<void> {
+export async function testAi(s: AiSettings, signal?: AbortSignal): Promise<void> {
   const canvas = new OffscreenCanvas(64, 64);
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, 64, 64);
-  await readWithAi(s, [{ jpeg: await canvas.convertToBlob({ type: 'image/jpeg' }), lines: [] }]);
+  await readWithAi(s, [{ jpeg: await canvas.convertToBlob({ type: 'image/jpeg' }), lines: [] }], signal);
 }
 
 /* -------------------------------------------------------- the text layer ---- */

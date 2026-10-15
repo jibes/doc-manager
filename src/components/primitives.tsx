@@ -85,7 +85,7 @@ export function Button({
       testID={testID}
       accessibilityRole="button"
       disabled={disabled}
-      accessibilityState={{ disabled: !!disabled }}
+      aria-disabled={!!disabled}
       onPress={() => {
         tick();
         onPress?.();

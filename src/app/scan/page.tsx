@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +10,7 @@ import { Toast } from '@/components/Toast';
 import { radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
 import { isBlurred } from '@/scan/engine/imaging/sharpness';
-import { useScan } from '@/scan/session';
+import { sayScan, useScan, useScanMessage } from '@/scan/session';
 import { FilterChips } from '@/scan/ui/FilterChips';
 import { HoldButton } from '@/scan/ui/HoldButton';
 import { PageImage } from '@/scan/ui/PageImage';
@@ -25,8 +25,9 @@ export default function ScanPage() {
   const { pages, loaded, restore, update, remove, applyToAll } = useScan();
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const dismiss = useCallback(() => setMessage(null), []);
+  const { text: message, undo } = useScanMessage();
+  const focused = useIsFocused();
+  const dismiss = useCallback(() => sayScan(null), []);
   useEffect(() => void restore(), [restore]);
 
   const index = pages.findIndex((p) => p.id === id);
@@ -52,11 +53,12 @@ export default function ScanPage() {
   if (Platform.OS !== 'web') return <Unsupported />;
   if (!page) return <View style={styles.screen} />;
 
+  // Deleted at once, with Undo (shown here, or on the document when it was the last page: the screen goes back
+  // there by itself once its page is gone).
   const del = () => {
     const next = pages[index + 1] ?? pages[index - 1];
-    remove(page.id);
+    sayScan(t.scanDeletedN(1), remove(page.id));
     if (next) open(next.id);
-    else router.replace('/scan/review');
   };
   const others = pages.filter((p) => p.spec.filter !== page.spec.filter).length;
 
@@ -115,10 +117,7 @@ export default function ScanPage() {
         {others > 0 && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => {
-              applyToAll(page.spec.filter);
-              setMessage(t.scanAppliedToAll(pages.length));
-            }}
+            onPress={() => sayScan(t.scanAppliedToAll(pages.length), applyToAll(page.spec.filter))}
             style={{ alignSelf: 'flex-start', paddingVertical: space.xs }}
           >
             <T v="label" color="#9DB8FF">
@@ -133,7 +132,7 @@ export default function ScanPage() {
           <Action testID="scan-delete" icon="trash" label={t.delete} onPress={del} />
         </View>
       </View>
-      <Toast message={message} onDismiss={dismiss} />
+      {focused && <Toast message={message} onDismiss={dismiss} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
     </View>
   );
 }

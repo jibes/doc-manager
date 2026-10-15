@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { router, useIsFocused } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,7 +17,7 @@ import { defaultTitle } from '@/scan/export';
 import { prefetchExports } from '@/scan/exportCache';
 import { saveScan, type SaveProgress } from '@/scan/save';
 import { aiHost, aiReady } from '@/scan/ai';
-import { useScan } from '@/scan/session';
+import { sayScan, useScan, useScanMessage } from '@/scan/session';
 import { FilterChips } from '@/scan/ui/FilterChips';
 import { PageImage } from '@/scan/ui/PageImage';
 import { Unsupported } from '@/scan/ui/Unsupported';
@@ -34,7 +34,8 @@ export default function ScanReview() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { pages, title, loaded, restore, setTitle, applyToAll, clear, moveTo, moveMany, removeMany, updateMany } = useScan();
+  const { pages, title, loaded, aiRead, unsaved, restore, setTitle, setAiRead, applyToAll, clear, moveTo, moveMany, removeMany, updateMany } = useScan();
+  const focused = useIsFocused();
   const scan = usePrefs((s) => s.scan);
   const scanTo = usePrefs((s) => s.scanTo);
   const ai = usePrefs((s) => s.ai);
@@ -44,23 +45,18 @@ export default function ScanReview() {
   const [roots, setRoots] = useState<FolderRoot[]>([]);
   const [choosing, setChoosing] = useState(false);
   const [progress, setProgress] = useState<SaveProgress | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [undo, setUndo] = useState<(() => void) | null>(null);
+  // The scanner's messages (the camera's too: it may have closed since), with Undo for what they report.
+  const { text: message, undo } = useScanMessage();
   // Select mode: the pages picked for a bulk action (null: not selecting).
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const saving = useRef<AbortController | null>(null);
   const grid = useRef<View>(null);
   const placeholder = useMemo(() => defaultTitle(), []);
-  const dismiss = useCallback(() => {
-    setMessage(null);
-    setUndo(null);
-  }, []);
-  const notify = (text: string, back?: () => void) => {
-    setMessage(text);
-    setUndo(() => back ?? null);
-  };
+  const dismiss = () => sayScan(null);
+  const notify = (text: string, back?: () => void) => sayScan(text, back);
   const ids = useMemo(() => pages.map((pg) => pg.id), [pages]);
-  const drag = useTileDrag(grid, ids, moveTo, !selected && pages.length > 1);
+  // While saving, the document stays as it is being saved.
+  const drag = useTileDrag(grid, ids, moveTo, !selected && !progress && pages.length > 1);
   const byId = useMemo(() => new Map(pages.map((pg) => [pg.id, pg])), [pages]);
   const shown = drag ? drag.order.map((id) => byId.get(id)!).filter(Boolean) : pages;
   const picked = selected ? pages.filter((pg) => selected.has(pg.id)) : [];
@@ -70,17 +66,17 @@ export default function ScanReview() {
     // The app's own folder is the default ("null") choice, listed first.
     folders.roots(false).then((r) => setRoots(r.filter((x) => x.kind !== 'app')), () => setRoots([]));
   }, []);
-  // Render (and read) the pages in the background while the user looks them over, so saving is quick.
+  // Render (and read) the pages in the background while the user looks them over (not while the camera is on top), so saving is quick.
   useEffect(() => {
-    if (pages.length) prefetchExports(pages, scan);
-  }, [pages, scan]);
+    if (pages.length && focused) prefetchExports(pages, scan);
+  }, [pages, scan, focused]);
 
   const archive = usePrefs((s) => s.archive);
   const toInbox = !!archive && scanTo === INBOX_TARGET;
   const target = toInbox ? null : (roots.find((r) => r.id === scanTo) ?? null);
-  // The chips show (and set) the filter of the selected pages while selecting, else of all pages.
+  // The chips show (and set) the filter of the selected pages while selecting, else of all pages; none when they differ.
   const scope = selected ? picked : pages;
-  const common = scope.length && scope.every((pg) => pg.spec.filter === scope[0].spec.filter) ? scope[0].spec.filter : selected ? null : scan.defaultFilter;
+  const common = scope.length && scope.every((pg) => pg.spec.filter === scope[0].spec.filter) ? scope[0].spec.filter : scope.length ? null : scan.defaultFilter;
   const columns = Math.max(2, Math.floor((Math.min(width, MAX_W) - space.xl * 2 + space.md) / (TILE_MIN + space.md)));
   const tile = (Math.min(width, MAX_W) - space.xl * 2 - space.md * (columns - 1)) / columns;
 
@@ -90,7 +86,9 @@ export default function ScanReview() {
       notify(t.scanFilteredN(picked.length), updateMany([...selected], () => ({ filter })));
       return;
     }
-    applyToAll(filter);
+    // Pages with filters of their own lose them: that can be undone.
+    const back = applyToAll(filter);
+    if (common === null) notify(t.scanAppliedToAll(pages.length), back);
     setPrefs({ scan: { ...scan, defaultFilter: filter } });
   };
 
@@ -117,15 +115,18 @@ export default function ScanReview() {
     const controller = new AbortController();
     saving.current = controller;
     setProgress({ phase: 'render', done: 0, total: pages.length });
+    // The pages being saved: only they leave the scan when it is saved.
+    const saved = pages.map((pg) => pg.id);
     try {
       const to = toInbox ? { root: archive!, dir: await inboxDir(archive!) } : target && { root: target.id };
-      const { doc, aiError } = await saveScan(pages, scan, title, placeholder, to, setProgress, controller.signal, aiOffered && ai.read ? ai : undefined);
-      clear();
+      const { doc, aiError, unread } = await saveScan(pages, scan, title, placeholder, to, setProgress, controller.signal, aiOffered && aiRead ? ai : undefined);
+      clear(saved);
       if (aiError) await ask({ title: t.scanAiFailedTitle, body: t.scanAiFailed(aiError), confirm: t.done });
+      if (unread) await ask({ title: t.scanUnreadTitle(unread), body: t.ocrFailed, confirm: t.done });
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
       else router.replace('/');
     } catch (e) {
-      if (!controller.signal.aborted) setMessage(t.scanSaveFailed(e instanceof Error ? e.message : String(e)));
+      if (!controller.signal.aborted) notify(t.scanSaveFailed(e instanceof Error ? e.message : String(e)));
     } finally {
       saving.current = null;
       setProgress(null);
@@ -152,7 +153,7 @@ export default function ScanReview() {
   return (
     <View style={{ flex: 1, backgroundColor: p.canvas }}>
       <ScrollView contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + 120 }}>
-        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl }}>
+        <View pointerEvents={progress ? 'none' : 'auto'} style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl, opacity: progress ? 0.6 : 1 }}>
           <ScreenHeader title={t.scan} over={pages.length ? t.scanPages(pages.length) : undefined}>
             {pages.length > 1 && !progress && (
               <Button
@@ -164,8 +165,14 @@ export default function ScanReview() {
             )}
           </ScreenHeader>
 
+          {unsaved && (
+            <T v="caption" color={p.markRing} testID="scan-unsaved" style={{ marginBottom: space.md }}>
+              {t.scanUnsaved}
+            </T>
+          )}
           <TextInput
             testID="scan-title"
+            editable={!progress}
             value={title}
             onChangeText={setTitle}
             placeholder={placeholder}
@@ -267,14 +274,14 @@ export default function ScanReview() {
                 {aiOffered && (
                   <>
                     <View style={{ height: 1, backgroundColor: p.hairline }} />
-                    <Pressable testID="scan-ai" accessibilityRole="switch" aria-checked={ai.read} onPress={() => setPrefs({ ai: { ...ai, read: !ai.read } })} style={styles.row}>
+                    <Pressable testID="scan-ai" accessibilityRole="switch" aria-checked={aiRead} onPress={() => setAiRead(!aiRead)} style={styles.row}>
                       <View style={{ flex: 1 }}>
                         <T>{t.scanAi}</T>
                         <T v="caption" color={p.muted}>
                           {t.scanAiNote(aiHost(ai))}
                         </T>
                       </View>
-                      <Switch value={ai.read} onValueChange={(read) => setPrefs({ ai: { ...ai, read } })} trackColor={{ true: p.accent }} />
+                      <Switch value={aiRead} onValueChange={setAiRead} trackColor={{ true: p.accent }} />
                     </Pressable>
                   </>
                 )}
@@ -348,7 +355,7 @@ export default function ScanReview() {
           </Pressable>
         </Pressable>
       )}
-      <Toast message={message} onDismiss={dismiss} above={selected ? 110 : 64} action={undo ? { label: t.undo, onPress: undo } : undefined} />
+      {focused && <Toast message={message} onDismiss={dismiss} above={selected ? 110 : 64} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
     </View>
   );
 }

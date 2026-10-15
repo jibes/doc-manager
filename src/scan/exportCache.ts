@@ -32,6 +32,8 @@ export interface PageText {
    * is `uprightPage`'s, with these words.
    */
   turn: number;
+  /** Recognition failed (no words because it couldn't run, not because the page has none). */
+  failed?: boolean;
 }
 
 /** A page as it is once turned by `turn` quarter turns: its orientation is then settled. */
@@ -84,6 +86,8 @@ const inFlight = new Map<string, Promise<EncodedPage>>();
 const read = new Set<string>();
 let paused = false;
 let generation = 0;
+/** The last prefetch asked for, to go on with after a pause. */
+let last: { pages: Page[]; settings: ScanSettings } | null = null;
 /** Whether the background prefetch also reads the text (OCR on and its models downloaded). */
 let readsText = false;
 
@@ -243,11 +247,11 @@ async function encode(page: Page, settings: ScanSettings, text: boolean): Promis
             changed();
             return { words: scaled, turn };
           })
-          .catch(() => {
-            // This export goes out without text; the next one tries again.
+          .catch((): PageText => {
+            // This export goes out without text (and says so); the next one tries again.
             if (ready.get(k) === entry) ready.set(k, { ...entry, text: null });
             changed();
-            return { words: [], turn: 0 };
+            return { words: [], turn: 0, failed: true };
           });
       }
       ready.set(k, entry);
@@ -315,6 +319,7 @@ export function encodedPage(
  * longer exist are dropped.
  */
 export function prefetchExports(pages: Page[], settings: ScanSettings): void {
+  last = { pages, settings };
   const wanted = new Set(pages.map((p) => key(p, settings)));
   for (const k of [...ready.keys()]) {
     if (wanted.has(k)) continue;
@@ -354,12 +359,31 @@ export function forgetExport(pageId: string): void {
   exporter?.forget(pageId);
 }
 
-/** Stop starting new background renders (the one in progress finishes). */
+/** Stop starting new background renders (the one in progress finishes): while the camera is in use. */
 export function pausePrefetch(): void {
   paused = true;
   generation++;
 }
 
+/** Background renders again, from where the last request was. */
 export function resumePrefetch(): void {
   paused = false;
+  if (last) prefetchExports(last.pages, last.settings);
+}
+
+/** The document is gone (saved or discarded): nothing more is prepared or kept, and the workers close. */
+export function resetExports(): void {
+  generation++;
+  last = null;
+  ready.clear();
+  read.clear();
+  inFlight.clear();
+  exporter?.dispose();
+  exporter = null;
+  clearTimeout(readerIdle);
+  if (!reading) {
+    reader?.dispose();
+    reader = null;
+  }
+  changed();
 }

@@ -14,13 +14,15 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { aiMessage, t } from '@/i18n';
 import { aiReady } from '@/scan/ai';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 820;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** How long the model may take to suggest details. */
+const AI_WAIT_MS = 120_000;
 
 type Edits = Partial<Omit<Details, 'tags'>> & { tags?: string };
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -145,13 +147,21 @@ export default function Inbox() {
       setNotice(message(e));
     }
   };
+  // The model fills in the details; what the user types meanwhile stays. It gets two minutes.
   const askAi = async (item: Proposal) => {
-    setBusy((b) => new Set(b).add(item.entry.id));
+    const id = item.entry.id;
+    const before = edits[id] ?? {};
+    setBusy((b) => new Set(b).add(id));
     try {
-      const d = await suggest({ ...item, details: detailsOf(item, edits[item.entry.id]) }, ai);
-      setEdits((all) => ({ ...all, [item.entry.id]: { title: d.title, sender: d.sender, type: d.type, date: d.date, tags: d.tags.join(', ') } }));
+      const d = await suggest({ ...item, details: detailsOf(item, before) }, ai, AbortSignal.timeout(AI_WAIT_MS));
+      const got: Edits = { title: d.title, sender: d.sender, type: d.type, date: d.date, tags: d.tags.join(', ') };
+      setEdits((all) => {
+        const now = all[id] ?? {};
+        const kept = Object.fromEntries((Object.keys(got) as (keyof Edits)[]).filter((k) => now[k] !== before[k]).map((k) => [k, now[k]]));
+        return { ...all, [id]: { ...now, ...got, ...kept } };
+      });
     } catch (e) {
-      setNotice(message(e));
+      setNotice(aiMessage(e));
     } finally {
       setBusy((b) => {
         const next = new Set(b);

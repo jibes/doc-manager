@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import type { FilterId } from './engine/imaging/filters';
 import type { Quad } from './engine/imaging/image';
 import type { PageSpec } from './engine/pipeline';
-import { forgetExport, onPageTurned } from './exportCache';
+import { forgetExport, onPageTurned, resetExports } from './exportCache';
 import { dropRenders } from './renderCache';
 import { forgetPage } from './services';
 import type { Page } from './types';
@@ -26,6 +26,10 @@ type ScanState = {
   pages: Page[];
   title: string;
   loaded: boolean;
+  /** Read with the AI model when saved: switched on for this scan only. */
+  aiRead: boolean;
+  /** A photo or the draft couldn't be kept on the device (storage full): the scan would be lost with the app. */
+  unsaved: boolean;
   restore(): Promise<void>;
   add(page: Omit<Page, 'id'>): Page;
   update(id: string, spec: Partial<PageSpec>): void;
@@ -42,8 +46,17 @@ type ScanState = {
   /** Gives every page this filter; returns a function that puts each page's previous filter back. */
   applyToAll(filter: FilterId): () => void;
   setTitle(title: string): void;
-  clear(): void;
+  setAiRead(on: boolean): void;
+  /** Ends the document (`ids`: only those pages, the ones just saved; others taken meanwhile stay). */
+  clear(ids?: string[]): void;
 };
+
+/**
+ * What the scanner has to say (a photo that couldn't be read, a page deleted with its Undo), shown by whichever
+ * scanner screen is in front: the camera may close right after saying it.
+ */
+export const useScanMessage = create<{ text: string | null; undo?: () => void }>(() => ({ text: null }));
+export const sayScan = (text: string | null, undo?: () => void) => useScanMessage.setState({ text, undo });
 
 let pending = false;
 /** Bumped when the document is discarded, so an Undo offered for the old one does nothing in the new one. */
@@ -56,15 +69,16 @@ export const useScan = create<ScanState>((setState, getState) => {
     pending = true;
     queueMicrotask(flush);
   };
+  const failed = () => setState({ unsaved: true });
   const flush = () => {
     pending = false;
     const { pages, title, loaded } = getState();
     if (!loaded) return;
     const draft: Draft = { pages: pages.map(({ source: _, ...rest }) => rest), title };
-    set('draft', draft, store()).catch(() => {});
+    set('draft', draft, store()).catch(failed);
   };
   const savePhoto = (page: Page) => {
-    set(photoKey(page.id), page.source, store()).catch(() => {});
+    set(photoKey(page.id), page.source, store()).catch(failed);
     save();
   };
   const setPages = (pages: Page[]) => {
@@ -117,6 +131,8 @@ export const useScan = create<ScanState>((setState, getState) => {
     pages: [],
     title: '',
     loaded: false,
+    aiRead: false,
+    unsaved: false,
 
     async restore() {
       if (getState().loaded) return;
@@ -127,12 +143,13 @@ export const useScan = create<ScanState>((setState, getState) => {
           const source = await get<Blob>(photoKey(rec.id), store());
           if (source) pages.push({ ...rec, source });
         }
-        // Pages taken while the draft was loading go after the saved ones.
+        // Pages taken while the draft was loading go after the saved ones (and into the draft with them).
         setState((s) => ({ pages: [...pages, ...s.pages], title: s.title || draft?.title || '', loaded: true }));
       } catch (e) {
         console.warn('Scan draft could not be restored', e);
         setState({ loaded: true });
       }
+      save();
     },
 
     add(page) {
@@ -237,12 +254,22 @@ export const useScan = create<ScanState>((setState, getState) => {
       save();
     },
 
-    clear() {
+    setAiRead: (aiRead) => setState({ aiRead }),
+
+    clear(ids) {
       generation++;
-      const { pages } = getState();
-      for (const page of pages) forget(page);
-      setState({ pages: [], title: '' });
-      Promise.all([set('draft', { pages: [], title: '' } satisfies Draft, store()), delMany(pages.map((p) => photoKey(p.id)), store())]).catch(() => {});
+      const { pages, title } = getState();
+      const gone = ids ? pages.filter((p) => ids.includes(p.id)) : pages;
+      const kept = ids ? pages.filter((p) => !ids.includes(p.id)) : [];
+      for (const page of gone) forget(page);
+      if (kept.length) setState({ pages: kept });
+      else {
+        setState({ pages: [], title: '', aiRead: false, unsaved: false });
+        // Nothing left to prepare: the export cache empties and its workers close.
+        resetExports();
+      }
+      const draft: Draft = { pages: kept.map(({ source: _, ...rest }) => rest), title: kept.length ? title : '' };
+      Promise.all([set('draft', draft, store()), delMany(gone.map((p) => photoKey(p.id)), store())]).catch(() => {});
     },
   };
 });

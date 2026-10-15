@@ -35,6 +35,18 @@ export function errorText(e: unknown): string {
   return t.openFailed;
 }
 
+/** What went wrong reading with AI (ai.ts's codes), in the user's language; what a server said, as it said it. */
+export function aiMessage(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (m === 'ai:declined') return t.aiDeclined;
+  if (m === 'ai:cut-off') return t.aiCutOff;
+  if (m === 'ai:no-json') return t.aiNoJson;
+  if (m === 'ai:bad-url') return t.aiUrlBad;
+  if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) return t.aiTimeout;
+  const server = /^ai:server ?(.*)$/s.exec(m);
+  return server ? t.aiServer(server[1].trim()) : m;
+}
+
 /** What went wrong with a file operation (rename, move, save, keep), in the user's language where we know it. */
 export function opError(e: unknown): string {
   const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';

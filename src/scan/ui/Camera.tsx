@@ -5,6 +5,7 @@ export type CameraProps = {
   autoCapture: boolean;
   defaultFilter: FilterId;
   retakeId: string | null;
+  active: boolean;
   onAutoCapture: (on: boolean) => void;
   onClose: () => void;
   onCrop: (pageId: string) => void;

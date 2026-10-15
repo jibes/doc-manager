@@ -7,13 +7,13 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { aiMessage, t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
 import { shareNow, useSharing } from '@/archive/sharing';
 import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
 import { AppearancePicker } from '@/reader/AppearancePanel';
-import { testAi, type AiApi } from '@/scan/ai';
+import { aiUrl, testAi, type AiApi } from '@/scan/ai';
 import { hasLightSensor } from '@/state/ambient';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -297,19 +297,27 @@ function AiSection() {
   const ai = usePrefs((s) => s.ai);
   const setPrefs = usePrefs((s) => s.set);
   const [status, setStatus] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
   const set = (patch: Partial<typeof ai>) => {
     setStatus(null);
     setPrefs({ ai: { ...ai, ...patch } });
   };
+  // The answer is told only for the settings it tested (not ones changed meanwhile).
   const test = async () => {
+    const tested = JSON.stringify(ai);
+    const still = () => JSON.stringify(usePrefs.getState().ai) === tested;
+    setTesting(true);
     setStatus(t.aiTesting);
     try {
-      await testAi(ai);
-      setStatus(t.aiTestOk);
+      await testAi(ai, AbortSignal.timeout(60_000));
+      if (still()) setStatus(t.aiTestOk);
     } catch (e) {
-      setStatus(t.aiTestFailed(e instanceof Error ? e.message : String(e)));
+      if (still()) setStatus(t.aiTestFailed(aiMessage(e)));
+    } finally {
+      setTesting(false);
     }
   };
+  const badUrl = !!ai.url.trim() && !aiUrl(ai);
   const field = (testID: string, label: string, value: string, onChange: (v: string) => void, placeholder?: string, secret?: boolean) => (
     <View style={{ gap: space.xs }}>
       <T v="caption" color={p.muted}>
@@ -320,6 +328,7 @@ function AiSection() {
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
+        accessibilityLabel={label}
         placeholderTextColor={p.muted}
         secureTextEntry={secret}
         autoCapitalize="none"
@@ -360,10 +369,15 @@ function AiSection() {
           </View>
         </View>
         {field('ai-url', t.aiUrl, ai.url, (url) => set({ url }), t.aiUrlHint(ai.api))}
+        {badUrl && (
+          <T v="caption" color={p.markRing} testID="ai-url-bad" style={{ marginTop: -space.sm }}>
+            {t.aiUrlBad}
+          </T>
+        )}
         {field('ai-key', t.aiKey, ai.key, (key) => set({ key }), undefined, true)}
         {field('ai-model', t.aiModel, ai.model, (model) => set({ model }), t.aiModelHint(ai.api))}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <Button testID="ai-test" kind="quiet" label={t.aiTest} onPress={() => void test()} />
+          <Button testID="ai-test" kind="quiet" label={t.aiTest} disabled={testing || badUrl || !ai.url.trim()} onPress={() => void test()} />
           {status && (
             <T testID="ai-status" v="caption" color={p.inkSoft} style={{ flex: 1 }}>
               {status}

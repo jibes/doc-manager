@@ -43,11 +43,21 @@ export async function pageThumbnail(page: Page | undefined): Promise<Blob | unde
   }
 }
 
+/** A name for each photo, the same as long as it is the same Blob (see RenderJob.sourceKey). */
+const sourceKeys = new WeakMap<Blob, string>();
+let photos = 0;
+const sourceKey = (blob: Blob) => {
+  let k = sourceKeys.get(blob);
+  if (!k) sourceKeys.set(blob, (k = `s${++photos}`));
+  return k;
+};
+
 /** The worker job for rendering `page` at `longEdge`. */
 export function renderJob(page: Page, longEdge: number): RenderJob {
   return {
     pageId: page.id,
     source: page.source,
+    sourceKey: sourceKey(page.source),
     sourceWidth: page.width,
     sourceHeight: page.height,
     spec: page.spec,
