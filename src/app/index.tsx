@@ -27,8 +27,8 @@ import { repo, type DocRecord } from '@/storage';
 const launchedAsApp = () => !!shell || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
 /** Set once the app has opened its first place (later visits here don't jump away). */
 let launched = false;
-/** Recently opened documents listed here (not on the reading list); all of them are in Documents. */
-const RECENT = 20;
+/** Without a reading list: the documents opened last, Continue included (the rest are Documents, sorted so). */
+const RECENT = 3;
 /** AGPL §13: offer the source to network users. */
 const SOURCE_URL = 'https://github.com/jibes/doc-reader';
 
@@ -89,8 +89,11 @@ export default function Home() {
   const [current, ...shelf] = reading;
   // Nothing on the reading list: the document opened last is the one to continue.
   const lastRead = reading.length ? undefined : docs.find((d) => d.openedAt && !d.reading);
-  // Recently opened: the last few not shown above (every document is in Documents).
-  const recent = useMemo(() => docs.filter((d) => !d.reading && d !== lastRead).slice(0, RECENT), [docs, lastRead]);
+  // Reading is the reading list. Without one, the last few opened or added (Continue first); all in Documents.
+  const recent = useMemo(
+    () => (reading.length ? [] : docs.filter((d) => !d.reading && d !== lastRead).slice(0, lastRead ? RECENT - 1 : RECENT)),
+    [docs, reading.length, lastRead],
+  );
 
   if (!loaded) return <View style={{ flex: 1, backgroundColor: p.canvas }} />;
 
@@ -209,6 +212,10 @@ export default function Home() {
                     <T v="kicker" color={p.muted}>
                       {t.recentTitle}
                     </T>
+                  )}
+                  {/* The whole history: Documents, last opened first. */}
+                  {!reading.length && (lastRead || recent.length > 0) && (
+                    <Button testID="recent-all" kind="quiet" label={t.recentAll} onPress={() => router.push({ pathname: '/documents', params: { sort: 'opened' } })} />
                   )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' }}>
                     {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}

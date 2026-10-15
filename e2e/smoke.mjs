@@ -2369,9 +2369,17 @@ async function lastRead() {
   await page.getByTestId('last-read').waitFor({ timeout: 10000 });
   check(/Orderly Notes[\s\S]*Page \d of 2/.test(await page.getByTestId('last-read').innerText()), 'last read: Continue shows the document last read');
   check((await page.getByTestId('recent-row').count()) === 0, 'last read: …and Recently opened doesn’t list it again');
+  // The whole history is Documents, last opened first.
+  await page.getByTestId('recent-all').click();
+  await page.getByTestId('docs-sort').locator('visible=true').waitFor();
+  let first = '';
+  for (let i = 0; i < 40 && !first.includes('Orderly Notes'); i++) first = await page.waitForTimeout(250).then(() => page.getByTestId('archive-hit').locator('visible=true').first().innerText().catch(() => ''));
+  check((await page.getByTestId('docs-sort').locator('visible=true').innerText()).includes('Opened recently') && first.includes('Orderly Notes'), 'last read: “All recently opened” is Documents, sorted by last opened');
+  await page.getByTestId('tab-reading').locator('visible=true').click();
   await page.getByTestId('continue-add').click();
   await page.getByTestId('reading-list').waitFor();
   check((await page.getByTestId('last-read').count()) === 0, 'last read: adding it puts it on the reading list');
+  check((await page.getByTestId('recent-all').count()) === 0 && (await page.getByTestId('recent-row').count()) === 0, 'last read: with a reading list, Reading shows only the list');
   await ctx.close();
 }
 

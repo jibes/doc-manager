@@ -52,6 +52,9 @@ describe('filters', () => {
   it('sorts by date either way, by name or by size', () => {
     expect(sortDocs(docs, 'date').map((d) => d.key)).toEqual(['energie', 'korn', 'old', 'wheel']);
     expect(sortDocs(docs, 'oldest').map((d) => d.key)).toEqual(['wheel', 'old', 'korn', 'energie']);
+    // Opened on this device last first; never opened after, newest first.
+    const opened = (d: IndexedDoc) => ({ old: 200, wheel: 100 })[d.key as 'old' | 'wheel'];
+    expect(sortDocs(docs, 'opened', undefined, opened).map((d) => d.key)).toEqual(['old', 'wheel', 'energie', 'korn']);
     expect(sortDocs(docs, 'name').map((d) => d.key)).toEqual(['energie', 'korn', 'wheel', 'old']);
     const sized = docs.map((d, i) => ({ ...d, size: [5, 50, 5, 1][i] }));
     expect(sortDocs(sized, 'size').map((d) => d.key)).toEqual(['korn', 'energie', 'wheel', 'old']);

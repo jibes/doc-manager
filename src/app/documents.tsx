@@ -25,6 +25,7 @@ import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { folders } from '@/lib/folders';
+import { useLibrary } from '@/state/library';
 import { APP_ROOT_ID } from '@/lib/nesting';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
 import { addFolder, PasteBar, Roots } from './files';
@@ -37,7 +38,7 @@ const REFRESH_MS = 1500;
 const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
 const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'person', type: 'pages', year: 'calendar' };
 
-const sortName: Record<Sort, string> = { date: t.sortDate, oldest: t.sortOldest, name: t.sortName, size: t.sortSize };
+const sortName: Record<Sort, string> = { opened: t.sortOpened, date: t.sortDate, oldest: t.sortOldest, name: t.sortName, size: t.sortSize };
 
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
@@ -59,7 +60,7 @@ const sameView = (v: SavedView, s: Showing) =>
 export default function Documents() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ q?: string; view?: string }>();
+  const params = useLocalSearchParams<{ q?: string; view?: string; sort?: string }>();
   const view = useDocsView((s) => s.view);
   const archive = usePrefs((s) => s.archive);
   const inboxHere = usePrefs((s) => s.inboxHere);
@@ -78,7 +79,27 @@ export default function Documents() {
   }, [params.view]);
   const [query, setQuery] = useState(params.q ?? '');
   const [filter, setFilter] = useState<Filter>({});
-  const [sort, setSort] = useState<Sort>('date');
+  // Phones open on what was opened lately (what Reading's recent list was); wide windows on the newest.
+  const [sort, setSort] = useState<Sort>(() => (SORTS.includes(params.sort as Sort) ? (params.sort as Sort) : wide ? 'date' : 'opened'));
+  // Asked for from Reading ("All recently opened") while the screen was already open.
+  const [askedSort, setAskedSort] = useState(params.sort);
+  if (askedSort !== params.sort) {
+    setAskedSort(params.sort);
+    if (SORTS.includes(params.sort as Sort)) setSort(params.sort as Sort);
+  }
+  // When this device last opened (or added) each document: the library knows (files don't say), by document or file.
+  const library = useLibrary((s) => s.docs);
+  const openedAt = useMemo(() => {
+    const byKey = new Map<string, number>();
+    for (const d of library) {
+      // Added (a scan just saved, a file just opened from elsewhere) counts as opened.
+      const at = d.openedAt ?? d.addedAt;
+      byKey.set(`lib:${d.id}`, at);
+      if (d.shareKey) byKey.set(`share:${d.shareKey}`, Math.max(at, byKey.get(`share:${d.shareKey}`) ?? 0));
+      byKey.set(`file:${d.fileName}|${d.bytes}`, Math.max(at, byKey.get(`file:${d.fileName}|${d.bytes}`) ?? 0));
+    }
+    return (d: IndexedDoc) => byKey.get(d.key) ?? (d.share ? byKey.get(`share:${d.share}`) : undefined) ?? byKey.get(`file:${d.name}|${d.size}`);
+  }, [library]);
   // Search results come best match first, until another order is chosen for them.
   const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);
@@ -142,9 +163,9 @@ export default function Documents() {
   // With a query, best matches first; without, every document by date or name.
   const base = useMemo(() => {
     const answer = found?.hits ?? [];
-    const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc)) : sortDocs(all, sort).map(asHit);
+    const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc, openedAt)) : sortDocs(all, sort, undefined, openedAt).map(asHit);
     return place ? hits.filter((h) => placeOf(h.doc, archive) === place) : hits;
-  }, [searching, found, all, sort, bestFirst, place, archive]);
+  }, [searching, found, all, sort, bestFirst, place, archive, openedAt]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 

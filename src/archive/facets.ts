@@ -3,8 +3,11 @@ import type { IndexedDoc } from './search';
 /** What the Documents screen narrows by: one value per kind (any for the others), and how it sorts. */
 export type Filter = { tag?: string; sender?: string; type?: string; year?: string };
 /** Newest or oldest by the document's date, by name, or largest first; search results also by how well they match. */
-export type Sort = 'date' | 'oldest' | 'name' | 'size';
-export const SORTS: Sort[] = ['date', 'oldest', 'name', 'size'];
+/** `opened`: last opened on this device first (never opened ones after, newest first). */
+export type Sort = 'opened' | 'date' | 'oldest' | 'name' | 'size';
+export const SORTS: Sort[] = ['opened', 'date', 'oldest', 'name', 'size'];
+/** When this device last opened a document (Tessel records it; files don't say). */
+export type OpenedAt = (d: IndexedDoc) => number | undefined;
 export type Facet = keyof Filter;
 export const FACETS: Facet[] = ['tag', 'sender', 'type', 'year'];
 
@@ -80,11 +83,13 @@ const byName = (a: IndexedDoc, b: IndexedDoc) => natural.compare(titleOf(a), tit
 /** Dates are YYYY-MM-DD: compared as they are. */
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc): T[];
-export function sortDocs(items: IndexedDoc[], sort: Sort): IndexedDoc[];
-export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc = (x) => x as unknown as IndexedDoc): T[] {
+export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc, opened?: OpenedAt): T[];
+export function sortDocs(items: IndexedDoc[], sort: Sort, docOf?: undefined, opened?: OpenedAt): IndexedDoc[];
+export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc = (x) => x as unknown as IndexedDoc, opened?: OpenedAt): T[] {
   const compare = (a: IndexedDoc, b: IndexedDoc): number => {
     switch (sort) {
+      case 'opened':
+        return (opened?.(b) ?? 0) - (opened?.(a) ?? 0) || cmp(docDate(b), docDate(a)) || byName(a, b);
       case 'name':
         return byName(a, b);
       case 'size':
