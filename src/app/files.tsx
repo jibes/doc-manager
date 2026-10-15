@@ -208,7 +208,7 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
                 testID="use-archive"
                 kind="quiet"
                 icon="inbox"
-                label={candidates.length === 1 ? t.useNamedAsArchive(candidates[0].name) : t.chooseArchive}
+                label={candidates.length === 1 ? t.namedAsArchive(candidates[0].name) : t.chooseArchive}
                 onPress={chooseArchive}
               />
             )}
@@ -311,15 +311,12 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
     if (e.kind === 'dir') return go(root, rootName, e.id, e.name);
     if (opening) return;
     setOpening(e.id);
-    try {
-      const file = await folders.read(root, e);
-      const [doc] = await importFiles([{ name: e.name, size: e.size || file.size, file, handle: e.handle, link: e.uri }]);
-      if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id } });
-    } catch (err) {
-      setMessage(errorText(err));
-    } finally {
-      setOpening(null);
-    }
+    await folders
+      .read(root, e)
+      .then((file) => importFiles([{ name: e.name, size: e.size || file.size, file, handle: e.handle, link: e.uri }]))
+      .then(([doc]) => doc && router.push({ pathname: '/read/[id]', params: { id: doc.id } }))
+      .catch((err: unknown) => setMessage(errorText(err)))
+      .finally(() => setOpening(null));
   };
 
   const newFolder = async () => {
@@ -507,7 +504,7 @@ export function PasteBar({ here, bottom, side = 0, onDone, onError, onMessage }:
   const paste = async () => {
     if (!here) return;
     setBusy(true);
-    try {
+    const move = async () => {
       for (const { from, entries } of clip.items) {
         // Already here: nothing to move.
         if (clip.move && from.root === here.root && (from.dir ?? '') === (here.dir ?? '')) continue;
@@ -528,16 +525,18 @@ export function PasteBar({ here, bottom, side = 0, onDone, onError, onMessage }:
           }
         }
       }
-      schedule(1000);
-      onMessage?.(clip.move ? t.movedN(count) : t.copiedN(count));
-      setClip(null);
-    } catch (e) {
-      onError(opError(e));
-    } finally {
-      setBusy(false);
-      changed();
-      onDone();
-    }
+    };
+    await move().then(
+      () => {
+        schedule(1000);
+        onMessage?.(clip.move ? t.movedN(count) : t.copiedN(count));
+        setClip(null);
+      },
+      (e: unknown) => onError(opError(e)),
+    );
+    setBusy(false);
+    changed();
+    onDone();
   };
 
   return (

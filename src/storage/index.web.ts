@@ -72,7 +72,7 @@ export const repo: LibraryRepo = {
   async linkedToHandle(handle) {
     const ids: string[] = [];
     for (const [id, data] of await entries<string, unknown>(files)) {
-      if (isFileHandle(data) && (await data.isSameEntry(handle).catch(() => false))) ids.push(id);
+      if (isFileHandle(data) && data.name === handle.name && (await data.isSameEntry(handle).catch(() => false))) ids.push(id);
     }
     return ids;
   },

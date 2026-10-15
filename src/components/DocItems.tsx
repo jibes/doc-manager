@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { fonts, radius, space } from '@/design/tokens';
@@ -48,10 +48,16 @@ export type Picture = { kind: 'cover'; uri: string | null | undefined; aspect: n
 function usePicture(picture: Picture): Thumb | undefined {
   const [made, setMade] = useState<{ key: string; thumb: Thumb } | null>(null);
   const key = picture.kind === 'file' ? `${picture.root}|${picture.entry.id}|${picture.entry.modified}` : '';
+  // The entry object is new on every listing; its key says whether it is the same file (read when the key changes).
+  const latest = useRef(picture);
   useEffect(() => {
-    if (picture.kind !== 'file') return;
+    latest.current = picture;
+  });
+  useEffect(() => {
+    const now = latest.current;
+    if (now.kind !== 'file') return;
     let live = true;
-    const { root, entry } = picture;
+    const { root, entry } = now;
     cachedThumb(root, entry)
       .then((hit) => (hit !== undefined ? hit : thumb(root, entry, () => folders.read(root, entry))))
       .then((th) => live && setMade({ key, thumb: th }))
@@ -59,8 +65,6 @@ function usePicture(picture: Picture): Thumb | undefined {
     return () => {
       live = false;
     };
-    // The entry object is new on every listing; its key says whether it is the same file.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   if (picture.kind === 'cover') return picture.uri ? { uri: picture.uri, aspect: picture.aspect } : null;
   if (picture.kind === 'dir') return null;

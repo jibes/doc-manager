@@ -36,7 +36,8 @@ jobs:
         run: |
           mkdir -p site && cp -r dist "site${EXPO_BASE_URL}"
           (cd site && python3 -m http.server 8080 >/dev/null 2>&1 &)
-          sleep 1
+          # Up once it answers (not after a guessed pause).
+          for i in $(seq 1 100); do curl -sf "http://localhost:8080${EXPO_BASE_URL}/" > /dev/null && break; sleep 0.2; done
           BASE="http://localhost:8080${EXPO_BASE_URL}/" CHROMIUM=none npm run test:e2e
       - uses: actions/upload-artifact@v7
         if: failure()

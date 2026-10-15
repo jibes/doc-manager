@@ -15,7 +15,7 @@ import { onBack } from '@/lib/backGuard';
 import { shortcut, withShortcut } from '@/lib/keys';
 import { goBack } from '@/lib/nav';
 import { useAsk } from '@/state/ask';
-import { useLibrary } from '@/state/library';
+import { libraryActions } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import type { DocRecord } from '@/storage';
 import { AppearancePanel } from './AppearancePanel';
@@ -58,7 +58,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
-  const { savePosition, flushPositions, toggleBookmark, toggleReading, markOpened, updateFileInfo } = useLibrary.getState();
+  const { savePosition, flushPositions, toggleBookmark, toggleReading, markOpened, updateFileInfo } = libraryActions();
   useEffect(() => () => flushPositions(true), [flushPositions]);
   const readingMode = !!doc.reading;
   const apiRef = useRef<BlockListApi | null>(null);

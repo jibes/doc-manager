@@ -220,13 +220,16 @@ function PagesGrid({ p, sizes, cache, page, onGo, bookmarks }: { p: Palette; siz
   const listRef = useRef<FlatList<number>>(null);
   // Scroll to the current page after the first render. (initialScrollIndex renders only from that row on,
   // and when the grid fits on screen nothing ever scrolls to fill in the rows above it.)
+  // Only once, when the grid first gets its size: later page changes come from taps in the grid itself.
+  const scrolled = useRef(false);
   useEffect(() => {
-    if (!cellW) return;
-    const raf = requestAnimationFrame(() => listRef.current?.scrollToIndex({ index: Math.floor(page / cols), animated: false, viewPosition: 0.3 }));
+    if (!cellW || scrolled.current) return;
+    const raf = requestAnimationFrame(() => {
+      scrolled.current = true;
+      listRef.current?.scrollToIndex({ index: Math.floor(page / cols), animated: false, viewPosition: 0.3 });
+    });
     return () => cancelAnimationFrame(raf);
-    // Only when the grid first gets its size: later page changes come from taps in the grid itself.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cellW > 0]);
+  }, [cellW, page]);
   return (
     <View style={{ flex: 1 }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
       {cellW > 0 && (

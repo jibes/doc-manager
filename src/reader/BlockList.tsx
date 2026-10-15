@@ -170,11 +170,13 @@ export function BlockList({
 
   // Open where the reader was.
   const start = useMemo(() => blockAt(blocks, initial.page, initial.y), [blocks, initial.page, initial.y]);
+  // Only once, when it opens: later position changes come from this view itself.
+  const opened = useRef(false);
   useEffect(() => {
+    if (opened.current) return;
+    opened.current = true;
     if (start > 0) requestAnimationFrame(() => !navigatedRef.current && scrollToIndex(start));
-    // Only on mount: later position changes come from this view itself.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [start, scrollToIndex]);
 
   // Position = the rendered block crossing a reading line just below the top bar, measured on screen
   // (estimates place the list; measurement keeps the reported position exact).

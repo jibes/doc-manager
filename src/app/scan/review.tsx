@@ -150,7 +150,7 @@ export default function ScanReview() {
     useScanSaving.setState({ controller, progress: { phase: 'render', done: 0, total: pages.length } });
     // The pages being saved: only they leave the scan when it is saved.
     const saved = pages.map((pg) => pg.id);
-    try {
+    const run = async () => {
       const to = toInbox ? { root: archive!, dir: await inboxDir(archive!) } : target && { root: target.id };
       const { doc, aiError, unread } = await saveScan(pages, scan, title, placeholder, to, setProgress, controller.signal, aiOffered && aiRead ? ai : undefined);
       clear(saved);
@@ -160,11 +160,11 @@ export default function ScanReview() {
       if (unread) await ask({ title: t.scanUnreadTitle(unread), body: t.ocrFailed, confirm: t.done });
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
       else router.replace('/');
-    } catch (e) {
+    };
+    await run().catch((e: unknown) => {
       if (!controller.signal.aborted) notify(t.scanSaveFailed(scanError(e)));
-    } finally {
-      useScanSaving.setState({ controller: null, progress: null });
-    }
+    });
+    useScanSaving.setState({ controller: null, progress: null });
   };
 
   const discard = async () => {

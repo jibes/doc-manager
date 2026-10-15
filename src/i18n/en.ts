@@ -469,7 +469,7 @@ export const en = {
   archiveSynced: 'Archive · synced',
   /** For a folder that is called Archive already. */
   syncedOnly: 'Synced with your other devices',
-  useNamedAsArchive: (name: string) => `Use “${name}” as the archive`,
+  namedAsArchive: (name: string) => `Use “${name}” as the archive`,
   chooseArchive: 'Choose the archive folder…',
   keepInArchive: 'Keep in archive',
   keptInArchive: 'Kept in the archive’s Inbox: it syncs to your other devices.',

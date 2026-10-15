@@ -55,7 +55,7 @@ export function ShellOpen() {
     if (!shell) return;
     const show = async (outcome: Promise<Outcome>) => {
       setOpening(true);
-      try {
+      const shown = async () => {
         const done = await outcome;
         const bare = startedBare.current;
         startedBare.current = false;
@@ -65,13 +65,13 @@ export function ShellOpen() {
           else router.push(to);
         } else if (done && !bare && where.current.startsWith('/read/')) sayRoot(t.filesAddedN(done.added));
         else if (done || bare) goTab('reading');
-      } catch {
+      };
+      await shown().catch(() => {
         // Nothing opened: the screen under the cover is where the app is (or the app's first, from the bare one).
         if (startedBare.current) goTab('reading');
         startedBare.current = false;
-      } finally {
-        setTimeout(() => setOpening(false), SETTLE_MS);
-      }
+      });
+      setTimeout(() => setOpening(false), SETTLE_MS);
     };
     // Once (an effect can run twice).
     if (atLaunch) void show(atLaunch);

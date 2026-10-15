@@ -13,7 +13,7 @@ export type Request =
   | { id: number; type: 'save'; doc: number }
   | { id: number; type: 'bytes'; doc: number }
   | { id: number; type: 'addText'; doc: number; pages: PageWords[] }
-  | { id: number; type: 'annots'; doc: number }
+  | { id: number; type: 'annots'; doc: number; from?: number; to?: number }
   | { id: number; type: 'addHighlight'; doc: number; page: number; rects: NormRect[]; color: string; contents?: string }
   | { id: number; type: 'updateAnnot'; doc: number; page: number; index: number; contents?: string; color?: string }
   | { id: number; type: 'removeAnnot'; doc: number; page: number; index: number }

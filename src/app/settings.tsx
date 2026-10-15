@@ -315,14 +315,11 @@ function AiSection() {
     const ctrl = new AbortController();
     setRunning(ctrl);
     setStatus(t.aiTesting);
-    try {
-      await testAi(ai, anySignal([ctrl.signal, AbortSignal.timeout(60_000)]));
-      if (!ctrl.signal.aborted) setStatus(t.aiTestOk);
-    } catch (e) {
-      if (!ctrl.signal.aborted) setStatus(t.aiTestFailed(aiMessage(e)));
-    } finally {
-      setRunning((cur) => (cur === ctrl ? null : cur));
-    }
+    await testAi(ai, anySignal([ctrl.signal, AbortSignal.timeout(60_000)])).then(
+      () => !ctrl.signal.aborted && setStatus(t.aiTestOk),
+      (e: unknown) => !ctrl.signal.aborted && setStatus(t.aiTestFailed(aiMessage(e))),
+    );
+    setRunning((cur) => (cur === ctrl ? null : cur));
   };
   const insecure = aiInsecure(ai);
   const badUrl = !!ai.url.trim() && !aiUrl(ai) && !insecure;

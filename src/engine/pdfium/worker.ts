@@ -903,9 +903,12 @@ function pageAnnotations(d: Doc, pageIndex: number): Annotation[] {
   });
 }
 
-function annotations(docId: number): Annotation[] {
+/** The annotations of pages `from` to `to` (exclusive; all by default). */
+function annotations(docId: number, from = 0, to?: number): Annotation[] {
   const d = getDoc(docId);
-  return d.pageSizes.flatMap((_, i) => pageAnnotations(d, i));
+  const out: Annotation[] = [];
+  for (let i = Math.max(0, from); i < Math.min(to ?? d.pageSizes.length, d.pageSizes.length); i++) out.push(...pageAnnotations(d, i));
+  return out;
 }
 
 function withPage<T>(d: Doc, pageIndex: number, fn: (page: number) => T): T {
@@ -1106,7 +1109,7 @@ async function run(job: Job) {
     case 'setField':
       return post({ id: job.id, ok: true, result: setFormField(job.doc, job.page, job.index, job.value) });
     case 'annots':
-      return post({ id: job.id, ok: true, result: annotations(job.doc) });
+      return post({ id: job.id, ok: true, result: annotations(job.doc, job.from, job.to) });
     case 'addHighlight':
       addHighlight(job.doc, job.page, job.rects, job.color, job.contents);
       return post({ id: job.id, ok: true, result: null });

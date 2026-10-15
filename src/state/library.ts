@@ -177,6 +177,9 @@ const positions = new Map<string, { position: ReadingPosition; atEnd?: boolean }
 let positionTimer: ReturnType<typeof setTimeout> | undefined;
 const POSITION_MS = 400;
 
+/** The library's actions (stable): for components that mustn't re-render with the library. */
+export const libraryActions = (): LibraryState => useLibrary.getState();
+
 export const useLibrary = create<LibraryState>((set, get) => {
   // Debounced writes still waiting: written now.
   const persistNow = () => {
@@ -211,6 +214,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
     if (Date.now() - failedAt < MOVE_RETRY_MS) return;
     const app = await folders.appFolder().catch(() => null);
     if (!app) return;
+    // One that can't be moved doesn't keep the others where they are.
+    let failed = false;
     for (const d of get().docs) {
       if (d.linked || d.fileName === SAMPLE_FILE) continue;
       let src;
@@ -227,10 +232,10 @@ export const useLibrary = create<LibraryState>((set, get) => {
         await repo.relink(d.id, made.uri);
         patch(d.id, (x) => ({ ...x, linked: true, fileName: made.name }));
       } catch {
-        writeStored(MOVE_FAILED, String(Date.now()));
-        return;
+        failed = true;
       }
     }
+    if (failed) writeStored(MOVE_FAILED, String(Date.now()));
   };
 
   let loading: Promise<void> | null = null;

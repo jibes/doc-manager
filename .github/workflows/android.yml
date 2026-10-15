@@ -17,9 +17,10 @@ on:
 permissions:
   contents: read
 
+# A newer push replaces a waiting run; on main one that is running finishes (it may be publishing a release).
 concurrency:
   group: android-${{ github.ref }}-${{ inputs.release }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   apk:
@@ -142,7 +143,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
+      # Only a commit the Web workflow passed (types, lint, unit and end-to-end tests) is published.
+      - name: Wait for the Web checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 90); do
+            STATE="$(gh run list -R "$GITHUB_REPOSITORY" --workflow web.yml --commit "$GITHUB_SHA" --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')"
+            case "$STATE" in
+              "completed success") echo "Web checks passed"; exit 0 ;;
+              completed*) echo "::error::The Web checks didn't pass on this commit ($STATE)"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::The Web checks didn't finish within 30 minutes"; exit 1
       - uses: actions/checkout@v7
         with:
           sparse-checkout: docs/releases
@@ -168,3 +184,5 @@ jobs:
           files: out/*.apk
           generate_release_notes: true
           body_path: ${{ runner.temp }}/notes.md
+          # 1.2.3-beta.1 and the like: offered to those who want pre-releases only.
+          prerelease: ${{ contains(needs.apk.outputs.version, '-') }}

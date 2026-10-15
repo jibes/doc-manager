@@ -61,9 +61,15 @@ async function buildFresh(): Promise<MiniSearch<Indexable>> {
 /** Documents changed since the index was saved (kept with it, so a change is never lost to an early exit). */
 const changed = new Set<string>();
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let changedTimer: ReturnType<typeof setTimeout> | undefined;
+/** How soon the list of changes is written after one (indexing a folder notes hundreds in a row). */
+const CHANGED_MS = 400;
 function noteChanged(keys: string[]) {
   for (const k of keys) changed.add(k);
-  void set('changed', [...changed], savedStore).catch(() => {});
+  changedTimer ??= setTimeout(() => {
+    changedTimer = undefined;
+    void set('changed', [...changed], savedStore).catch(() => {});
+  }, CHANGED_MS);
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => enqueue({ id: 0, type: 'save' } as const), SAVE_MS);
 }

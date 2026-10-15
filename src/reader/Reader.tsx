@@ -27,7 +27,7 @@ import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions'
 import { onBack } from '@/lib/backGuard';
 import { shortcut, withKey, withShortcut } from '@/lib/keys';
 import { useAsk } from '@/state/ask';
-import { useLibrary } from '@/state/library';
+import { libraryActions } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 import { detailsOf, saveDetails } from '@/archive/details';
@@ -70,6 +70,45 @@ const clampText = (s: number) => Math.min(1.8, Math.max(0.75, Math.round(s * 20)
 /** Scroll events this soon after a jump (contents, scrubber, a search hit) are the jump's, not reading. */
 const JUMP_MS = 800;
 
+/** Writes the details into the document's file (write access asked first); what went wrong, or null. */
+async function detailsWritten(id: string, handle: DocHandle, details: Details): Promise<string | null> {
+  try {
+    // Write access first, while the tap still counts as a user gesture.
+    if (!(await repo.requestAccess(id, true))) return t.detailsFailed;
+    await saveDetails(id, handle, details);
+    return null;
+  } catch (e) {
+    return e instanceof Error && /encrypted/.test(e.message) ? t.detailsEncrypted : t.detailsFailed;
+  }
+}
+
+/** The document as a file in the archive's Inbox, which it then is: reading state, bookmarks and all stay with it. */
+async function keptInArchive(doc: DocRecord, handle: DocHandle, archive: string) {
+  const bytes = await handle.bytes();
+  const type = doc.format === 'epub' ? 'application/epub+zip' : 'application/pdf';
+  const entry = await folders.create({ root: archive, dir: await inboxDir(archive) }, doc.fileName, new Blob([bytes], { type }));
+  await libraryActions().linkTo(doc.id, { name: entry.name, size: bytes.byteLength, handle: entry.handle, link: entry.uri });
+}
+
+/** What making a document searchable came to. `started`: the open document may have the text and the file not. */
+type TextAdded = { done: true } | { done: false; message: string; started: boolean };
+
+async function textAdded(id: string, handle: DocHandle, onProgress: (done: number, total: number) => void): Promise<TextAdded> {
+  let started = false;
+  try {
+    if (!(await repo.requestAccess(id, true))) return { done: false, message: t.searchableFailed(t.writeDenied), started };
+    started = true;
+    const bytes = await makeSearchable(handle, onProgress);
+    if (typeof bytes === 'string') return { done: false, message: bytes === 'has-text' ? t.searchableNothing : t.searchableNone, started: false };
+    await repo.writeFile(id, bytes);
+    return { done: true };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    const why = m === 'denied' ? t.writeDenied : /Could not write the text/.test(m) ? t.searchableNoWrite : /can.t be read here/.test(m) ? t.searchableNoPages : m;
+    return { done: false, message: t.searchableFailed(why), started };
+  }
+}
+
 export function Reader({
   doc,
   handle,
@@ -94,7 +133,7 @@ export function Reader({
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
-  const { savePosition, flushPositions, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = useLibrary.getState();
+  const { savePosition, flushPositions, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
   // Where it was left: in the library at once when the reader closes.
   useEffect(() => () => flushPositions(true), [flushPositions]);
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
@@ -105,31 +144,26 @@ export function Reader({
   // Only the reader in front takes keys and Back: another one opened over it (a file dropped) leaves this one mounted underneath.
   const focused = useIsFocused();
   const edits = useEdits(doc, handle, focused);
-  const [reloaded, setReloaded] = useState(() => {
-    const message = afterReload;
+  // A message from before the reopen, shown by this reader once (read while rendering, which may happen twice:
+  // it is let go once the reader is up).
+  const [reloaded, setReloaded] = useState(() => afterReload);
+  useEffect(() => {
     afterReload = null;
-    return message;
-  });
+  }, []);
   const [savingDetails, setSavingDetails] = useState(false);
   // Indexing shares the PDF engine: it waits while a document is open.
   useEffect(() => pauseIndexing(), []);
   const writeDetails = async (details: Details) => {
     setSavingDetails(true);
-    try {
-      // Write access first, while the tap still counts as a user gesture.
-      if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
-      await saveDetails(doc.id, handle, details);
-      setDetails(doc.id, { title: details.title, author: details.sender });
-      invalidate(doc.id);
-      afterReload = t.detailsSaved;
-      // Reopened from the file, so everything (and a later save of form edits) starts from the new details.
-      if (onReload) onReload();
-      else setReloaded(t.detailsSaved);
-    } catch (e) {
-      setReloaded(e instanceof Error && /encrypted/.test(e.message) ? t.detailsEncrypted : t.detailsFailed);
-    } finally {
-      setSavingDetails(false);
-    }
+    const failed = await detailsWritten(doc.id, handle, details);
+    setSavingDetails(false);
+    if (failed) return setReloaded(failed);
+    setDetails(doc.id, { title: details.title, author: details.sender });
+    invalidate(doc.id);
+    afterReload = t.detailsSaved;
+    // Reopened from the file, so everything (and a later save of form edits) starts from the new details.
+    if (onReload) onReload();
+    else setReloaded(t.detailsSaved);
   };
 
   // A document not in the archive yet (only on this device, or in another folder) can be kept there.
@@ -161,20 +195,16 @@ export function Reader({
   }, [archive, doc.shareKey, doc.linked, doc.id, doc.fileName, handle, indexed]);
   const keepInArchive = async () => {
     if (!archive) return;
-    try {
-      const bytes = await handle.bytes();
-      const type = doc.format === 'epub' ? 'application/epub+zip' : 'application/pdf';
-      const entry = await folders.create({ root: archive, dir: await inboxDir(archive) }, doc.fileName, new Blob([bytes], { type }));
-      // This document is now the file in the archive: reading state, bookmarks and all stay with it.
-      await useLibrary.getState().linkTo(doc.id, { name: entry.name, size: bytes.byteLength, handle: entry.handle, link: entry.uri });
-      schedule(1000);
-      void refreshInboxCount();
-      afterReload = t.keptInArchive;
-      if (onReload) onReload();
-      else setReloaded(t.keptInArchive);
-    } catch (e) {
-      setReloaded(opError(e));
-    }
+    const kept = await keptInArchive(doc, handle, archive).then(
+      () => true,
+      (e: unknown) => (setReloaded(opError(e)), false),
+    );
+    if (!kept) return;
+    schedule(1000);
+    void refreshInboxCount();
+    afterReload = t.keptInArchive;
+    if (onReload) onReload();
+    else setReloaded(t.keptInArchive);
   };
 
   // An image-only PDF (no text on its first page) can get its text read and added.
@@ -191,32 +221,18 @@ export function Reader({
   const addText = async () => {
     if (reading) return;
     setReading({ done: 0, total: 0 });
-    // Once reading starts, the open document may have the text and the file not: then it is opened again.
-    let started = false;
-    try {
-      if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
-      started = true;
-      const bytes = await makeSearchable(handle, (done, total) => setReading({ done, total }));
-      if (typeof bytes === 'string') {
-        setReloaded(bytes === 'has-text' ? t.searchableNothing : t.searchableNone);
-        return;
-      }
-      await repo.writeFile(doc.id, bytes);
+    const result = await textAdded(doc.id, handle, (done, total) => setReading({ done, total }));
+    setReading(null);
+    if (result.done) {
       invalidate(doc.id);
       afterReload = t.searchableDone;
       if (onReload) onReload();
       else setReloaded(t.searchableDone);
-    } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
-      const why = m === 'denied' ? t.writeDenied : /Could not write the text/.test(m) ? t.searchableNoWrite : /can.t be read here/.test(m) ? t.searchableNoPages : m;
-      const failed = t.searchableFailed(why);
-      if (started && onReload) {
-        afterReload = failed;
-        onReload();
-      } else setReloaded(failed);
-    } finally {
-      setReading(null);
-    }
+    } else if (result.started && onReload) {
+      // Once reading started, the open document may have the text and the file not: it is opened again.
+      afterReload = result.message;
+      onReload();
+    } else setReloaded(result.message);
   };
 
   const list = useRef<FlatList<number>>(null);
@@ -414,10 +430,19 @@ export function Reader({
   // Reading every page's annotations takes a while on long documents: only once the Notes tab is shown.
   const [notesShown, setNotesShown] = useState(false);
   const showNotes = useCallback(() => setNotesShown(true), []);
+  // Read again only when they changed (not each time Find opens).
+  const annotsRead = useRef(-1);
   useEffect(() => {
-    if (panel !== 'find' || !notesShown) return;
+    if (panel !== 'find' || !notesShown || annotsRead.current === annotVersion) return;
     let alive = true;
-    handle.annotations().then((a) => alive && setAnnots(a), () => alive && setAnnots([]));
+    handle.annotations().then(
+      (a) => {
+        if (!alive) return;
+        annotsRead.current = annotVersion;
+        setAnnots(a);
+      },
+      () => alive && setAnnots([]),
+    );
     return () => {
       alive = false;
     };
@@ -462,14 +487,16 @@ export function Reader({
       const contents = await askNote(a.contents, a.quote);
       if (contents == null || contents === a.contents || noteBusy.current) return;
       noteBusy.current = true;
-      try {
-        await handle.updateAnnotation(a.page, a.index, { contents });
-        // By place, not by object: a list read meanwhile has new ones.
-        setAnnots((list) => list && list.map((x) => (x.page === a.page && x.index === a.index ? { ...x, contents } : x)));
-        annotated([a.page]);
-      } finally {
-        noteBusy.current = false;
-      }
+      await handle
+        .updateAnnotation(a.page, a.index, { contents })
+        .then(() => {
+          // By place, not by object: a list read meanwhile has new ones.
+          setAnnots((list) => list && list.map((x) => (x.page === a.page && x.index === a.index ? { ...x, contents } : x)));
+          annotated([a.page]);
+        })
+        .finally(() => {
+          noteBusy.current = false;
+        });
     },
     [askNote, handle, annotated],
   );
@@ -477,14 +504,16 @@ export function Reader({
     async (a: Annotation) => {
       if (noteBusy.current) return;
       noteBusy.current = true;
-      try {
-        await handle.removeAnnotation(a.page, a.index);
-        // Later annotations on that page move up one place (matched by place: a list read meanwhile has new objects).
-        setAnnots((list) => list && list.filter((x) => x.page !== a.page || x.index !== a.index).map((x) => (x.page === a.page && x.index > a.index ? { ...x, index: x.index - 1 } : x)));
-        annotated([a.page]);
-      } finally {
-        noteBusy.current = false;
-      }
+      await handle
+        .removeAnnotation(a.page, a.index)
+        .then(() => {
+          // Later annotations on that page move up one place (matched by place: a list read meanwhile has new objects).
+          setAnnots((list) => list && list.filter((x) => x.page !== a.page || x.index !== a.index).map((x) => (x.page === a.page && x.index > a.index ? { ...x, index: x.index - 1 } : x)));
+          annotated([a.page]);
+        })
+        .finally(() => {
+          noteBusy.current = false;
+        });
     },
     [handle, annotated],
   );
@@ -530,7 +559,7 @@ export function Reader({
           q,
           (batch) => {
             pending.push(...batch);
-            raf ||= requestAnimationFrame(flush);
+            if (!raf) raf = requestAnimationFrame(flush);
           },
           ctrl.signal,
         )

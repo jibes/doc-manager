@@ -228,7 +228,7 @@ export function CropEditor({ page, quad, onChange }: CropEditorProps) {
           style={{
             position: 'absolute',
             top: 12,
-            [loupeLeft ? 'left' : 'right']: 12,
+            ...(loupeLeft ? { left: 12 } : { right: 12 }),
             width: LOUPE,
             height: LOUPE,
             borderRadius: LOUPE / 2,

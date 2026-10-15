@@ -9,7 +9,7 @@ import { holdBrowserBack } from '@/lib/backGuard';
 import { goBack } from '@/lib/nav';
 import { invalidate } from '@/archive/indexer';
 import { repo, type DocRecord } from '@/storage';
-import { useLibrary } from '@/state/library';
+import { libraryActions } from '@/state/library';
 import { drafting, useDrafts } from './drafts';
 
 /** A form field being typed in commits its text when it loses focus: before saving, printing or sharing. */
@@ -44,24 +44,21 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
 
   const save = useCallback(async () => {
     commitField();
-    try {
-      // Ask for write access first, while the click or key press still counts as a user gesture.
-      if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
-      const bytes = await handle.save();
-      // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
-      const saved = edits.current;
-      await repo.writeFile(doc.id, bytes);
-      // Its size as now: browsers tell a linked document's file by its name and size.
-      useLibrary.getState().patchDoc(doc.id, { bytes: bytes.byteLength });
-      invalidate(doc.id);
-      if (edits.current === saved) {
-        dirtyNow.current = false;
-        setDirty(false);
-      }
-      setNotice(doc.linked ? t.savedInPlace(doc.fileName) : t.savedCopy);
-    } catch {
-      setNotice(t.saveFailed);
+    // Ask for write access first, while the click or key press still counts as a user gesture.
+    if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return setNotice(t.saveFailed);
+    const bytes = await handle.save().catch(() => null);
+    if (!bytes) return setNotice(t.saveFailed);
+    // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
+    const saved = edits.current;
+    if (!(await repo.writeFile(doc.id, bytes).then(() => true, () => false))) return setNotice(t.saveFailed);
+    // Its size as now: browsers tell a linked document's file by its name and size.
+    libraryActions().patchDoc(doc.id, { bytes: bytes.byteLength });
+    invalidate(doc.id);
+    if (edits.current === saved) {
+      dirtyNow.current = false;
+      setDirty(false);
     }
+    setNotice(doc.linked ? t.savedInPlace(doc.fileName) : t.savedCopy);
   }, [doc.id, doc.linked, doc.fileName, handle]);
 
   /** For share / download / print: the document with its edits, saved or not (undefined: as it was opened). */

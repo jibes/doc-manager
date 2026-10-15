@@ -2,7 +2,10 @@ import { BASE } from '@/lib/base';
 import { takeEarlyWorker } from '@/lib/shell';
 
 import type { OpenResult, Request, Response, ResultMap } from './pdfium/protocol';
-import type { DocHandle, DocSource, DocumentEngine, OutlineItem, PageLink, Raster, SearchHit, TextRun } from './types';
+import type { Annotation, DocHandle, DocSource, DocumentEngine, OutlineItem, PageLink, Raster, SearchHit, TextRun } from './types';
+
+/** Pages whose annotations are read in one request. */
+const ANNOT_PAGES = 25;
 
 export * from './types';
 
@@ -105,7 +108,12 @@ function handleFrom(r: OpenResult): DocHandle {
     save: () => client.call('save', { doc: r.doc }),
     bytes: () => client.call('bytes', { doc: r.doc }),
     addTextLayer: (pages) => client.call('addText', { doc: r.doc, pages }),
-    annotations: () => client.call('annots', { doc: r.doc }),
+    // A slice of pages per request: a long document's notes don't hold up the pages being drawn meanwhile.
+    annotations: async () => {
+      const out: Annotation[] = [];
+      for (let from = 0; from < r.pageCount; from += ANNOT_PAGES) out.push(...(await client.call('annots', { doc: r.doc, from, to: from + ANNOT_PAGES })));
+      return out;
+    },
     addHighlight: (page, rects, color, contents) => client.call('addHighlight', { doc: r.doc, page, rects, color, contents }).then(() => {}),
     updateAnnotation: (page, index, patch) => client.call('updateAnnot', { doc: r.doc, page, index, ...patch }).then(() => {}),
     removeAnnotation: (page, index) => client.call('removeAnnot', { doc: r.doc, page, index }).then(() => {}),

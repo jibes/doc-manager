@@ -21,8 +21,15 @@ export function PageImage({ page, longEdge, channel, unfiltered = false, onRende
   const ref = useRef<HTMLCanvasElement>(null);
   const [drawn, setDrawn] = useState<string | null>(null);
   const key = renderKey(page, longEdge, unfiltered);
+  // What the render is made of: `key` covers the page's photo and spec, the size and the filter (the page object
+  // itself is new more often), so the render effect reads them from here.
+  const latest = useRef({ page, longEdge, unfiltered, onRendering });
+  useEffect(() => {
+    latest.current = { page, longEdge, unfiltered, onRendering };
+  });
 
   useEffect(() => {
+    const { page, longEdge, unfiltered, onRendering } = latest.current;
     const canvas = ref.current;
     if (!canvas) return;
     const draw = (bitmap: ImageBitmap) => {
@@ -56,8 +63,6 @@ export function PageImage({ page, longEdge, channel, unfiltered = false, onRende
       // A render nobody will see should not hold up the ones that will.
       controller.abort();
     };
-    // `key` covers the page's photo and spec, the size and the filter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, channel]);
 
   return (

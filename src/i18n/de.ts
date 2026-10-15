@@ -441,7 +441,7 @@ export const de: Strings = {
   placeDevice: 'Dieses Gerät',
   archiveSynced: 'Archiv · synchronisiert',
   syncedOnly: 'Mit deinen anderen Geräten synchronisiert',
-  useNamedAsArchive: (name) => `„${name}“ als Archiv verwenden`,
+  namedAsArchive: (name) => `„${name}“ als Archiv verwenden`,
   chooseArchive: 'Archivordner wählen …',
   keepInArchive: 'Im Archiv behalten',
   keptInArchive: 'Im Eingang des Archivs behalten: Es wird mit deinen anderen Geräten synchronisiert.',

@@ -16,7 +16,7 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { aiMessage, t } from '@/i18n';
 import { aiReady } from '@/scan/ai';
-import { useLibrary } from '@/state/library';
+import { libraryActions } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -100,77 +100,82 @@ export default function Inbox() {
     filing.current.add(id);
     const path = pathOf(item);
     setBusy((b) => new Set(b).add(id));
-    try {
-      await fileDocument(
-        archive,
-        dir,
-        item,
-        detailsOf(item, edits[id]),
-        path,
-        (done, total) => setProgress((all) => ({ ...all, [id]: t.searchableProgress(done, total) })),
-        useLibrary.getState().followEntry,
-      );
-      gone(item);
-      setNotice(t.inboxFiled(path.join('/')));
-      return true;
-    } catch (e) {
-      setNotice(t.inboxFailed(message(e)));
-      return false;
-    } finally {
-      filing.current.delete(id);
-      setBusy((b) => {
-        const next = new Set(b);
-        next.delete(id);
-        return next;
-      });
-      setProgress(({ [id]: _done, ...rest }) => rest);
-    }
+    const filed = await fileDocument(
+      archive,
+      dir,
+      item,
+      detailsOf(item, edits[id]),
+      path,
+      (done, total) => setProgress((all) => ({ ...all, [id]: t.searchableProgress(done, total) })),
+      libraryActions().followEntry,
+    ).then(
+      () => {
+        gone(item);
+        setNotice(t.inboxFiled(path.join('/')));
+        return true;
+      },
+      (e: unknown) => {
+        setNotice(t.inboxFailed(message(e)));
+        return false;
+      },
+    );
+    filing.current.delete(id);
+    setBusy((b) => {
+      const next = new Set(b);
+      next.delete(id);
+      return next;
+    });
+    setProgress((all) => {
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
+    return filed;
   };
   // One after the other; those whose date isn't valid stay (and it says so), a failure stops it.
   const fileAll = async () => {
     setFilingAll(true);
-    try {
-      const skipped = proposals.filter((item) => !valid(item)).length;
-      for (const item of proposals.filter(valid)) if (!(await fileOne(item))) return;
-      if (skipped) setNotice(t.inboxSkipped(skipped));
-    } finally {
-      setFilingAll(false);
+    const skipped = proposals.filter((item) => !valid(item)).length;
+    let stopped = false;
+    for (const item of proposals.filter(valid)) {
+      if (await fileOne(item)) continue;
+      stopped = true;
+      break;
     }
+    if (skipped && !stopped) setNotice(t.inboxSkipped(skipped));
+    setFilingAll(false);
   };
   // A copy that is already filed: the library's documents of it become the filed one, then it goes.
   const discardOne = async (item: Proposal) => {
     if (!archive) return;
-    try {
-      const filed = item.duplicateOf?.place;
-      if (filed?.kind === 'folder') await useLibrary.getState().followEntry(item.entry, filed.entry).catch(() => {});
-      await discard(archive, dir, [item.entry]);
-      gone(item);
-    } catch (e) {
-      setNotice(message(e));
-    }
+    const filed = item.duplicateOf?.place;
+    if (filed?.kind === 'folder') await libraryActions().followEntry(item.entry, filed.entry).catch(() => {});
+    await discard(archive, dir, [item.entry]).then(
+      () => gone(item),
+      (e: unknown) => setNotice(message(e)),
+    );
   };
   // The model fills in the details; what the user types meanwhile stays. It gets two minutes.
   const askAi = async (item: Proposal) => {
     const id = item.entry.id;
     const before = edits[id] ?? {};
     setBusy((b) => new Set(b).add(id));
-    try {
-      const d = await suggest({ ...item, details: detailsOf(item, before) }, ai, AbortSignal.timeout(AI_WAIT_MS));
-      const got: Edits = { title: d.title, sender: d.sender, type: d.type, date: d.date, tags: d.tags.join(', ') };
-      setEdits((all) => {
-        const now = all[id] ?? {};
-        const kept = Object.fromEntries((Object.keys(got) as (keyof Edits)[]).filter((k) => now[k] !== before[k]).map((k) => [k, now[k]]));
-        return { ...all, [id]: { ...now, ...got, ...kept } };
-      });
-    } catch (e) {
-      setNotice(aiMessage(e));
-    } finally {
-      setBusy((b) => {
-        const next = new Set(b);
-        next.delete(item.entry.id);
-        return next;
-      });
-    }
+    await suggest({ ...item, details: detailsOf(item, before) }, ai, AbortSignal.timeout(AI_WAIT_MS)).then(
+      (d) => {
+        const got: Edits = { title: d.title, sender: d.sender, type: d.type, date: d.date, tags: d.tags.join(', ') };
+        setEdits((all) => {
+          const now = all[id] ?? {};
+          const kept = Object.fromEntries((Object.keys(got) as (keyof Edits)[]).filter((k) => now[k] !== before[k]).map((k) => [k, now[k]]));
+          return { ...all, [id]: { ...now, ...got, ...kept } };
+        });
+      },
+      (e: unknown) => setNotice(aiMessage(e)),
+    );
+    setBusy((b) => {
+      const next = new Set(b);
+      next.delete(item.entry.id);
+      return next;
+    });
   };
 
   return (
