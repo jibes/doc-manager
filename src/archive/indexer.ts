@@ -139,6 +139,12 @@ function rekey(from: IndexedDoc, to: Candidate) {
   changedNow();
 }
 
+/** Renamed by Tessel itself: its record (and text) under the file's new name now, as the next pass would find it. */
+export function renamed(from: IndexedDoc, entry: FolderEntry) {
+  if (Platform.OS !== 'web' || from.place.kind !== 'folder' || !docs.has(from.key)) return;
+  rekey(from, { key: `${from.place.root}:${entry.id}`, place: { ...from.place, entry }, name: entry.name, size: entry.size, modified: entry.modified });
+}
+
 function drop(keys: string[]) {
   if (!keys.length) return;
   for (const key of keys) docs.delete(key);
@@ -423,11 +429,19 @@ async function run(): Promise<void> {
   useIndex.setState({ running: false, duplicates: archiveDuplicates() });
 }
 
-/** Starts indexing a little after launch, and again when the app comes back after a while. */
+/**
+ * Starts indexing a little after launch; again when the app comes back after a while, and every so often while it
+ * stays open (what Syncthing brings meanwhile: new scans, deletions, renames, conflict copies).
+ */
 export function startIndexing() {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
   schedule(4000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && Date.now() - lastWalk > REWALK_MS) schedule(2000);
-  });
+  const stale = () => document.visibilityState === 'visible' && Date.now() - lastWalk > REWALK_MS;
+  document.addEventListener('visibilitychange', () => stale() && schedule(2000));
+  setInterval(() => stale() && schedule(1000), REWALK_MS / 5);
+}
+
+/** A screen that shows what the index knows came up: looked at again soon if the last look is a while ago. */
+export function refreshSoon() {
+  if (Platform.OS === 'web' && Date.now() - lastWalk > REWALK_MS / 5) schedule(1500);
 }

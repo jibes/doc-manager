@@ -57,7 +57,8 @@ export type FoldersApi = {
    */
   appFolder(): Promise<FolderRoot | null>;
   /** Asks for access to a locked folder again (needs a user gesture). */
-  unlock(id: string): Promise<boolean>;
+  /** Asks for access to the folder again (`write`: to change it too); needs a user gesture to prompt. */
+  unlock(id: string, write?: boolean): Promise<boolean>;
   list(root: string, dir?: string): Promise<FolderEntry[]>;
   /** The file's bytes. */
   read(root: string, e: FolderEntry): Promise<Blob>;

@@ -22,16 +22,20 @@ let building: Promise<MiniSearch<Indexable>> | null = null;
 /** Changes while the index is being built: applied to it once it is. */
 let pending: (Indexable | string)[] = [];
 
+/** Bumped when what goes into the index changes: a saved one of another kind is built afresh. */
+const INDEX_VERSION = 2;
+
+/** A document PDFium can't open (protected, damaged) is still found by its name. */
 function apply(to: MiniSearch<Indexable>, change: Indexable | string) {
   const key = typeof change === 'string' ? change : change.key;
   if (to.has(key)) to.discard(key);
-  if (typeof change !== 'string' && !change.failed) to.add(change);
+  if (typeof change !== 'string') to.add(change);
 }
 
 /** The saved index with what changed since it was saved, or null (none, or unreadable). */
 async function loadSaved(): Promise<MiniSearch<Indexable> | null> {
-  const [json, changed] = await getMany<string | string[] | undefined>(['index', 'changed'], savedStore);
-  if (typeof json !== 'string') return null;
+  const [json, changed, version] = await getMany<string | string[] | number | undefined>(['index', 'changed', 'version'], savedStore);
+  if (typeof json !== 'string' || version !== INDEX_VERSION) return null;
   let made: MiniSearch<Indexable>;
   try {
     made = MiniSearch.loadJSON<Indexable>(json, indexOptions);
@@ -49,7 +53,7 @@ async function buildFresh(): Promise<MiniSearch<Indexable>> {
   const metas = new Map((await values<IndexedDoc>(metaStore)).map((d) => [d.key, d]));
   for (const [key, pages] of await entries<string, string[]>(textStore)) {
     const meta = metas.get(key);
-    if (meta && !meta.failed) made.add({ ...meta, pages });
+    if (meta) made.add({ ...meta, pages });
   }
   return made;
 }
@@ -69,7 +73,7 @@ async function save() {
   if (index.dirtCount > 0) await index.vacuum();
   const json = JSON.stringify(index);
   changed.clear();
-  await setMany([['index', json], ['changed', []]], savedStore);
+  await setMany([['index', json], ['changed', []], ['version', INDEX_VERSION]], savedStore);
 }
 
 function ready(): Promise<MiniSearch<Indexable>> {

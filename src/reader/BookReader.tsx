@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View, type LayoutChangeEvent } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -178,21 +179,30 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   );
 
   // ---------- keyboard (web) ----------
+  // Only the book in front: another document opened over it leaves this one mounted underneath.
+  const focused = useIsFocused();
   useEffect(() => {
-    if (Platform.OS !== 'web' || !vp) return;
-    const onKey = (e: KeyboardEvent) => {
+    if (Platform.OS !== 'web' || !vp || !focused) return;
+    // ⌘/Ctrl shortcuts (and F3) before a text field can keep them; letters whatever Shift or Caps Lock say.
+    const onShortcut = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
-      if (mod && e.key === 's' && canDownload) return e.preventDefault(), void downloadDoc(doc).catch(() => {});
-      if (mod && e.key === 'f') {
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (useAsk.getState().request || !(mod || key === 'F3')) return;
+      if (mod && key === 's' && canDownload) return e.preventDefault(), void downloadDoc(doc).catch(() => {});
+      if (mod && key === 'f') {
         e.preventDefault();
         setChrome(true);
         return openFind(true);
       }
-      if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
+      if ((mod && key === 'g') || key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
+      // A question being asked has the keys (Esc answers it itself).
+      if (useAsk.getState().request || e.defaultPrevented) return;
       if (e.key === 'Escape') {
-        // A question being asked answers Esc itself; a selection goes before the book does.
-        if (useAsk.getState().request) return;
+        // A selection goes before the book does.
         if (menu) return setMenu(false);
         if (panel) return setPanel(null);
         const sel = window.getSelection();
@@ -213,7 +223,8 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
         ArrowRight: () => goToPage(page + 1),
         ArrowLeft: () => goToPage(page - 1),
         Home: () => goToPage(0),
-        End: () => goToPage(book.pageCount),
+        // A jump to the last page: not read to the end.
+        End: () => goToPage(book.pageCount - 1),
         b: () => toggleBookmark(doc.id, page),
         t: () => (panel === 'find' ? setPanel(null) : openFind(false)),
       };
@@ -223,20 +234,23 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
         fn();
       }
     };
+    window.addEventListener('keydown', onShortcut, true);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [vp, menu, panel, searchActive, onQuery, stepHit, goToPage, page, book.pageCount, toggleBookmark, doc]);
+    return () => {
+      window.removeEventListener('keydown', onShortcut, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [vp, focused, menu, panel, searchActive, onQuery, stepHit, goToPage, page, book.pageCount, toggleBookmark, doc]);
 
   // Android's back button closes what is open first.
-  useEffect(
-    () =>
-      onBack(() => {
-        if (menu) return setMenu(false), true;
-        if (panel) return setPanel(null), true;
-        return false;
-      }),
-    [menu, panel],
-  );
+  useEffect(() => {
+    if (!focused) return;
+    return onBack(() => {
+      if (menu) return setMenu(false), true;
+      if (panel) return setPanel(null), true;
+      return false;
+    });
+  }, [menu, panel, focused]);
 
   // ---------- chrome ----------
   const chromeShown = chrome || panel != null || menu || !readingMode;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -55,6 +55,21 @@ describe('AI reading', () => {
     expect(() => parseResult('no json', 1)).toThrow();
   });
 
+  it('places each page’s reading by its number, not by its place in the list', () => {
+    // Page 1 left out (blank); the third entry names its page only through its lines' ids.
+    const reply = JSON.stringify({
+      title: 'A',
+      pages: [
+        { page: 2, lines: [{ id: '2.1', text: 'zwei' }], added: [] },
+        { lines: [{ id: '3.1', text: 'drei' }], added: [{ text: 'bez', box: [1, 2, 3, 4] }] },
+      ],
+    });
+    const r = parseResult(reply, 3);
+    expect(r.pages[0]).toEqual({ lines: [], added: [] });
+    expect(r.pages[1].lines).toEqual([{ id: '2.1', text: 'zwei' }]);
+    expect(r.pages[2]).toEqual({ lines: [{ id: '3.1', text: 'drei' }], added: [{ text: 'bez', box: [1, 2, 3, 4] }] });
+  });
+
   it('names the file by date, sender and title', () => {
     const r = { title: 'Rechnung 40217', date: '2026-10-02', sender: 'Musterwerke Zürich', type: 'Rechnung', keywords: [], pages: [] };
     expect(aiTitle(r)).toBe('2026-10-02 Musterwerke Zürich – Rechnung 40217');
@@ -99,6 +114,13 @@ describe('replies', () => {
     expect(aiReady({ ...s, url: 'api.anthropic.com' })).toBe(false);
     expect(aiReady({ ...s, url: 'ftp://example.com' })).toBe(false);
     expect(aiHost({ ...s, url: ' https://api.anthropic.com/v1 ' })).toBe('api.anthropic.com');
+    // Over plain http only within this device or network: elsewhere the key would travel unencrypted.
+    expect(aiInsecure({ ...s, url: 'http://example.com/v1' })).toBe(true);
+    expect(aiReady({ ...s, url: 'http://example.com/v1' })).toBe(false);
+    expect(aiReady({ ...s, url: 'http://172.32.0.1/v1' })).toBe(false);
+    for (const url of ['http://192.168.1.20:11434/v1', 'http://10.0.0.5', 'http://172.20.1.1', 'http://ollama.local:11434', 'http://[::1]:8080', 'http://100.101.1.2'])
+      expect(aiReady({ ...s, url }), url).toBe(true);
+    expect(aiInsecure({ ...s, url: 'https://example.com' })).toBe(false);
     expect(() => parseResult('no json here', 1)).toThrow(AI_NO_JSON);
     expect(() => parseResult('{"title": "A", "pages": [', 1)).toThrow(AI_NO_JSON);
   });

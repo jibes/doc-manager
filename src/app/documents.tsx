@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View }
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
-import { allDocs, searchAll, snippetsFor, useIndex, warmSearch } from '@/archive/indexer';
+import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/archive/indexer';
 import { HitRow } from '@/archive/Results';
 import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
@@ -14,7 +14,7 @@ import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useDocsView, useMainWidth,
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
 import { SelectChip, SortChip } from '@/components/SortChip';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
-import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
+import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, readingAddedText, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
 import { Toast } from '@/components/Toast';
 import { useNotice } from '@/components/useNotice';
@@ -98,7 +98,8 @@ export default function Documents() {
     let alive = true;
     allDocs().then((d) => {
       if (!alive) return;
-      setAll(d.filter((x) => !x.failed));
+      // Documents that can't be opened here (protected, damaged) are listed too, by their name.
+      setAll(d);
       setReady(true);
     });
     return () => {
@@ -109,9 +110,11 @@ export default function Documents() {
   // The search index is built ahead, so the first search answers at once.
   useEffect(() => warmSearch(), []);
   // Views as stored now, each time the screen comes back (another device may have changed them).
+  // The index looks again if its last look is a while ago (what Syncthing brought meanwhile).
   useFocusEffect(
     useCallback(() => {
       loadViews().catch(() => {});
+      refreshSoon();
     }, []),
   );
 
@@ -484,8 +487,7 @@ export default function Documents() {
             disabled={!picked.length}
             onPress={() =>
               void batch(async () => {
-                const n = await addToReading(picked);
-                return n ? t.readingAddedN(n) : t.readingAlready;
+                return readingAddedText(await addToReading(picked));
               })
             }
           />

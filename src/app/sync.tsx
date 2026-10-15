@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { allDocs, forget, useIndex, type Conflict } from '@/archive/indexer';
+import { allDocs, forget, refreshSoon, useIndex, type Conflict } from '@/archive/indexer';
+import { useThrottled } from '@/lib/useThrottled';
 import { openDoc, whereIs } from '@/archive/Results';
 import type { IndexedDoc } from '@/archive/search';
 import { duplicates } from '@/archive/sync';
@@ -39,7 +41,9 @@ export default function Sync() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const conflicts = useIndex((s) => s.conflicts);
-  const done = useIndex((s) => s.done);
+  // What the index changed, at most every 1.5 s (not once per document read).
+  const changed = useThrottled(useIndex((s) => s.changed), 1500);
+  useFocusEffect(useCallback(() => refreshSoon(), []));
   const [pairs, setPairs] = useState<Pair[] | null>(null);
   const [groups, setGroups] = useState<IndexedDoc[][]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -59,7 +63,7 @@ export default function Sync() {
     return () => {
       alive = false;
     };
-  }, [conflicts, done, round, archive]);
+  }, [conflicts, changed, round, archive]);
 
   // Resolved files leave the lists (and the index) at once; the next pass reads the folders again.
   const act = async (op: () => Promise<string>, after: () => void) => {
@@ -94,7 +98,8 @@ export default function Sync() {
     await act(async () => {
       if (pair.original) await discard(root, dir, [pair.original]);
       await folders.rename(root, dir, entry, name.original);
-      return pair.original ? kept(root) : t.syncKeptDeleted;
+      // With no other version left (gone already), nothing was deleted: it only took its name back.
+      return pair.original ? kept(root) : t.syncKeptAs(name.original);
     }, () => dropPair(pair, true));
   };
   const keepBoth = (pair: Pair) =>

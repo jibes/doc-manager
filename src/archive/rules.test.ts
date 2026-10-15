@@ -47,6 +47,10 @@ describe('dates', () => {
     expect(findDate('geb. 03.04.67, Rechnung vom 02.10.26', now)).toBe('2026-10-02');
     expect(findDate('Vertrag vom 15.09.98', now)).toBe('1998-09-15');
     expect(findDate('Gültig bis 01.01.2031, ausgestellt 12.10.2026', now)).toBe('2026-10-12');
+    // Version and section numbers before the date aren't dates.
+    expect(findDate('Version 1.2.34 vom 02.10.2026', now)).toBe('2026-10-02');
+    expect(findDate('Release 2.1.19, Stand 3.10.2026', now)).toBe('2026-10-03');
+    expect(findDate('Abschnitt 4.5.6.12 – 02.10.26', now)).toBe('2026-10-02');
   });
 });
 
@@ -61,6 +65,12 @@ describe('file paths', () => {
     expect(pathFor('{year}/{type}/{date} – {title}', none, fallback)).toEqual(['2026', '2026-01-05 – Scan.pdf']);
     expect(pathFor('{type}/{title} - {sender}', { ...none, title: 'X', sender: '' }, { ...fallback, sender: '' })).toEqual(['X.pdf']);
     expect(pathFor('{sender} - {type} - {title}', { ...none, title: 'Rechnung', sender: 'Telekom' }, fallback)).toEqual(['Telekom - Rechnung.pdf']);
+    expect(pathFor('{date}_{type}_{title}', { ...none, title: 'Rechnung', date: '2026-10-02' }, fallback)).toEqual(['2026-10-02_Rechnung.pdf']);
+  });
+
+  it('never makes a folder the file name', () => {
+    expect(pathFor('{year}/{sender}/{type}', { ...none, sender: 'Nordkorn', date: '2026-10-02' }, fallback)).toEqual(['2026', 'Nordkorn', 'Scan.pdf']);
+    expect(pathFor('{year}/{sender}/{title}', { ...none, sender: 'Nordkorn', title: '???', date: '2026-10-02' }, fallback)).toEqual(['2026', 'Nordkorn', 'Scan.pdf']);
   });
 
   it('keeps names safe to sync', () => {

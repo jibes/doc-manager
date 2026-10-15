@@ -20,17 +20,39 @@ export type AiSettings = {
 
 export const DEFAULT_AI: AiSettings = { api: 'anthropic', url: '', key: '', model: '' };
 
-/**
- * The address, when it is a whole web address (http or https, with a host). Anything else would be taken as a
- * path on the app's own site: the key and the pages would go there.
- */
-export function aiUrl(s: AiSettings): URL | null {
+/** This device, the local network (private and link-local addresses) or a .local name. */
+export function localHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(h);
+  if (v4) {
+    const [a, b] = [+v4[1], +v4[2]];
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  return h === '::1' || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h);
+}
+
+/** A whole web address, but over http to somewhere beyond this device and network: the key would go unencrypted. */
+function parsed(s: AiSettings): URL | null {
   try {
     const url = new URL(s.url.trim());
     return (url.protocol === 'https:' || url.protocol === 'http:') && url.host ? url : null;
   } catch {
     return null;
   }
+}
+export const aiInsecure = (s: AiSettings) => {
+  const url = parsed(s);
+  return !!url && url.protocol === 'http:' && !localHost(url.hostname);
+};
+
+/**
+ * The address, when it is a whole web address (https, or http to this device or the local network). Anything else
+ * would be taken as a path on the app's own site (the key and the pages would go there), or send them in the clear.
+ */
+export function aiUrl(s: AiSettings): URL | null {
+  const url = parsed(s);
+  return url && !aiInsecure(s) ? url : null;
 }
 
 export const aiReady = (s: AiSettings) => !!aiUrl(s) && !!s.model.trim();
@@ -43,6 +65,12 @@ export const AI_DECLINED = 'ai:declined';
 export const AI_CUT_OFF = 'ai:cut-off';
 export const AI_NO_JSON = 'ai:no-json';
 export const AI_BAD_URL = 'ai:bad-url';
+/** Plain http to an address beyond this device and network. */
+export const AI_INSECURE = 'ai:insecure';
+/** "ai:unreachable:<host>": no answer at all (offline, wrong address, or a browser rule against the request). */
+export const AI_UNREACHABLE = 'ai:unreachable';
+/** The address answered, but not as an AI API does (a login page, a proxy's error page). */
+export const AI_NOT_API = 'ai:not-api';
 /** "ai:server <status> <what it said>". */
 export const AI_SERVER = 'ai:server';
 
@@ -75,6 +103,7 @@ export const RESULT_SCHEMA = object({
   pages: {
     type: 'array',
     items: object({
+      page: { type: 'integer', description: 'The page’s number, from 1' },
       lines: { type: 'array', items: object({ id: { type: 'string' }, text: { type: 'string' } }) },
       added: { type: 'array', items: object({ text: { type: 'string' }, box: { type: 'array', items: { type: 'number' } } }) },
     }),
@@ -89,7 +118,7 @@ export function prompt(pages: AiPage[]): string {
     '1. For every line, give its text exactly as it appears on the page: fix misread letters, umlauts and accents, missing or extra spaces. Keep the line’s id. Give "" for a line that is not text (a logo, a stamp, noise).',
     '2. Under "added", give text the recogniser missed, such as handwriting, one entry per line of text, with its box as [x0, y0, x1, y1] in thousandths of the page’s width and height (0,0 is the top left).',
     '3. Describe the document: title, date, sender, type and keywords.',
-    'Give one entry in "pages" per page, in order. Reply with the JSON object only.',
+    'Give one entry in "pages" per page, in order, each with its page number (from 1), also for a page with nothing on it. Reply with the JSON object only.',
     '',
     listed,
   ].join('\n');
@@ -114,7 +143,22 @@ export function parseResult(text: string, pageCount: number): AiResult {
     throw new Error(AI_NO_JSON);
   }
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
-  const pages = Array.isArray(raw.pages) ? raw.pages : [];
+  type Entry = Partial<AiResult['pages'][number]> & { page?: unknown };
+  const entries = (Array.isArray(raw.pages) ? raw.pages : []) as Entry[];
+  // Which page an entry is: its number, else the page its lines' ids name ("3.2" is on page 3), else its place
+  // in the list. A model that leaves a blank page out mustn't shift the next page's handwriting onto it.
+  const pageOf = (e: Entry, i: number) => {
+    const n = Number(e?.page);
+    if (Number.isInteger(n) && n >= 1 && n <= pageCount) return n - 1;
+    const named = [...new Set((e?.lines ?? []).map((l) => Number(String(l?.id ?? '').split('.')[0])).filter(Number.isInteger))];
+    if (named.length === 1 && named[0] >= 1 && named[0] <= pageCount) return named[0] - 1;
+    return i;
+  };
+  const byPage = new Map<number, Entry>();
+  entries.forEach((e, i) => {
+    const at = pageOf(e, i);
+    if (!byPage.has(at)) byPage.set(at, e);
+  });
   return {
     title: str(raw.title),
     date: /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? str(raw.date) : '',
@@ -122,8 +166,8 @@ export function parseResult(text: string, pageCount: number): AiResult {
     type: str(raw.type),
     keywords: Array.isArray(raw.keywords) ? raw.keywords.map(str).filter(Boolean).slice(0, 5) : [],
     pages: Array.from({ length: pageCount }, (_, i) => ({
-      lines: (pages[i]?.lines ?? []).filter((l) => typeof l?.id === 'string' && typeof l?.text === 'string'),
-      added: (pages[i]?.added ?? []).filter((a) => str(a?.text) && Array.isArray(a?.box) && a.box.length === 4 && a.box.every(Number.isFinite)),
+      lines: (byPage.get(i)?.lines ?? []).filter((l) => typeof l?.id === 'string' && typeof l?.text === 'string'),
+      added: (byPage.get(i)?.added ?? []).filter((a) => str(a?.text) && Array.isArray(a?.box) && a.box.length === 4 && a.box.every(Number.isFinite)),
     })),
   };
 }
@@ -133,7 +177,12 @@ export function parseResult(text: string, pageCount: number): AiResult {
  * own host, which an address's CORS rules (set up for the web app's address, or for none) don't allow.
  */
 async function post(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
-  if (!shell) return fetch(url, { method: 'POST', ...init });
+  if (!shell)
+    return fetch(url, { method: 'POST', ...init }).catch((e: unknown) => {
+      // No answer at all (offline, a wrong address, or the browser's rules against the request): said as such.
+      if (e instanceof TypeError) throw new Error(`${AI_UNREACHABLE}:${new URL(url).host}`);
+      throw e;
+    });
   // Stopped, the app closes the connection too (no upload goes on unseen).
   const r = await shellRequest<{ status: number; body: string }>('http', { url, method: 'POST', headers: init.headers, body: init.body }, init.signal);
   return new Response(r.body, { status: r.status });
@@ -207,8 +256,25 @@ export function openAiReply(raw: string): string {
 
 const trimSlash = (url: string) => url.trim().replace(/\/+$/, '');
 
-/** A rejection worth another try without the structured output: the server doesn't know that part of the request (not a bad key, model or image). */
-const FORMAT_REJECTED = /output_config|response_format|json_schema|json_object|structured|schema|format|guided|grammar/i;
+/**
+ * A rejection worth another try without the structured output: the server names that part of the request (an
+ * image it can't take, or a bad key or model, says nothing of these).
+ */
+const FORMAT_REJECTED = /output_config|response_format|json_schema|json_object|structured[ _]outputs?|guided_(?:json|grammar)|\bgrammar\b/i;
+/** A rejected output length: the model's own maximum, when the server says it. */
+const LENGTH_REJECTED = /max_tokens/i;
+/** Room for thinking and every line of every page given back (a stream allows this much); less where a model allows less. */
+const MAX_TOKENS = [64_000, 32_000, 16_000];
+
+/** A reply read as the API's own, or (a page that isn't one: a login or error page) said so. */
+const asReply = (read: () => string) => {
+  try {
+    return read();
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new Error(AI_NOT_API);
+    throw e;
+  }
+};
 
 /**
  * Anthropic's Messages API over fetch. (The official SDK can't initialise in this app's web bundle: Metro trips
@@ -219,11 +285,10 @@ type Request = { images: Blob[]; text: string; schema: object };
 
 async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): Promise<string> {
   const images = await Promise.all(req.images.map(async (jpeg) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await base64(jpeg) } })));
-  const body = (structured: boolean) =>
+  const body = (structured: boolean, maxTokens: number) =>
     JSON.stringify({
       model: s.model.trim(),
-      // Room for thinking and every line of every page given back (a stream allows this much).
-      max_tokens: 32000,
+      max_tokens: maxTokens,
       // Streamed: the reply starts at once, so a proxy on the way (Cloudflare gives up after ~100 s without a
       // byte) doesn't cut off a long reading. The whole stream is read before it is used.
       stream: true,
@@ -231,8 +296,11 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
       ...(structured ? { output_config: { format: { type: 'json_schema', schema: req.schema } } } : {}),
     });
   let last = '';
-  // A model or server without structured output gets the request again without it: the prompt asks for JSON anyway.
-  for (const structured of [true, false]) {
+  // A model or server without structured output gets the request again without it (the prompt asks for JSON
+  // anyway); one that allows a shorter reply, again with that length.
+  let structured = true;
+  let length = 0;
+  for (let tries = 0; tries < 5; tries++) {
     // With or without the /v1 that OpenAI-style addresses carry.
     const res = await post(`${trimSlash(s.url).replace(/\/v1$/, '')}/v1/messages`, {
       headers: {
@@ -241,13 +309,19 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
         'anthropic-dangerous-direct-browser-access': 'true',
         ...(s.key ? { 'x-api-key': s.key } : {}),
       },
-      body: body(structured),
+      body: body(structured, MAX_TOKENS[length]),
       signal,
     });
-    if (res.ok) return anthropicReply(await res.text());
+    if (res.ok) {
+      const raw = await res.text();
+      return asReply(() => anthropicReply(raw));
+    }
     const said = await res.text().catch(() => '');
     last = `${res.status} ${said.slice(0, 200)}`;
-    if (res.status !== 400 || !FORMAT_REJECTED.test(said)) break;
+    if (res.status !== 400) break;
+    if (LENGTH_REJECTED.test(said) && length < MAX_TOKENS.length - 1) length++;
+    else if (FORMAT_REJECTED.test(said) && structured) structured = false;
+    else break;
   }
   throw new Error(`${AI_SERVER} ${last}`);
 }
@@ -269,7 +343,10 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
       body: body(format),
       signal,
     });
-    if (res.ok) return openAiReply(await res.text());
+    if (res.ok) {
+      const raw = await res.text();
+      return asReply(() => openAiReply(raw));
+    }
     const said = await res.text().catch(() => '');
     last = `${res.status} ${said.slice(0, 200)}`;
     // Only a rejected request format is worth another try.
@@ -280,6 +357,7 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
 
 /** Sends the pages and returns what the model read. Throws with a message for the user on any failure. */
 const send = (s: AiSettings, req: Request, signal?: AbortSignal) => {
+  if (aiInsecure(s)) throw new Error(AI_INSECURE);
   if (!aiUrl(s)) throw new Error(AI_BAD_URL);
   return s.api === 'anthropic' ? viaAnthropic(s, req, signal) : viaOpenAi(s, req, signal);
 };

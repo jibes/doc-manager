@@ -61,6 +61,8 @@ const OCR_EDGE = 2600;
 
 /** The OCR worker holds its models in memory; it is closed after this long unused. */
 const OCR_IDLE_MS = 60_000;
+/** How long after the camera closes the last request goes on, unless the document's screen asked again meanwhile. */
+const RESUME_MS = 250;
 
 
 
@@ -86,6 +88,8 @@ const inFlight = new Map<string, Promise<EncodedPage>>();
 const read = new Set<string>();
 let paused = false;
 let generation = 0;
+/** Bumped when the document is gone: work still running for it then starts nothing more and keeps nothing. */
+let epoch = 0;
 /** The last prefetch asked for, to go on with after a pause. */
 let last: { pages: Page[]; settings: ScanSettings } | null = null;
 /** Whether the background prefetch also reads the text (OCR on and its models downloaded). */
@@ -217,6 +221,7 @@ async function encode(page: Page, settings: ScanSettings, text: boolean): Promis
     if (!running) break;
     await running.catch(() => undefined);
   }
+  const started = epoch;
   const running = worker()
     .encode({
       ...renderJob(page, RESOLUTION_LONG_EDGE[settings.resolution]),
@@ -230,6 +235,7 @@ async function encode(page: Page, settings: ScanSettings, text: boolean): Promis
         height: result.height,
         text: null,
       };
+      if (started !== epoch) return entry;
       if (result.ocr) {
         const toPage = result.width / result.ocr.width;
         // A page whose rotation the user or OCR has settled is read as it is.
@@ -242,7 +248,7 @@ async function encode(page: Page, settings: ScanSettings, text: boolean): Promis
               y0: w.y0 * toPage,
               y1: w.y1 * toPage,
             }));
-            if (turn) settleTurn(page, settings, turn, scaled);
+            if (turn && started === epoch) settleTurn(page, settings, turn, scaled);
             if (ready.get(k) === entry) read.add(k);
             changed();
             return { words: scaled, turn };
@@ -365,15 +371,22 @@ export function pausePrefetch(): void {
   generation++;
 }
 
-/** Background renders again, from where the last request was. */
+/**
+ * Background renders again. The document's screen, back in front, usually asks again with its pages as they are
+ * now; only if it doesn't does the last request (perhaps with pages since replaced) go on.
+ */
 export function resumePrefetch(): void {
   paused = false;
-  if (last) prefetchExports(last.pages, last.settings);
+  const run = generation;
+  setTimeout(() => {
+    if (run === generation && !paused && last) prefetchExports(last.pages, last.settings);
+  }, RESUME_MS);
 }
 
 /** The document is gone (saved or discarded): nothing more is prepared or kept, and the workers close. */
 export function resetExports(): void {
   generation++;
+  epoch++;
   last = null;
   ready.clear();
   read.clear();

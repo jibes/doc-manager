@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/Icon';
 import { T } from '@/components/primitives';
 import { radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { scanError, t } from '@/i18n';
 import { captureStill, openCamera, setTorch, stopStream } from '../engine/camera/camera';
 import type { Detection } from '../engine/detect/heatmap';
 import { MODEL_INPUT } from '../engine/detect/model';
@@ -72,7 +72,7 @@ function cameraMessage(error: unknown): string {
   if (name === 'NotAllowedError' || name === 'SecurityError') return t.scanCameraBlocked;
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return t.scanCameraMissing;
   if (name === 'NotReadableError' || name === 'AbortError') return t.scanCameraBusy;
-  return error instanceof Error ? error.message : String(error);
+  return scanError(error);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -356,12 +356,10 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
         if (blurred) say(t.scanBlurred);
         else if (offFrame) say(t.scanOffFrame);
         if (retakeId) onRetaken(id);
-        else if (!found && !auto) {
-          say(t.scanNoEdges);
-          onCrop(id);
-        }
+        // The crop screen says why it opened (no edges found): a message here would wait until it is closed.
+        else if (!found && !auto) onCrop(id);
       } catch (error) {
-        if (mounted && !l.hidden) say(t.scanCaptureFailed(error instanceof Error ? error.message : String(error)));
+        if (mounted && !l.hidden) say(t.scanCaptureFailed(scanError(error)));
       } finally {
         l.capturing = false;
         setExposing(false);

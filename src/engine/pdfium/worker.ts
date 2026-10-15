@@ -1151,6 +1151,20 @@ async function run(job: Job) {
   }
 }
 
+/**
+ * Lets messages that arrived meanwhile in (a cancel, a page to draw): awaiting what is already settled doesn't,
+ * so a search would otherwise run to its end before anything else is even seen.
+ */
+const breathe = () =>
+  new Promise<void>((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      ch.port1.close();
+      resolve();
+    };
+    ch.port2.postMessage(null);
+  });
+
 async function pump() {
   if (busy) return;
   busy = true;
@@ -1164,6 +1178,8 @@ async function pump() {
         releaseSearch(job);
         post({ id: job.id, ok: false, error: e instanceof Error ? e.message : String(e) });
       }
+      // Between a search's slices (and after anything long), new requests are taken in.
+      if (job.type === 'search' || job.type === 'annots') await breathe();
     }
   } finally {
     busy = false;

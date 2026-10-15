@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, withRules, type Proposal } from '@/archive/inbox';
+import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, useRulesUnreadable, withRules, type Proposal } from '@/archive/inbox';
 import type { Details } from '@/archive/pdfInfo';
 import { openDoc } from '@/archive/Results';
 import { discard } from '@/archive/trash';
@@ -54,6 +54,8 @@ export default function Inbox() {
   // Being filed now (a second tap, or File all, leaves them be).
   const filing = useRef(new Set<string>());
   const [filingAll, setFilingAll] = useState(false);
+  // Filing with rules that couldn't be read would file by others (the default ones): it waits for them.
+  const rulesUnreadable = useRulesUnreadable((s) => s.unreadable);
   const [notice, setNotice] = useState<string | null>(null);
   // While filing makes a document searchable: how far reading its text has come.
   const [progress, setProgress] = useState<Record<string, string>>({});
@@ -177,7 +179,7 @@ export default function Inbox() {
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
           <ScreenHeader title={t.inboxTitle} up={() => goTab('documents')}>
             {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push('/rules')} />}
-            {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} disabled={filingAll} onPress={() => void fileAll()} />}
+            {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} disabled={filingAll || rulesUnreadable} onPress={() => void fileAll()} />}
           </ScreenHeader>
 
           {!archive ? (
@@ -197,6 +199,11 @@ export default function Inbox() {
                   {t.inboxReading(reading.done, reading.total)}
                 </T>
               )}
+              {rulesUnreadable && (
+                <T v="caption" color={p.markRing} testID="inbox-rules-unreadable">
+                  {t.inboxRulesUnreadable}
+                </T>
+              )}
               {items && proposals.length === 0 && <T color={p.muted}>{t.inboxEmpty}</T>}
               <View style={{ gap: space.lg }}>
                 {proposals.map((item) => (
@@ -207,7 +214,7 @@ export default function Inbox() {
                     edits={edits[item.entry.id] ?? {}}
                     onEdit={(e) => setEdits((all) => ({ ...all, [item.entry.id]: { ...all[item.entry.id], ...e } }))}
                     path={pathOf(item)}
-                    valid={valid(item)}
+                    valid={valid(item) && !rulesUnreadable}
                     busy={busy.has(item.entry.id)}
                     progress={progress[item.entry.id]}
                     onFile={() => void fileOne(item)}

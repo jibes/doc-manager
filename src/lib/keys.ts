@@ -12,6 +12,11 @@ export function shortcut(key: string): string | undefined {
   return keyboard ? `${mac ? '⌘' : t.ctrlKey}${key}` : undefined;
 }
 
+/** A label with a single-key shortcut in brackets (Text view (V)), when this device has shortcuts. */
+export function withKey(label: string, key: string): string {
+  return keyboard ? `${label} (${key})` : label;
+}
+
 /** A label with its shortcut in brackets, when this device has shortcuts. */
 export function withShortcut(label: string, key: string): string {
   const k = shortcut(key);

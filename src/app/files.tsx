@@ -20,8 +20,9 @@ import { PartlyDone } from '@/lib/folderTypes';
 import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { setArchive } from '@/archive/views';
-import { schedule } from '@/archive/indexer';
-import { addToReading, filesAsDocs } from '@/archive/batch';
+import { allDocs, renamed, schedule } from '@/archive/indexer';
+import { sameOrRenamed } from '@/lib/names';
+import { addToReading, filesAsDocs, readingAddedText } from '@/archive/batch';
 import { cancelThumbs } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
 import { clipCount, useClipboard } from '@/state/clipboard';
@@ -323,7 +324,12 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
     if (!n || n === e.name) return;
     await run(async () => {
       const to = await folders.rename(root, dir, e, n);
+      // The file as it is now: library documents follow it (browsers: by its new handle), its record keeps its text.
+      const now = (await folders.list(root, dir).catch(() => [] as FolderEntry[])).find((x) => (to ? x.uri === to : x.name === n));
       if (to && e.uri) await followFiles([{ from: e.uri, to }]);
+      else if (now && e.handle) await useLibrary.getState().followEntry(e, now);
+      const was = now && (await allDocs()).find((d) => d.key === `${root}:${e.id}`);
+      if (was && now) renamed(was, now);
     });
   };
   const remove = async () => {
@@ -455,7 +461,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
             icon="readingAdd"
             label={t.readingList}
             disabled={!picked.length || picked.some((e) => e.kind === 'dir')}
-            onPress={() => void run(async () => t.readingAddedN(await addToReading(filesAsDocs(root, dir, picked))))}
+            onPress={() => void run(async () => readingAddedText(await addToReading(filesAsDocs(root, dir, picked))))}
           />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!picked.length} onPress={() => clip(false)} />
           <Action testID="act-move" icon="move" label={t.move} disabled={!editable || !picked.length} onPress={() => clip(true)} />
@@ -497,12 +503,22 @@ export function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: P
       for (const { from, entries } of clip.items) {
         // Already here: nothing to move.
         if (clip.move && from.root === here.root && (from.dir ?? '') === (here.dir ?? '')) continue;
+        // Browsers tell moved files only by name: what was here before.
+        const byHandle = clip.move && entries.some((e) => e.handle && e.kind !== 'dir');
+        const before = byHandle ? new Set((await folders.list(here.root, here.dir).catch(() => [] as FolderEntry[])).map((e) => e.name)) : null;
         const moved = await folders.transfer(from, entries, here, clip.move).catch(async (e: unknown) => {
           // What did move is followed all the same (its library documents go with it).
           if (clip.move && e instanceof PartlyDone) await followFiles(e.done as { from: string; to: string }[]);
           throw e;
         });
         if (clip.move) await followFiles(moved);
+        if (before) {
+          const arrived = (await folders.list(here.root, here.dir).catch(() => [] as FolderEntry[])).filter((e) => !before.has(e.name));
+          for (const e of entries.filter((x) => x.handle && x.kind !== 'dir')) {
+            const now = arrived.find((a) => sameOrRenamed(a.name, e.name));
+            if (now) await useLibrary.getState().followEntry(e, now);
+          }
+        }
       }
       schedule(1000);
       onMessage?.(clip.move ? t.movedN(count) : t.copiedN(count));

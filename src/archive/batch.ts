@@ -1,9 +1,10 @@
+import { t } from '@/i18n';
 import { folders, type FolderEntry, type Place as FolderPlace } from '@/lib/folders';
 import { PartlyDone } from '@/lib/folderTypes';
 import { shareDocs } from '@/lib/fileActions';
 import { useLibrary } from '@/state/library';
 import type { DocRecord } from '@/storage';
-import { forget } from './indexer';
+import { forget, renamed, schedule } from './indexer';
 import { importFromFolder } from './Results';
 import type { IndexedDoc, Place } from './search';
 import type { Trashed } from './sync';
@@ -46,18 +47,27 @@ export const filesAsDocs = (root: string, dir: string | undefined, entries: Fold
   }));
 
 /** Puts them on the reading list (files come into the library for it); returns how many were added. */
-export async function addToReading(docs: IndexedDoc[]): Promise<number> {
-  let added = 0;
+export type ReadingAdded = { added: number; already: number; failed: number };
+
+export async function addToReading(docs: IndexedDoc[]): Promise<ReadingAdded> {
+  const r: ReadingAdded = { added: 0, already: 0, failed: 0 };
   for (const d of docs) {
-    const rec: DocRecord | undefined = inFolder(d) ? await importFromFolder(d.place) : libraryDoc(d);
-    if (!rec) continue;
-    const now = useLibrary.getState().docs.find((x) => x.id === rec.id);
-    if (now && !now.reading) {
-      useLibrary.getState().toggleReading(rec.id);
-      added++;
+    const rec: DocRecord | undefined = inFolder(d) ? await importFromFolder(d.place).catch(() => undefined) : libraryDoc(d);
+    const now = rec && useLibrary.getState().docs.find((x) => x.id === rec.id);
+    if (!now) r.failed++;
+    else if (now.reading) r.already++;
+    else {
+      useLibrary.getState().toggleReading(now.id);
+      r.added++;
     }
   }
-  return added;
+  return r;
+}
+
+/** What adding to the reading list did, in words (the same on every screen). */
+export function readingAddedText({ added, already, failed }: ReadingAdded): string {
+  const done = added ? t.readingAddedN(added) : already ? t.readingAlready : '';
+  return failed ? `${done} ${t.readingFailedN(failed)}`.trim() : done;
 }
 
 /** One share sheet for the files, one for library copies. */
@@ -108,9 +118,15 @@ export async function deleteAll(docs: IndexedDoc[]): Promise<{ trashed: { root: 
 export async function renameDoc(d: IndexedDoc, name: string) {
   if (!inFolder(d)) return;
   const { root, dir, entry } = d.place;
-  const to = await folders.rename(root, dir, entry, /\.(pdf|epub)$/i.test(name) ? name : `${name}${entry.name.match(/\.(pdf|epub)$/i)?.[0] ?? ''}`);
+  const next = /\.(pdf|epub)$/i.test(name) ? name : `${name}${entry.name.match(/\.(pdf|epub)$/i)?.[0] ?? ''}`;
+  const to = await folders.rename(root, dir, entry, next);
+  // The file as it is now (its ID, handle): the library follows it, and its record keeps its text.
+  const now = (await folders.list(root, dir).catch(() => [] as FolderEntry[])).find((e) => (to ? e.uri === to : e.name === next));
   if (to && entry.uri) await useLibrary.getState().followFiles([{ from: entry.uri, to }]);
-  forget([d.key]);
+  else if (now) await useLibrary.getState().followEntry(entry, now);
+  if (now) renamed(d, now);
+  else forget([d.key]);
+  schedule(1000);
 }
 
 /** Puts back what deleteAll moved to the trash. */

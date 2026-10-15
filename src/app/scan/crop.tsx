@@ -57,6 +57,11 @@ export default function ScanCrop() {
           </T>
         </Pressable>
       </View>
+      {!page.detected && !quad && (
+        <T v="caption" color="#fff" accessibilityLiveRegion="polite" style={styles.hint}>
+          {t.scanNoEdges}
+        </T>
+      )}
       <CropEditor page={page} quad={shown} onChange={setQuad} />
       <View style={[styles.bottom, { paddingBottom: insets.bottom + space.lg }]}>
         <Pressable accessibilityRole="button" disabled={!page.detected} onPress={() => page.detected && setQuad(page.detected)} style={[styles.tool, { opacity: page.detected ? 1 : 0.4 }]}>
@@ -80,6 +85,7 @@ export default function ScanCrop() {
 }
 
 const styles = StyleSheet.create({
+  hint: { textAlign: 'center', paddingHorizontal: space.lg, paddingBottom: space.sm },
   screen: { flex: 1, backgroundColor: '#000', userSelect: 'none' } as object,
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.lg, paddingBottom: space.sm },
   text: { paddingVertical: space.sm, paddingRight: space.md },

@@ -42,9 +42,26 @@ export function aiMessage(e: unknown): string {
   if (m === 'ai:cut-off') return t.aiCutOff;
   if (m === 'ai:no-json') return t.aiNoJson;
   if (m === 'ai:bad-url') return t.aiUrlBad;
+  if (m === 'ai:insecure') return t.aiUrlInsecure;
+  if (m === 'ai:not-api') return t.aiNotApi;
+  if (m === 'ai:offline') return t.aiOffline;
+  if (m === 'ai:timeout') return t.aiTimeout;
+  const host = /^ai:(unknown-host|unreachable):(.*)$/.exec(m);
+  if (host) return host[1] === 'unknown-host' ? t.aiUnknownHost(host[2]) : t.aiUnreachable(host[2]);
   if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) return t.aiTimeout;
   const server = /^ai:server ?(.*)$/s.exec(m);
   return server ? t.aiServer(server[1].trim()) : m;
+}
+
+/** What went wrong in the scanner (its workers, the camera, a folder), in the user's language where we know it. */
+export function scanError(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (/worker (?:stopped responding|was closed)/i.test(m)) return t.scanWorkerStopped;
+  if (/camera produced no video/i.test(m)) return t.cameraNoVideo;
+  const folder = /^Can't make the folder (.+)$/.exec(m);
+  if (folder) return t.folderNotMade(folder[1]);
+  if (m === 'denied' || m === t.writeDenied) return t.writeDenied;
+  return m;
 }
 
 /** What went wrong with a file operation (rename, move, save, keep), in the user's language where we know it. */

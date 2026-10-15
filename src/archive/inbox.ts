@@ -75,10 +75,13 @@ export async function refreshInboxCount(): Promise<void> {
 /* --------------------------------------------------------------- rules ---- */
 
 export const useRules = create<Rules>(() => DEFAULT_RULES);
+/** The rules file is there but can't be read now (no access yet, or broken): nothing is filed until it can be. */
+export const useRulesUnreadable = create<{ unreadable: boolean }>(() => ({ unreadable: false }));
 
 /** The rules as stored; those last read when the file can't be read now (no access yet), so nothing is lost. */
 export async function loadRules(archive: string): Promise<Rules> {
   const text = await readSettings(archive, RULES_PATH).catch(() => undefined);
+  useRulesUnreadable.setState({ unreadable: text === undefined });
   if (text === undefined) return useRules.getState();
   const rules = text ? parseRules(text) : DEFAULT_RULES;
   useRules.setState(rules, true);

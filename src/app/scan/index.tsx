@@ -12,6 +12,8 @@ import { Unsupported } from '@/scan/ui/Unsupported';
 
 /** Height of the camera's controls (shutter, import, Done) over the bottom edge, which messages stay clear of. */
 const CONTROLS_H = 100;
+/** The camera's status line just above the controls. */
+const STATUS_H = 52;
 
 /** The camera. `retake`: the photo replaces that page's; `from=review`: closing goes back to the document. */
 export default function ScanCamera() {
@@ -54,8 +56,8 @@ export default function ScanCamera() {
         onRetaken={retaken}
         say={say}
       />
-      {/* Above the shutter and Done (a message must never be in the way of taking or finishing). */}
-      {focused && <Toast message={message} onDismiss={dismiss} above={CONTROLS_H} />}
+      {/* Above the shutter and Done, and above the status line (Hold still…): neither may be hidden by a message. */}
+      {focused && <Toast message={message} onDismiss={dismiss} above={CONTROLS_H + STATUS_H} />}
     </View>
   );
 }

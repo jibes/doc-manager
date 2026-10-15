@@ -1,3 +1,4 @@
+import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
@@ -24,7 +25,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import type { Annotation, DocHandle, PageLink, SearchHit } from '@/engine/types';
 import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
 import { onBack } from '@/lib/backGuard';
-import { shortcut, withShortcut } from '@/lib/keys';
+import { shortcut, withKey, withShortcut } from '@/lib/keys';
 import { useAsk } from '@/state/ask';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
@@ -101,7 +102,9 @@ export function Reader({
   const textApiRef = useRef<ReflowApi | null>(null);
   // Reading-list documents get reading behaviour (immersive chrome, progress); everything else is a plain viewer.
   const readingMode = !!doc.reading;
-  const edits = useEdits(doc, handle);
+  // Only the reader in front takes keys and Back: another one opened over it (a file dropped) leaves this one mounted underneath.
+  const focused = useIsFocused();
+  const edits = useEdits(doc, handle, focused);
   const [reloaded, setReloaded] = useState(() => {
     const message = afterReload;
     afterReload = null;
@@ -205,7 +208,8 @@ export function Reader({
       else setReloaded(t.searchableDone);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      const failed = t.searchableFailed(m === 'denied' ? t.writeDenied : m);
+      const why = m === 'denied' ? t.writeDenied : /Could not write the text/.test(m) ? t.searchableNoWrite : /can.t be read here/.test(m) ? t.searchableNoPages : m;
+      const failed = t.searchableFailed(why);
       if (started && onReload) {
         afterReload = failed;
         onReload();
@@ -301,6 +305,8 @@ export function Reader({
     scrollX.current = Math.max(0, x);
     // Ignore scroll events emitted while content resizes; they'd corrupt the anchor.
     restored.current = false;
+    // A scroll put there, not read there: the browser's late scroll event after it isn't reading to the end.
+    jumpedAt.current = Date.now();
     go();
     // Again once the new size is laid out (across it can take a second frame).
     let raf = requestAnimationFrame(() => {
@@ -589,42 +595,48 @@ export function Reader({
     if (panel) return setPanel(null), true;
     return false;
   }, [noteRequest, menu, panel]);
-  useEffect(
-    () =>
-      onBack(() => {
-        if (closeSomething()) return true;
-        if (!edits.unsaved) return false;
-        edits.leave();
-        return true;
-      }),
-    [closeSomething, edits],
-  );
+  useEffect(() => {
+    if (!focused) return;
+    return onBack(() => {
+      if (closeSomething()) return true;
+      if (!edits.unsaved) return false;
+      edits.leave();
+      return true;
+    });
+  }, [closeSomething, edits, focused]);
 
   // ---------- keyboard + wheel (web) ----------
   useEffect(() => {
-    if (Platform.OS !== 'web' || !vp) return;
+    if (Platform.OS !== 'web' || !vp || !focused) return;
     const text = view === 'text';
     const sizeText = (f: number) => setPrefs({ textScale: clampText(f === 0 ? 1 : textScale * f) });
+    // Shortcuts with ⌘/Ctrl (and F3) are taken before a text field sees them: a field would keep them from the
+    // page (and the browser would find, save or print instead). Letters whatever Shift or Caps Lock say.
+    const onShortcut = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (useAsk.getState().request || !(mod || key === 'F3')) return;
+      if (mod && key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
+      // ⌘S saves edits when there are any; otherwise it downloads, as before.
+      if (mod && key === 's') return e.preventDefault(), void (edits.dirty || useDrafts.getState().field ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
+      if (mod && key === 'f') {
+        e.preventDefault();
+        setChrome(true);
+        return openFind(true);
+      }
+      if (mod && (key === '=' || key === '+')) return e.preventDefault(), text ? sizeText(1.1) : setZoom(zoom * 1.2);
+      if (mod && key === '-') return e.preventDefault(), text ? sizeText(1 / 1.1) : setZoom(zoom / 1.2);
+      if (mod && key === '0') return e.preventDefault(), text ? sizeText(0) : setZoom(1);
+      if ((mod && key === 'g') || key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
+    };
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       const target = e.target as HTMLElement | null;
       // Typing, or a form's checkbox or radio (Space ticks it).
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '') || !!target?.closest?.('.fl');
-      if (mod && e.key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
-      // ⌘S saves edits when there are any; otherwise it downloads, as before.
-      if (mod && e.key === 's') return e.preventDefault(), void (edits.dirty || useDrafts.getState().field ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
-      if (mod && e.key === 'f') {
-        e.preventDefault();
-        setChrome(true);
-        return openFind(true);
-      }
-      if (mod && (e.key === '=' || e.key === '+')) return e.preventDefault(), text ? sizeText(1.1) : setZoom(zoom * 1.2);
-      if (mod && e.key === '-') return e.preventDefault(), text ? sizeText(1 / 1.1) : setZoom(zoom / 1.2);
-      if (mod && e.key === '0') return e.preventDefault(), text ? sizeText(0) : setZoom(1);
-      if ((mod && e.key === 'g') || e.key === 'F3') return e.preventDefault(), stepHit(e.shiftKey ? -1 : 1);
+      // A question being asked has the keys (Esc answers it itself).
+      if (useAsk.getState().request || e.defaultPrevented) return;
       if (e.key === 'Escape') {
-        // A question being asked answers Esc itself.
-        if (useAsk.getState().request) return;
         if (closeSomething()) return;
         // A selection (its Highlight bubble) goes before the document does.
         const sel = window.getSelection();
@@ -647,8 +659,12 @@ export function Reader({
         ArrowRight: () => goToPage(page + 1),
         ArrowLeft: () => goToPage(page - 1),
         Home: () => goToPage(0),
-        // End means the end of the document, not the top of its last page.
-        End: () => (view === 'text' ? goToPage(handle.pageCount - 1) : scrollTo(Number.MAX_SAFE_INTEGER, false)),
+        // End means the end of the document, not the top of its last page; a jump there isn't reading to it.
+        End: () => {
+          jumpedAt.current = Date.now();
+          if (view === 'text') goToPage(handle.pageCount - 1);
+          else scrollTo(Number.MAX_SAFE_INTEGER, false);
+        },
         b: () => toggleBookmark(doc.id, page),
         v: () => switchView(view === 'page' ? 'text' : 'page'),
         t: () => (panel === 'find' ? setPanel(null) : openFind(false)),
@@ -682,16 +698,18 @@ export function Reader({
     const onMove = (e: MouseEvent) => {
       if (e.clientY < TOP_BAR + 24 || e.clientY > window.innerHeight - BOTTOM_BAR - 24) setChrome(true);
     };
+    window.addEventListener('keydown', onShortcut, true);
     window.addEventListener('keydown', onKey);
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('mousemove', onMove);
     return () => {
+      window.removeEventListener('keydown', onShortcut, true);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs]);
+  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs]);
 
   // ---------- pinch (native) ----------
   // The pages scale about where the fingers started; on release the zoom keeps that point there.
@@ -875,7 +893,7 @@ export function Reader({
           <IconButton icon="search" label={withShortcut(t.findShortcut, 'F')} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
           <IconButton
             icon="textView"
-            label={`${t.textView} (V)`}
+            label={withKey(t.textView, 'V')}
             active={view === 'text'}
             onPress={() => switchView(view === 'page' ? 'text' : 'page')}
             testID="view-toggle"

@@ -65,13 +65,33 @@ function dictAt(text: string, at: number): string {
 
 export type Trailer = { kind: 'table' | 'stream'; xref: number; size: number; root: string; id?: string; encrypted: boolean };
 
+/**
+ * Where a cross-reference section really starts: at the offset startxref gives, or (as readers repair it) just
+ * around it: whitespace before it, an offset a few bytes off. -1 when there is none there.
+ */
+function sectionNear(bytes: Uint8Array, xref: number): number {
+  const from = Math.max(0, xref - 64);
+  const near = latin1(bytes, from, Math.min(bytes.length, xref + 64));
+  const re = /(?<![a-z])xref\s|(?<!\d)\d+\s+\d+\s+obj\b/g;
+  let best = -1;
+  for (let m = re.exec(near); m; m = re.exec(near)) {
+    // The window may have cut an object's number: only whole ones count.
+    if (m[0][0] !== 'x' && m.index === 0 && from > 0 && /\d/.test(latin1(bytes, from - 1, from))) continue;
+    const pos = from + m.index;
+    if (best < 0 || Math.abs(pos - xref) < Math.abs(best - xref)) best = pos;
+  }
+  return best;
+}
+
 /** The newest cross-reference section: where it is, its kind, and what a following section must repeat. */
 export function readTrailer(bytes: Uint8Array): Trailer {
   const tail = latin1(bytes, Math.max(0, bytes.length - 2048));
   const sx = tail.lastIndexOf('startxref');
   if (sx < 0) throw new Error('Not a PDF (no startxref)');
-  const xref = Number(/startxref\s+(\d+)/.exec(tail.slice(sx))?.[1]);
-  if (!Number.isFinite(xref) || xref >= bytes.length) throw new Error('Broken startxref');
+  const given = Number(/startxref\s+(\d+)/.exec(tail.slice(sx))?.[1]);
+  if (!Number.isFinite(given) || given >= bytes.length) throw new Error('Broken startxref');
+  const xref = sectionNear(bytes, given);
+  if (xref < 0) throw new Error('Unreadable cross-reference');
   // Enough of the file after the section's start to hold its trailer or stream dictionary.
   const head = latin1(bytes, xref, Math.min(bytes.length, xref + (1 << 20)));
   let dict: string;

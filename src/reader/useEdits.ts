@@ -24,7 +24,7 @@ function commitField() {
  * to the user's own file when it was opened in place, to the library copy otherwise. `unsaved`: those, or text
  * still being typed (a field, the details), which leaving asks about too.
  */
-export function useEdits(doc: DocRecord, handle: DocHandle) {
+export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
   const [dirty, setDirty] = useState(false);
   const typed = useDrafts((s) => s.field || s.details);
   const unsaved = dirty || typed;
@@ -89,19 +89,21 @@ export function useEdits(doc: DocRecord, handle: DocHandle) {
   // Typed text belongs to this document only.
   useEffect(() => () => useDrafts.setState({ field: false, details: false }), []);
 
+  // Closing the tab: the browser's own "leave site?" prompt (also for a document another one was opened over).
   useEffect(() => {
     if (Platform.OS !== 'web' || !unsaved) return;
-    // Closing the tab: the browser's own "leave site?" prompt.
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener('beforeunload', warn);
-    // The browser's Back (and the Android app's, when the page doesn't answer it first) asks too.
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unsaved]);
+  // The browser's Back (and the Android app's, when the page doesn't answer it first) asks too: only the document
+  // in front holds it (another opened over it holds its own).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !unsaved || !focused) return;
     const unhold = holdBrowserBack(() => leaveRef.current());
     release.current = unhold;
-    return () => {
-      window.removeEventListener('beforeunload', warn);
-      unhold();
-    };
-  }, [unsaved]);
+    return () => unhold();
+  }, [unsaved, focused]);
 
   return { dirty, unsaved, markDirty, save, current, leave, notice, clearNotice };
 }

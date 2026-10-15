@@ -8,7 +8,7 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
+import { scanError, t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
 import { shell } from '@/lib/shell';
 import type { FilterId } from '@/scan/engine/imaging/filters';
@@ -97,9 +97,11 @@ export default function ScanReview() {
   const archive = usePrefs((s) => s.archive);
   const toInbox = !!archive && scanTo === INBOX_TARGET;
   const target = toInbox ? null : (roots.find((r) => r.id === scanTo) ?? null);
-  // The chips show (and set) the filter of the selected pages while selecting, else of all pages; none when they differ.
+  // The chips show (and set) the filter of the selected pages while selecting, else of all pages; none when they
+  // differ, or while selecting with nothing picked (then they do nothing, and say so).
   const scope = selected ? picked : pages;
-  const common = scope.length && scope.every((pg) => pg.spec.filter === scope[0].spec.filter) ? scope[0].spec.filter : scope.length ? null : scan.defaultFilter;
+  const nonePicked = !!selected && !picked.length;
+  const common = nonePicked ? null : scope.length && scope.every((pg) => pg.spec.filter === scope[0].spec.filter) ? scope[0].spec.filter : scope.length ? null : scan.defaultFilter;
   const columns = Math.max(2, Math.floor((Math.min(width, MAX_W) - space.xl * 2 + space.md) / (TILE_MIN + space.md)));
   const tile = (Math.min(width, MAX_W) - space.xl * 2 - space.md * (columns - 1)) / columns;
 
@@ -135,6 +137,10 @@ export default function ScanReview() {
 
   const save = async () => {
     if (useScanSaving.getState().controller || !pages.length) return;
+    // Write access to the folder is asked for now, while the tap still counts (after the pages are rendered and
+    // read it no longer would, and saving would fail at the very end).
+    const root = toInbox ? archive : target?.id;
+    if (root && !(await folders.unlock(root, true).catch(() => false))) return notify(t.scanSaveFailed(t.writeDenied));
     const controller = new AbortController();
     // Saved as it is now: an Undo offered before (a page deleted) can't change what is being written.
     sayScan(null);
@@ -154,7 +160,7 @@ export default function ScanReview() {
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
       else router.replace('/');
     } catch (e) {
-      if (!controller.signal.aborted) notify(t.scanSaveFailed(e instanceof Error ? e.message : String(e)));
+      if (!controller.signal.aborted) notify(t.scanSaveFailed(scanError(e)));
     } finally {
       useScanSaving.setState({ controller: null, progress: null });
     }
@@ -285,7 +291,7 @@ export default function ScanReview() {
               <T v="kicker" color={p.muted} style={styles.kicker}>
                 {t.scanFilter}
               </T>
-              <FilterChips value={common} onChange={setFilter} />
+              <FilterChips value={common} onChange={setFilter} disabled={nonePicked} />
 
               {!selected && (
               <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>

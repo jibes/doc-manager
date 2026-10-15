@@ -159,9 +159,9 @@ const browserFolders: FoldersApi = {
     return { id, name: handle.name, kind: 'folder' };
   },
   forget: (id) => del(id, store),
-  async unlock(id) {
+  async unlock(id, write = false) {
     const h = await folderHandle(id);
-    return (await h.requestPermission({ mode: 'read' })) === 'granted';
+    return (await h.requestPermission({ mode: write ? 'readwrite' : 'read' })) === 'granted';
   },
   async list(root, dir) {
     const out: FolderEntry[] = [];

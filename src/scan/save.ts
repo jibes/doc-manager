@@ -1,4 +1,5 @@
-import { aiMessage } from '@/i18n';
+import { aiMessage, t } from '@/i18n';
+import { anySignal } from '@/lib/signals';
 import { folders, type Place } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
 import type { DocRecord } from '@/storage';
@@ -9,6 +10,9 @@ import { processor, renderJob } from './services';
 import type { Page, ScanSettings } from './types';
 
 export type SaveProgress = { phase: 'render' | 'read' | 'ai'; done: number; total: number };
+
+/** How long AI reading may take: a few minutes, more for long documents. */
+const aiTime = (pages: number) => Math.min(15 * 60_000, 120_000 + pages * 30_000);
 
 /** Long edge of the page images sent for AI reading: models see about this much anyway. */
 const AI_EDGE = 1568;
@@ -54,7 +58,8 @@ export async function saveScan(
                 lines: pageLines(pdf.words ?? [], i).map((l) => ({ id: l.id, text: l.words.map((w) => w.text).join(' ') })),
               })),
             );
-            const reading = await readWithAi(ai, sent, signal);
+            // A model that doesn't answer in time leaves the scan with the device's text (not unsaved).
+            const reading = await readWithAi(ai, sent, anySignal([signal, AbortSignal.timeout(aiTime(done.length))]));
             done.forEach(({ pdf }, i) => (pdf.words = applyReading(pdf.words ?? [], i, reading.pages[i], pdf.pixelWidth, pdf.pixelHeight)));
             found = aiTitle(reading);
             return { author: reading.sender || undefined, subject: reading.type || undefined, keywords: reading.keywords, date: reading.date || undefined };
@@ -81,7 +86,7 @@ export async function saveScan(
     if (!doc) {
       const why = useLibrary.getState().error;
       library.clearError();
-      throw new Error(why ?? 'The document could not be kept.');
+      throw new Error(why ?? t.scanNotKept);
     }
     return { doc, aiError, unread };
   }

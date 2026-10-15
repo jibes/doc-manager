@@ -61,6 +61,17 @@ describe('document information by incremental update', () => {
     expect(text(bytes).match(/startxref/g)).toHaveLength(4);
   });
 
+  it('finds a section that startxref points just beside (as PDFium repairs it)', () => {
+    const body = '%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n';
+    const at = body.length;
+    for (const off of [at - 1, at + 2]) {
+      const pdf = new TextEncoder().encode(`${body}xref\n0 2\n0000000000 65535 f \n0000000009 00000 n \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n${off}\n%%EOF\n`);
+      expect(readTrailer(pdf)).toMatchObject({ kind: 'table', xref: at, size: 2, root: '1 0 R' });
+      // And details can go into it, pointing back at where the section really is.
+      expect(text(withInfo(pdf, { Title: 'x' }).subarray(pdf.length))).toMatch(new RegExp(`/Prev ${at}\\b`));
+    }
+  });
+
   it('leaves encrypted PDFs alone', () => {
     const body = '%PDF-1.4\n1 0 obj\n<<>>\nendobj\n';
     const pdf = new TextEncoder().encode(`${body}xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 2 /Root 1 0 R /Encrypt 5 0 R >>\nstartxref\n${body.length}\n%%EOF\n`);

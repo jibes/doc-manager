@@ -75,18 +75,29 @@ const fullYear = (yy: string, now: Date) => {
 /** Dates that aren't the document's: someone's birthday. */
 const BIRTH = /(?:geb\.?|geboren(?:\s+am)?|geburtsdatum:?|born(?:\s+on)?|date\s+of\s+birth:?|dob:?)\s*$/i;
 
+/** A year written with two digits is taken as at most this many years back ("1.2.34" is no date from 1934). */
+const SHORT_YEARS_BACK = 30;
+
 /** The first date in a text, as YYYY-MM-DD: 02.10.2026, 2.10.26, 2026-10-02, 2. Oktober 2026, October 2, 2026. */
 export function findDate(text: string, now = new Date()): string {
   const patterns: [RegExp, (m: RegExpExecArray) => string][] = [
     [/\b(\d{4})-(\d{2})-(\d{2})\b/, (m) => iso(+m[1], +m[2], +m[3], now)],
-    [/\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/, (m) => iso(fullYear(m[3], now), +m[2], +m[1], now)],
+    [/\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/, (m) => iso(+m[3], +m[2], +m[1], now)],
+    // Two-digit years: not inside a longer dotted number, nor after a version or number word ("Version 2.1.19").
+    [
+      /(?<![\d.])(?<!\b(?:version|vers|ver|v|rev|release|build|nr|no)\.?\s*)\b(\d{1,2})\.(\d{1,2})\.(\d{2})\b(?!\.\d)/i,
+      (m) => {
+        const y = fullYear(m[3], now);
+        return y >= now.getFullYear() - SHORT_YEARS_BACK ? iso(y, +m[2], +m[1], now) : '';
+      },
+    ],
     [/\b(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü]{3,9})\.?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[2])] ? iso(+m[3], MONTHS[fold(m[2])], +m[1], now) : '')],
     [/\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[1])] ? iso(+m[3], MONTHS[fold(m[1])], +m[2], now) : '')],
   ];
   // The earliest valid date in the text wins (letters put theirs near the top).
   let best = { at: Infinity, date: '' };
   for (const [re, toDate] of patterns) {
-    const global = new RegExp(re.source, 'g');
+    const global = new RegExp(re.source, `${re.flags}g`);
     for (let m = global.exec(text); m; m = global.exec(text)) {
       if (BIRTH.test(text.slice(Math.max(0, m.index - 24), m.index))) continue;
       const date = toDate(m);
@@ -123,21 +134,19 @@ export function pathFor(template: string, d: Details, fallback: { title: string;
     type: d.type,
     title: d.title || fallback.title,
   };
-  const parts = (template.trim() || DEFAULT_TEMPLATE)
-    .split('/')
-    .map((part) =>
-      safe(
-        part
-          .replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? values[key as keyof typeof values] : all))
-          // A missing value leaves no stray separators: "2026-10-02  – " → "2026-10-02", "A -  - B" → "A - B".
-          .replace(/(\s*[-–·_])(?:\s*[-–·_])+(?=\s|$)/g, '$1')
-          .replace(/\s*[-–·_]\s*$/, '')
-          .replace(/^\s*[-–·_]\s*/, ''),
-      ),
-    )
-    .filter(Boolean);
+  // A missing value goes with what joined it to the rest: "{date}_{type}_{title}" → "2026-10-02_Rechnung",
+  // "{title} - {sender}" → "Rechnung", "A - {type} - B" → "A - B".
+  const GAP = '\u0000';
+  const render = (part: string) =>
+    safe(
+      part
+        .replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? values[key as keyof typeof values] || GAP : all))
+        .replace(/(\s*[-–·_]\s*)?\u0000(\s*[-–·_]\s*)?/g, (_all, before?: string, after?: string) => (before && after ? before : ' ')),
+    );
+  const parts = (template.trim() || DEFAULT_TEMPLATE).split('/').map(render);
+  // The last part is the file's name; when it comes out empty, the title is (a folder never becomes the name).
   const name = parts.pop() || safe(fallback.title) || 'Document';
-  return [...parts, `${name.replace(/\.pdf$/i, '')}.pdf`];
+  return [...parts.filter(Boolean), `${name.replace(/\.pdf$/i, '')}.pdf`];
 }
 
 /** Rules as stored: anything malformed is dropped. */

@@ -16,7 +16,7 @@ import { readStored, writeStored } from '@/lib/stored';
 import { docKey } from '@/archive/shared';
 import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
-import { repo, type DocRecord, type ReadingPosition } from '@/storage';
+import { FILE_MOVED, repo, type DocRecord, type ReadingPosition } from '@/storage';
 
 /**
  * `handle` (Chromium) or `link` (a document in a folder, through the Android app): the file in place;
@@ -247,8 +247,10 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const doc = docs.find((d) => ids.includes(d.id));
       return doc && { doc, exact: true };
     };
-    if (item.link) return among((await repo.linkedTo([item.link])).get(item.link) ?? []);
-    if (item.handle) return among(await repo.linkedToHandle(item.handle).catch(() => []));
+    if (item.link || item.handle) {
+      const linked = item.link ? among((await repo.linkedTo([item.link])).get(item.link) ?? []) : among(await repo.linkedToHandle(item.handle!).catch(() => []));
+      return linked ?? (item.file ? await followed(item) : undefined);
+    }
     const named = (d: DocRecord) => d.bytes === item.size && sameOrRenamed(d.fileName, item.name);
     if (!item.file) {
       const doc = docs.find(named);
@@ -264,6 +266,29 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!d.shareKey) patch(d.id, (x) => ({ ...x, shareKey: k }));
       const doc = get().docs.find((x) => x.id === d.id);
       if (doc && k === key && startsWith(src.bytes, bytes)) return { doc, exact: src.bytes.byteLength === bytes.byteLength };
+    }
+    return undefined;
+  };
+
+  /**
+   * A document of this library that was moved or filed elsewhere (on another device, say), whose own file is gone:
+   * the same document (its share key) follows this file instead of a second one being made.
+   */
+  const followed = async (item: ImportItem): Promise<{ doc: DocRecord; exact: boolean } | undefined> => {
+    const linked = get().docs.filter((d) => d.linked && d.shareKey);
+    if (!linked.length) return undefined;
+    // The share key needs only the file's start.
+    const key = await docKey(await item.file!.slice(0, 65536).arrayBuffer());
+    for (const d of linked) {
+      if (d.shareKey !== key) continue;
+      const gone = await repo.source(d.id).then(
+        () => false,
+        (e: unknown) => e instanceof Error && e.message === FILE_MOVED,
+      );
+      if (!gone) continue;
+      await get().linkTo(d.id, item);
+      const doc = get().docs.find((x) => x.id === d.id);
+      if (doc) return { doc, exact: true };
     }
     return undefined;
   };
@@ -493,8 +518,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
     async followFiles(moves) {
       const linked = await repo.linkedTo(moves.map((m) => m.from));
       for (const [uri, ids] of linked) {
-        // The file itself, or one inside a moved folder: same path below the new place.
-        const m = moves.find((x) => uri === x.from || uri.startsWith(x.from));
+        // The file itself, or one inside a moved folder: same path below the new place ("Report" isn't "Report 2024.pdf").
+        const m = moves.find((x) => uri === x.from || uri.startsWith(`${x.from}/`) || uri.startsWith(`${x.from}%2F`));
         if (!m) continue;
         const to = m.to + uri.slice(m.from.length);
         for (const id of ids) {

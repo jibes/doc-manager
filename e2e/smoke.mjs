@@ -310,8 +310,11 @@ async function run(name, viewport, isMobile) {
 
   // Reaching the last page moves it to Finished.
   if (!isMobile) {
+    // End jumps there (not reading); scrolling down to the end from a screen above it is.
     await page.keyboard.press('End');
     await page.waitForTimeout(1200);
+    await page.keyboard.press('PageUp');
+    await page.waitForTimeout(600);
     await page.mouse.wheel(0, 4000);
     await page.waitForTimeout(1000);
     await page.keyboard.press('Escape');
@@ -638,7 +641,15 @@ async function regressions() {
   await page.evaluate(() => getSelection().removeAllRanges());
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-reading').click();
+  // End jumps there (as in books, a jump isn't reading); scrolling down to the end is.
   await page.keyboard.press('End');
+  await page.waitForTimeout(1000);
+  await page.keyboard.press('PageUp');
+  await page.waitForTimeout(400);
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('PageDown');
+    await page.waitForTimeout(300);
+  }
   await page.waitForTimeout(1000);
   await page.keyboard.press('Escape');
   await page.getByTestId('reading-list').waitFor();
@@ -2358,6 +2369,8 @@ async function scanner() {
       return r.every(Boolean) && r.map((x) => (x < 1 ? 'L' : 'P')).join('');
     }, null, { timeout: 60000 }).then((h) => h.jsonValue());
   await vis('scan-select').click();
+  const anyFilterOn = await page.locator('[data-testid^=scan-filter-][aria-checked=true]').locator('visible=true').count();
+  check((await vis('scan-filter-document').isDisabled()) && !anyFilterOn, 'scanner: with no page picked, the filters are off');
   await vis('scan-tile').nth(1).click();
   check((await vis('scan-selected').innerText()).includes('1 page'), 'scanner: select mode picks pages');
   await vis('bulk-rotate').click();
