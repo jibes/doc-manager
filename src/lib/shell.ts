@@ -12,6 +12,8 @@ type ShellApi = {
   request(id: string, method: string, args: string): void;
   hasLightSensor?(): boolean;
   light?(on: boolean): void;
+  /** Stops a request (an http one: its connection is closed). */
+  cancel?(id: string): void;
 };
 
 export const shell: ShellApi | undefined = typeof window !== 'undefined' ? (window as unknown as { TesselShell?: ShellApi }).TesselShell : undefined;
@@ -81,19 +83,30 @@ export async function stageForShell(file: Blob, name: string, mime: string): Pro
 
 let nextRequest = 0;
 
-/** Slower or interactive shell work (folders, permissions, writing back); see Bridge.request. */
-export function shellRequest<T>(method: string, args: object = {}): Promise<T> {
+/** Slower or interactive shell work (folders, permissions, writing back); see Bridge.request. `signal` stops it. */
+export function shellRequest<T>(method: string, args: object = {}, signal?: AbortSignal): Promise<T> {
   if (!shell) return Promise.reject(new Error('No shell'));
+  if (signal?.aborted) return Promise.reject(signal.reason);
   const id = `r${++nextRequest}`;
   return new Promise<T>((resolve, reject) => {
+    const done = () => {
+      window.removeEventListener('tessel-shell-reply', onReply);
+      signal?.removeEventListener('abort', onAbort);
+    };
     const onReply = (e: Event) => {
       const d = (e as CustomEvent<{ id: string; ok: boolean; value?: T; error?: string }>).detail;
       if (d?.id !== id) return;
-      window.removeEventListener('tessel-shell-reply', onReply);
+      done();
       if (d.ok) resolve(d.value as T);
       else reject(new Error(d.error ?? 'Failed'));
     };
+    const onAbort = () => {
+      done();
+      shell!.cancel?.(id);
+      reject(signal!.reason);
+    };
     window.addEventListener('tessel-shell-reply', onReply);
+    signal?.addEventListener('abort', onAbort, { once: true });
     shell!.request(id, method, JSON.stringify(args));
   });
 }

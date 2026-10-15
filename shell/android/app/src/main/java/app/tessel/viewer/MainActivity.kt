@@ -35,6 +35,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Tessel for Android: the web app, bundled in the APK and shown in a WebView, with native glue for
@@ -60,13 +61,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private var pendingSave: File? = null
+    /** Copies to where the user saves: off the main thread (a big PDF would freeze the app). */
+    private val saving = Executors.newSingleThreadExecutor()
     private val saver = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val file = pendingSave
+        val file = pendingSave ?: return@registerForActivityResult
         pendingSave = null
         val target = result.data?.data
-        if (result.resultCode == RESULT_OK && file != null && target != null) {
-            runCatching { contentResolver.openOutputStream(target)?.use { out -> file.inputStream().use { it.copyTo(out) } } }
-                .onFailure { Log.w(TAG, "save failed", it) }
+        saving.execute {
+            if (result.resultCode == RESULT_OK && target != null) {
+                runCatching { contentResolver.openOutputStream(target)?.use { out -> file.inputStream().use { it.copyTo(out) } } }
+                    .onFailure { Log.w(TAG, "save failed", it) }
+            }
+            file.delete()
         }
     }
 

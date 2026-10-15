@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's own pages never leave the APK; the only requests are AI reading's, to the address the user enters.
+     That may be a model on this device or the local network (Ollama, LM Studio) without https: allowed. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

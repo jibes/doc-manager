@@ -26,6 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.UUID
@@ -51,6 +52,11 @@ class Bridge(private val activity: MainActivity) {
     private val worker = Executors.newSingleThreadExecutor()
     /** Network requests (AI reading) take long; they don't hold up folder work. */
     private val network = Executors.newCachedThreadPool()
+    /** Copies for printing: never on the main thread (a big PDF would freeze the app). */
+    private val io = Executors.newSingleThreadExecutor()
+    /** Requests running (by the web app's id), to stop on cancel; ids cancelled before they started. */
+    private val calls = HashMap<String, okhttp3.Call>()
+    private val cancelled = HashSet<String>()
 
     /** Registers files from a VIEW/SEND intent; returns how many were usable. */
     fun accept(uris: List<Uri>): Int {
@@ -73,6 +79,12 @@ class Bridge(private val activity: MainActivity) {
             synchronized(this) {
                 incoming[id] = Incoming(uri, name, size, type)
                 unclaimed += id
+                // The app keeps what it opened: older files aren't fetched again, so only the latest few are known.
+                while (incoming.size > KEEP_INCOMING) {
+                    val eldest = incoming.keys.first()
+                    if (eldest in unclaimed) break
+                    incoming.remove(eldest)
+                }
             }
             n++
         }
@@ -137,7 +149,7 @@ class Bridge(private val activity: MainActivity) {
             // Interactive: answered when the user comes back from the system screen.
             "pickFolder" -> activity.runOnUiThread { activity.pickFolder { tree -> done(tree?.let { JSONObject().put("uri", it.toString()).put("name", folders.treeName(it)) }) } }
             "requestAllFiles" -> activity.runOnUiThread { activity.requestAllFiles { done(it) } }
-            "http" -> network.execute { runCatching { http(a) }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) } }
+            "http" -> network.execute { runCatching { http(id, a) }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) } }
             else -> worker.execute {
                 runCatching<Any?> {
                     when (method) {
@@ -181,22 +193,43 @@ class Bridge(private val activity: MainActivity) {
         }
     }
 
+    /** Stops a request the web app no longer waits for (AI reading cancelled): its connection closes. */
+    @JavascriptInterface
+    fun cancel(id: String) {
+        val call = synchronized(calls) { calls[id].also { if (it == null) cancelled += id } }
+        call?.cancel()
+    }
+
     /**
      * An HTTPS request made by the app rather than the WebView: AI reading goes to an address the user chose,
      * and the WebView's page origin (this app's own host) is one that address's CORS rules don't know.
      * {url, method, headers, body} → {status, body}.
      */
-    private fun http(a: JSONObject): JSONObject {
+    private fun http(id: String, a: JSONObject): JSONObject {
         val url = a.getString("url").toHttpUrlOrNull() ?: throw IllegalArgumentException("Not a web address")
         val headers = a.optJSONObject("headers")
-        val body = if (a.has("body")) a.getString("body").toRequestBody(headers?.optString("content-type")?.ifEmpty { null }?.toMediaTypeOrNull()) else null
-        val request = Request.Builder().url(url).method(a.optString("method", "POST"), body).apply {
+        val method = a.optString("method", "POST").uppercase()
+        val type = headers?.optString("content-type")?.ifEmpty { null }?.toMediaTypeOrNull()
+        val body = when {
+            a.has("body") -> a.getString("body").toRequestBody(type)
+            // OkHttp wants a body for these, if an empty one.
+            method in setOf("POST", "PUT", "PATCH") -> ByteArray(0).toRequestBody(type)
+            else -> null
+        }
+        val request = Request.Builder().url(url).method(method, body).apply {
             headers?.keys()?.forEach { k -> header(k, headers.getString(k)) }
         }.build()
+        val call = client.newCall(request)
+        synchronized(calls) {
+            if (cancelled.remove(id)) throw IOException("Canceled")
+            calls[id] = call
+        }
         try {
-            client.newCall(request).execute().use { r -> return JSONObject().put("status", r.code).put("body", r.body?.string() ?: "") }
+            call.execute().use { r -> return JSONObject().put("status", r.code).put("body", r.body?.string() ?: "") }
         } catch (e: UnknownHostException) {
             throw UnknownHostException("Can't find ${url.host}: neither this device's DNS nor Cloudflare's knows it. If a browser on this device reaches it, check that Tessel may use the network (app info, firewall or VPN apps).")
+        } finally {
+            synchronized(calls) { calls.remove(id) }
         }
     }
 
@@ -216,7 +249,16 @@ class Bridge(private val activity: MainActivity) {
             .readTimeout(300, TimeUnit.SECONDS)
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =
-                    try { Dns.SYSTEM.lookup(hostname) } catch (e: UnknownHostException) { doh.lookup(hostname) }
+                    try {
+                        Dns.SYSTEM.lookup(hostname)
+                    } catch (e: UnknownHostException) {
+                        try {
+                            doh.lookup(hostname)
+                        } catch (d: IOException) {
+                            // Cloudflare out of reach too (blocked, offline): as unknown as the system said.
+                            throw UnknownHostException(hostname).apply { initCause(d) }
+                        }
+                    }
             })
             .build()
     }
@@ -260,11 +302,25 @@ class Bridge(private val activity: MainActivity) {
                 cb.onLayoutFinished(PrintDocumentInfo.Builder(file.name).setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).build(), true)
             }
 
+            // Called on the main thread; the copy runs elsewhere (callbacks may be answered from any thread).
             override fun onWrite(pages: Array<out PageRange>?, dest: ParcelFileDescriptor, cancel: CancellationSignal?, cb: WriteResultCallback) {
-                runCatching {
-                    file.inputStream().use { input -> FileOutputStream(dest.fileDescriptor).use { input.copyTo(it) } }
-                }.onSuccess { cb.onWriteFinished(arrayOf(PageRange.ALL_PAGES)) }.onFailure { cb.onWriteFailed(it.message) }
+                io.execute {
+                    runCatching {
+                        file.inputStream().use { input -> FileOutputStream(dest.fileDescriptor).use { input.copyTo(it) } }
+                    }.onSuccess {
+                        if (cancel?.isCanceled == true) cb.onWriteCancelled() else cb.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                    }.onFailure { cb.onWriteFailed(it.message) }
+                }
+            }
+
+            override fun onFinish() {
+                io.execute { file.delete() }
             }
         }, PrintAttributes.Builder().build())
+    }
+
+    private companion object {
+        /** Files from other apps known at a time (see accept). */
+        const val KEEP_INCOMING = 16
     }
 }

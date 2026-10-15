@@ -1,6 +1,6 @@
 // Finalises `expo export -p web` output for static hosting under EXPO_BASE_URL:
 // prefixes our hand-written absolute links in index.html, preloads the fonts, and adds a 404.html SPA fallback.
-import { copyFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const base = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
 // dist for the website; the Android app bundles its own export (OUT_DIR, base "").
@@ -20,5 +20,9 @@ const html = readFileSync(file, 'utf8')
   .replace('</head>', `${fonts}</head>`);
 writeFileSync(file, html);
 copyFileSync(file, `${out}/404.html`);
+// The offline cache is this build's own (see public/sw.js): named by the version and when it was built.
+const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+const sw = `${out}/sw.js`;
+if (existsSync(sw)) writeFileSync(sw, readFileSync(sw, 'utf8').replace("const CACHE = 'tessel-dev';", `const CACHE = 'tessel-${version}-${Date.now().toString(36)}';`));
 writeFileSync(`${out}/.nojekyll`, '');
 console.log(`postexport: base="${base || '/'}"`);

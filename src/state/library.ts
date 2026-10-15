@@ -162,6 +162,24 @@ async function importBook(item: ImportItem, source: DocSource, set: (fn: (s: Lib
   return rec;
 }
 
+/** When moving copies into the Tessel folder last failed; tried again after a day. */
+const MOVE_FAILED = 'tessel.moveCopiesFailed';
+const MOVE_RETRY_MS = 86_400_000;
+const readStored = (key: string) => {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+const writeStored = (key: string, value: string) => {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+  } catch {
+    // Tried again next start.
+  }
+};
+
 const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.openedAt ?? a.addedAt);
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -196,22 +214,33 @@ export const useLibrary = create<LibraryState>((set, get) => {
     }, 600);
   };
 
-  /** Android app, once per document: copies kept inside the app by earlier versions move to Documents/Tessel. */
+  /**
+   * Android app, once per document: copies kept inside the app by earlier versions move to Documents/Tessel. When
+   * the folder can't be written, not again for a day (each try reads every copy).
+   */
   const moveCopies = async () => {
+    const failedAt = Number(readStored(MOVE_FAILED) ?? 0);
+    if (Date.now() - failedAt < MOVE_RETRY_MS) return;
     const app = await folders.appFolder().catch(() => null);
     if (!app) return;
     for (const d of get().docs) {
       if (d.linked || d.fileName === SAMPLE_FILE) continue;
+      let src;
       try {
-        const src = await repo.source(d.id);
-        if (src.kind !== 'bytes') continue;
+        src = await repo.source(d.id);
+      } catch {
+        continue;
+      }
+      if (src.kind !== 'bytes') continue;
+      try {
         const type = /\.epub$/i.test(d.fileName) ? 'application/epub+zip' : 'application/pdf';
         const made = await folders.create({ root: app.id }, d.fileName, new Blob([src.bytes], { type }));
         if (!made.uri) continue;
         await repo.relink(d.id, made.uri);
         patch(d.id, (x) => ({ ...x, linked: true, fileName: made.name }));
       } catch {
-        // Tried again on the next start.
+        writeStored(MOVE_FAILED, String(Date.now()));
+        return;
       }
     }
   };
@@ -292,7 +321,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         const label = item.name;
         set((s) => ({ importing: [...s.importing, label] }));
         try {
-          item = await intoAppFolder(item);
+          // Into the Tessel folder where it can go; else the library keeps its copy (as settle does).
+          item = await intoAppFolder(item).catch(() => item);
           const source = item.file
             ? ({ kind: 'bytes', bytes: await item.file.arrayBuffer() } as const)
             : ({ kind: 'uri', uri: item.uri! } as const);

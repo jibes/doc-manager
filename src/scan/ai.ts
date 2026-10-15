@@ -134,9 +134,8 @@ export function parseResult(text: string, pageCount: number): AiResult {
  */
 async function post(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
   if (!shell) return fetch(url, { method: 'POST', ...init });
-  init.signal?.throwIfAborted();
-  const aborted = new Promise<never>((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true }));
-  const r = await Promise.race([shellRequest<{ status: number; body: string }>('http', { url, method: 'POST', headers: init.headers, body: init.body }), aborted]);
+  // Stopped, the app closes the connection too (no upload goes on unseen).
+  const r = await shellRequest<{ status: number; body: string }>('http', { url, method: 'POST', headers: init.headers, body: init.body }, init.signal);
   return new Response(r.body, { status: r.status });
 }
 
