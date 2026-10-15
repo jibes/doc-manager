@@ -39,10 +39,20 @@ tap_until() {
 }
 # Visible texts and descriptions, for the log.
 screen() { ui | sed 's/></>\n</g' | grep -Eo '(text|content-desc)="[^"]+"'; }
+# Bounds of the first (or, with "last", the last) node whose text or description matches $1. A dump can fail on a
+# busy screen (the camera's moving picture): it is tried again before giving up.
+bounds_of() {
+  local b pick="${2:-head}"
+  for _ in 1 2 3; do
+    b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | { if [ "$pick" = last ]; then tail -1; else head -1; fi; } | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ' || true)
+    [ -n "$b" ] && { echo "$b"; return 0; }
+    sleep 2
+  done
+}
 # Taps the centre of the first node whose text or description matches $1.
 tap() {
   local b
-  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | head -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ' || true)
+  b=$(bounds_of "$1")
   [ -n "$b" ] || { echo "Nothing to tap for: $1"; screen | head -40; return 1; }
   set -- $b
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
@@ -57,7 +67,7 @@ on_device() {
 # Taps the last match instead (a dialog's button over the screen's own).
 tap_last() {
   local b
-  b=$(ui | sed 's/></>\n</g' | grep -E "(text|content-desc)=\"[^\"]*$1" | tail -1 | grep -Eo 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -Eo '[0-9]+' | tr '\n' ' ' || true)
+  b=$(bounds_of "$1" last)
   [ -n "$b" ] || { echo "Nothing to tap for: $1"; screen | head -40; return 1; }
   set -- $b
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))

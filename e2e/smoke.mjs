@@ -519,6 +519,7 @@ async function annotations() {
   const listed = (await rows.count()) === 2 && /Every PDF you open/.test(await rows.nth(0).innerText()) && /Try dragging a file in/.test(await rows.nth(1).innerText());
   check(listed, 'annotations: highlight and note listed with their text');
   await rows.nth(1).getByTestId('note-edit').click();
+  await page.getByTestId('note-dialog').waitFor();
   check((await page.getByRole('dialog', { name: 'Note' }).count()) === 1, 'annotations: the note is edited in a dialog');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
