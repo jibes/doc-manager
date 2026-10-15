@@ -210,7 +210,12 @@ sleep 2
 adb exec-out screencap -p > "$OUT/10-captured.png"
 if ui | grep -q "Full photo"; then tap "Cancel"; sleep 2; fi
 wait_for "Done, review"
-tap "Done, review"
+# Auto-capture may still be adding pages (each with a flash and a message): tap again if the first one is lost.
+for _ in 1 2 3; do
+  ui | grep -q 'Recognise text' && break
+  tap "Done, review" || true
+  sleep 4
+done
 wait_for "Recognise text"
 adb exec-out screencap -p > "$OUT/11-review.png"
 tap_last "Save"  # not "Save to" above it

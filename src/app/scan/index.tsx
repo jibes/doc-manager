@@ -10,6 +10,9 @@ import { Camera } from '@/scan/ui/Camera';
 import { usePrefs } from '@/state/prefs';
 import { Unsupported } from '@/scan/ui/Unsupported';
 
+/** Height of the camera's controls (shutter, import, Done) over the bottom edge, which messages stay clear of. */
+const CONTROLS_H = 100;
+
 /** The camera. `retake`: the photo replaces that page's; `from=review`: closing goes back to the document. */
 export default function ScanCamera() {
   const { retake, from } = useLocalSearchParams<{ retake?: string; from?: string }>();
@@ -51,7 +54,8 @@ export default function ScanCamera() {
         onRetaken={retaken}
         say={say}
       />
-      {focused && <Toast message={message} onDismiss={dismiss} />}
+      {/* Above the shutter and Done (a message must never be in the way of taking or finishing). */}
+      {focused && <Toast message={message} onDismiss={dismiss} above={CONTROLS_H} />}
     </View>
   );
 }
