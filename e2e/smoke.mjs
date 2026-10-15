@@ -1418,8 +1418,9 @@ async function foldersShell() {
   await vis('docs-filter').click();
   await page.getByTestId('action-facet-place').click();
   await page.getByTestId('action-place-device').click();
-  await page.waitForTimeout(300);
-  const device = await vis('archive-hit').allInnerTexts();
+  // The file was kept there a moment ago: the index may still be reading it.
+  let device = [];
+  for (let i = 0; i < 60 && !device.length; i++) device = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
   check(device.length === 1 && device[0].includes('This device'), `folders-shell: a file in the Tessel folder is on This device (${device.map((h) => h.replace(/\n/g, ' · '))})`);
   await vis('facet-place').click();
   await page.getByTestId('action-place-any').click().catch(() => {});
