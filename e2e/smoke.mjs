@@ -1628,6 +1628,18 @@ async function searchArchive() {
   const hidden = await hits('Annual');
   check(hidden.every((x) => !/old/.test(x)), 'search: hidden folders (.stversions) are left out');
 
+  // Moved elsewhere (as another device or a file manager would): found there, by its text, as before.
+  await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    const file = await (await root.getDirectoryHandle('2026')).getFileHandle('columns.pdf');
+    await file.move(await root.getDirectoryHandle('2027', { create: true }));
+  });
+  await page.goto(BASE);
+  await openDocs(page);
+  let moved = [];
+  for (let i = 0; i < 30 && !moved.some((x) => /2027/.test(x)); i++) moved = await hits('Orderly');
+  check(moved.length === 1 && /2027/.test(moved[0]), `search: a moved document is found where it is now (${moved.map((x) => x.replace(/\n/g, ' / '))})`);
+
   // Opening a hit: at its page, with the query highlighted.
   await hits('Orderly');
   await vis('archive-hit').first().click();

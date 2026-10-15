@@ -7,6 +7,8 @@ export type SearchRequest = { id: number } & (
   | { type: 'put'; doc: Indexable }
   /** Details changed, not the text (where it is): stored, not indexed again. */
   | { type: 'meta'; doc: IndexedDoc }
+  /** A file moved or renamed (a new key): its text goes along under the new key, not read again. */
+  | { type: 'rekey'; from: string; doc: IndexedDoc }
   | { type: 'drop'; keys: string[] }
   /** Every match, best first; the words around it for the first `snippets` only (the rest: `snippets` below). */
   | { type: 'search'; query: string; snippets?: number }

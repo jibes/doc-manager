@@ -122,6 +122,17 @@ async function handle(req: SearchRequest | { id: 0; type: 'save' }): Promise<unk
     case 'meta':
       await set(req.doc.key, req.doc, metaStore);
       return;
+    case 'rekey': {
+      const [pages] = await getMany<string[] | undefined>([req.from], textStore);
+      await Promise.all([delMany([req.from], metaStore), delMany([req.from], textStore)]);
+      change(req.from);
+      if (pages) {
+        await Promise.all([set(req.doc.key, req.doc, metaStore), set(req.doc.key, pages, textStore)]);
+        change({ ...req.doc, pages });
+      }
+      noteChanged([req.from, req.doc.key]);
+      return Boolean(pages);
+    }
     case 'drop':
       await Promise.all([delMany(req.keys, metaStore), delMany(req.keys, textStore)]);
       for (const key of req.keys) change(key);

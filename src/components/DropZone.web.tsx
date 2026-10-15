@@ -35,10 +35,12 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
       if (!depth.current) setOver(false);
     };
     const overFn = (e: DragEvent) => hasFiles(e) && e.preventDefault();
+    // Only files are taken (text dragged into a field drops there as usual).
     const drop = (e: DragEvent) => {
-      e.preventDefault();
       depth.current = 0;
       setOver(false);
+      if (!hasFiles(e)) return;
+      e.preventDefault();
       // Handles must be requested synchronously, inside the drop event; they let the file open in place.
       const dt = e.dataTransfer;
       const files = [...(dt?.files ?? [])];

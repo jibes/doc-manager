@@ -124,6 +124,21 @@ function moved(doc: IndexedDoc) {
   changedNow();
 }
 
+/** A file moved or renamed: its record (and, in the worker, its text) under its new key. */
+function rekey(from: IndexedDoc, to: Candidate) {
+  const doc: IndexedDoc = { ...from, key: to.key, place: to.place, name: to.name };
+  docs.delete(from.key);
+  docs.set(doc.key, doc);
+  // Its text wasn't there after all: it is read like a new one on the next pass.
+  const unread = () => {
+    if (docs.get(doc.key) !== doc) return;
+    docs.delete(doc.key);
+    schedule(1000);
+  };
+  void ask<boolean>({ type: 'rekey', from: from.key, doc }).then((moved) => moved || unread(), unread);
+  changedNow();
+}
+
 function drop(keys: string[]) {
   if (!keys.length) return;
   for (const key of keys) docs.delete(key);
@@ -377,7 +392,17 @@ async function run(): Promise<void> {
   const list = listed.filter((c) => !settledSince(c.key, started));
   useIndex.setState({ conflicts: conflicts.filter((c) => !settledSince(conflictKey(c), started)) });
   const seen = new Set(list.map((c) => c.key));
-  drop([...docs.values()].filter((d) => !seen.has(d.key) && !inUnlisted(d, unlisted)).map((d) => d.key));
+  const gone = [...docs.values()].filter((d) => !seen.has(d.key) && !inUnlisted(d, unlisted));
+  // Moved or renamed (a new key, the same size and time as a file gone): its text goes along, not read again.
+  const stamp = (x: { size: number; modified: number }) => `${x.size}:${x.modified}`;
+  const movable = new Map(gone.filter((d) => d.place.kind === 'folder' && d.modified > 0 && !d.failed && d.hash).map((d) => [stamp(d), d]));
+  for (const c of list) {
+    const was = docs.has(c.key) ? undefined : movable.get(stamp(c));
+    if (!was) continue;
+    movable.delete(stamp(c));
+    rekey(was, c);
+  }
+  drop(gone.filter((d) => docs.has(d.key)).map((d) => d.key));
   const todo = list.filter((c) => {
     const known = docs.get(c.key);
     // Records from before content hashes are read again once.
