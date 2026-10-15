@@ -238,7 +238,10 @@ export function openAiReply(raw: string): string {
   };
   const stream = events(raw) as { choices?: Choice[]; error?: { message?: string } }[] | null;
   if (!stream) {
-    const choice = (JSON.parse(raw) as { choices?: Choice[] }).choices?.[0];
+    const whole = JSON.parse(raw) as { choices?: Choice[]; error?: { message?: string } };
+    // Some servers answer 200 with only an error.
+    if (whole.error) throw new Error(whole.error.message ?? AI_SERVER);
+    const choice = whole.choices?.[0];
     if (choice?.message?.refusal) throw new Error(AI_DECLINED);
     if (choice?.finish_reason === 'length') throw new Error(AI_CUT_OFF);
     return choice?.message?.content ?? '';
@@ -258,9 +261,16 @@ const trimSlash = (url: string) => url.trim().replace(/\/+$/, '');
 
 /**
  * A rejection worth another try without the structured output: the server names that part of the request (an
- * image it can't take, or a bad key or model, says nothing of these).
+ * image it can't take, or a bad key or model, says nothing of these). As a status, or as an error in a reply
+ * that started fine ("does not support JSON schema mode", sent in the stream).
  */
-const FORMAT_REJECTED = /output_config|response_format|json_schema|json_object|structured[ _]outputs?|guided_(?:json|grammar)|\bgrammar\b/i;
+const FORMAT_REJECTED = /output_config|response_format|json[ _]schema|json[ _]object|json mode|structured[ _]outputs?|guided_(?:json|grammar)|\bgrammar\b/i;
+/** Rejected for its output format, however the server said it. */
+const formatRejected = (e: unknown) => e instanceof Error && FORMAT_REJECTED.test(e.message);
+
+/** The output format each address and model took last time (index into the formats tried): later requests start there. */
+const formatTaken = new Map<string, number>();
+const modelKey = (s: AiSettings) => `${s.api}|${trimSlash(s.url)}|${s.model.trim()}`;
 /** A rejected output length: the model's own maximum, when the server says it. */
 const LENGTH_REJECTED = /max_tokens/i;
 /** Room for thinking and every line of every page given back (a stream allows this much); less where a model allows less. */
@@ -298,7 +308,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
   let last = '';
   // A model or server without structured output gets the request again without it (the prompt asks for JSON
   // anyway); one that allows a shorter reply, again with that length.
-  let structured = true;
+  let structured = formatTaken.get(modelKey(s)) !== 1;
   let length = 0;
   for (let tries = 0; tries < 5; tries++) {
     // With or without the /v1 that OpenAI-style addresses carry.
@@ -314,7 +324,15 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
     });
     if (res.ok) {
       const raw = await res.text();
-      return asReply(() => anthropicReply(raw));
+      try {
+        const text = asReply(() => anthropicReply(raw));
+        formatTaken.set(modelKey(s), structured ? 0 : 1);
+        return text;
+      } catch (e) {
+        if (!structured || !formatRejected(e)) throw e;
+        structured = false;
+        continue;
+      }
     }
     const said = await res.text().catch(() => '');
     last = `${res.status} ${said.slice(0, 200)}`;
@@ -335,17 +353,26 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
       stream: true,
       ...(format ? { response_format: format } : {}),
     });
+  // The schema itself where the model takes it; else plain JSON (the prompt describes it); else no format at all.
   const formats = [{ type: 'json_schema', json_schema: { name: 'document', strict: true, schema: req.schema } }, { type: 'json_object' }, null];
   let last = '';
-  for (const format of formats) {
+  for (let i = formatTaken.get(modelKey(s)) ?? 0; i < formats.length; i++) {
     const res = await post(`${trimSlash(s.url)}/chat/completions`, {
       headers: { 'content-type': 'application/json', ...(s.key ? { authorization: `Bearer ${s.key}` } : {}) },
-      body: body(format),
+      body: body(formats[i]),
       signal,
     });
     if (res.ok) {
       const raw = await res.text();
-      return asReply(() => openAiReply(raw));
+      try {
+        const text = asReply(() => openAiReply(raw));
+        formatTaken.set(modelKey(s), i);
+        return text;
+      } catch (e) {
+        // Rejected only once the reply had started (the error in the stream): the next format, too.
+        if (i < formats.length - 1 && formatRejected(e)) continue;
+        throw e;
+      }
     }
     const said = await res.text().catch(() => '');
     last = `${res.status} ${said.slice(0, 200)}`;

@@ -37,7 +37,7 @@ import { useThrottled } from '@/lib/useThrottled';
 import { inboxDir, refreshInboxCount } from '@/archive/inbox';
 import { docKey } from '@/archive/shared';
 import { folders } from '@/lib/folders';
-import { makeSearchable, pagesWithoutText } from '@/archive/searchable';
+import { anyPageWithoutText, makeSearchable, pagesWithoutText } from '@/archive/searchable';
 import type { Details } from '@/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
 import { DetailsPanel } from './DetailsPanel';
@@ -56,6 +56,10 @@ import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Scrubber } from './Scrubber';
+
+/** Pages looked at for missing text (as many as the search index reads), and when the ones after the first are. */
+const PAGES_LOOKED_AT = 200;
+const LOOK_LATER_MS = 2000;
 
 type PanelName = 'find' | 'appearance' | 'details' | null;
 
@@ -207,13 +211,16 @@ export function Reader({
     else setReloaded(t.keptInArchive);
   };
 
-  // An image-only PDF (no text on its first page) can get its text read and added.
+  // A PDF with pages without text (a scan, or scanned pages after typed ones) can get their text read and added.
   const [textless, setTextless] = useState(false);
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || doc.format === 'epub') return;
     let alive = true;
-    pagesWithoutText(handle, 1).then((pages) => alive && setTextless(pages.length > 0), () => {});
+    // The first page at once; the others once the first pages are drawn.
+    pagesWithoutText(handle, 1)
+      .then((first) => first.length > 0 || new Promise<void>((r) => setTimeout(r, LOOK_LATER_MS)).then(() => anyPageWithoutText(handle, PAGES_LOOKED_AT, () => !alive)))
+      .then((any) => alive && setTextless(any), () => {});
     return () => {
       alive = false;
     };

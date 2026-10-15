@@ -33,14 +33,26 @@ async function withOcr<T>(fn: (c: OcrClient) => Promise<T>): Promise<T> {
   }
 }
 
+const textless = async (handle: DocHandle, page: number) =>
+  (await handle.pageText(page).catch(() => [])).reduce((n, r) => n + r.text.trim().length, 0) < MIN_CHARS;
+
 /** The pages (of the first `limit`) that have no text of their own. */
 export async function pagesWithoutText(handle: DocHandle, limit = Infinity): Promise<number[]> {
   const out: number[] = [];
-  for (let p = 0; p < Math.min(limit, handle.pageCount); p++) {
-    const runs = await handle.pageText(p).catch(() => []);
-    if (runs.reduce((n, r) => n + r.text.trim().length, 0) < MIN_CHARS) out.push(p);
-  }
+  for (let p = 0; p < Math.min(limit, handle.pageCount); p++) if (await textless(handle, p)) out.push(p);
   return out;
+}
+
+/**
+ * Whether any of the first `limit` pages has no text (a scan, or scanned pages after typed ones), stopping at
+ * the first; `stop` ends the search (the document was closed).
+ */
+export async function anyPageWithoutText(handle: DocHandle, limit: number, stop?: () => boolean): Promise<boolean> {
+  for (let p = 0; p < Math.min(limit, handle.pageCount); p++) {
+    if (stop?.()) return false;
+    if (await textless(handle, p)) return true;
+  }
+  return false;
 }
 
 /** Reads one page: its words, with boxes normalized to the page as shown. */

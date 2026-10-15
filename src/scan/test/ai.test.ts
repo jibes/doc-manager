@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -123,5 +123,36 @@ describe('replies', () => {
     expect(aiInsecure({ ...s, url: 'https://example.com' })).toBe(false);
     expect(() => parseResult('no json here', 1)).toThrow(AI_NO_JSON);
     expect(() => parseResult('{"title": "A", "pages": [', 1)).toThrow(AI_NO_JSON);
+  });
+});
+
+describe('output formats', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const answer = JSON.stringify({ title: 'Rechnung 40217', date: '', sender: 'Musterwerke Zürich', type: '', keywords: [] });
+  const sse = (e: object) => `data: ${JSON.stringify(e)}\n\ndata: [DONE]\n\n`;
+  // A server that starts the reply, then says in the stream that the model can't follow a JSON schema.
+  const server = () => {
+    const sent: { response_format?: { type: string } }[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { response_format?: { type: string } };
+      sent.push(body);
+      if (body.response_format?.type === 'json_schema')
+        return new Response(sse({ error: { message: "The model 'deepseek-v4.1-flash' does not support JSON schema mode. Use 'json_object' mode instead, or choose a model that supports structured outputs." } }));
+      return new Response(sse({ choices: [{ delta: { content: answer } }] }));
+    });
+    return sent;
+  };
+
+  it('fall back to plain JSON when the model rejects the schema inside the reply, and start there next time', async () => {
+    const sent = server();
+    const s = { api: 'openai' as const, url: 'https://ai.test/v1', key: 'k', model: 'deepseek-v4.1-flash' };
+    expect((await describeWithAi(s, 'text')).sender).toBe('Musterwerke Zürich');
+    expect(sent.map((b) => b.response_format?.type)).toEqual(['json_schema', 'json_object']);
+    await describeWithAi(s, 'text');
+    expect(sent.map((b) => b.response_format?.type)).toEqual(['json_schema', 'json_object', 'json_object']);
+  });
+
+  it('read an error sent with a 200 as the error', () => {
+    expect(() => openAiReply(JSON.stringify({ error: { message: 'Model not found' } }))).toThrow('Model not found');
   });
 });

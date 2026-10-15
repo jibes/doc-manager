@@ -1959,6 +1959,25 @@ async function searchable() {
   check((await page.getByTestId('menu-searchable').count()) === 0, 'searchable: and is no longer offered for it');
   await page.keyboard.press('Escape');
 
+  // Typed pages, then a scanned one: offered all the same (looked for once the first pages are drawn).
+  await page.goto(BASE);
+  const [mixed] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  await mixed.setFiles(new URL('./fixtures/mixed.pdf', import.meta.url).pathname);
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(3500);
+  await page.getByTestId('open-more').click();
+  const offered = (await page.getByTestId('menu-searchable').count()) === 1;
+  check(offered, 'searchable: offered for a document whose later pages are scans');
+  if (offered) {
+    await page.getByTestId('menu-searchable').click();
+    await page.getByText('Text added: the document can now be searched, selected and copied.').waitFor({ timeout: 180000 });
+    await page.getByTestId('open-find').click();
+    await page.getByTestId('search-input').fill('quick brown');
+    const found = await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 15000 }).then(() => true, () => false);
+    check(found, 'searchable: …and its scanned page can then be searched');
+    await page.keyboard.press('Escape');
+  } else await page.keyboard.press('Escape');
+
   // The inbox reads an image-only document's first page for its details, and files it searchable.
   const b64 = readFileSync(new URL('./fixtures/scan.pdf', import.meta.url)).toString('base64');
   await page.evaluate(async (data) => {
