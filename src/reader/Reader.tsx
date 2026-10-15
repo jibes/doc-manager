@@ -840,7 +840,7 @@ export function Reader({
         pointerEvents={chromeShown ? 'box-none' : 'none'}
         style={[styles.top, { paddingTop: insets.top, height: insets.top + TOP_BAR, backgroundColor: p.glass, borderColor: p.hairline }, topStyle]}
       >
-        <IconButton icon="back" label={t.library} onPress={edits.leave} testID="back" />
+        <IconButton icon="back" label={t.back} onPress={edits.leave} testID="back" />
         <View style={styles.titleWrap}>
           <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15, letterSpacing: -0.2 }}>
             {doc.title}

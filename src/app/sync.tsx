@@ -7,6 +7,7 @@ import { openDoc, whereIs } from '@/archive/Results';
 import type { IndexedDoc } from '@/archive/search';
 import { duplicates } from '@/archive/sync';
 import { discard, trashes } from '@/archive/trash';
+import { goTab } from '@/components/AppNav';
 import { Icon } from '@/components/Icon';
 import { Button, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -119,7 +120,7 @@ export default function Sync() {
     <View style={{ flex: 1, backgroundColor: p.canvas }}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4, gap: space.lg }}>
-          <ScreenHeader title={t.syncTitle} />
+          <ScreenHeader title={t.syncTitle} up={() => goTab('documents')} />
           {pairs && !shownPairs.length && !groups.length && <T color={p.muted}>{t.syncNothing}</T>}
 
           {shownPairs.length > 0 && (

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TAB_BAR_H, useTabBar } from '@/components/AppNav';
+import { columnWidth, goTab } from '@/components/AppNav';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -26,8 +26,6 @@ import { ask } from '@/state/ask';
 import { clipCount, useClipboard } from '@/state/clipboard';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
-
-const MAX_W = 820;
 
 /**
  * Folder IDs are URIs and paths ("…/tree/primary%3ADocs", "100% done"): route params are decoded on the
@@ -58,9 +56,7 @@ export default function Files() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const gutter = width < 600 ? space.xl - 4 : space.xxxl;
-  // As wide as every other document screen; the gutter only matters on narrower windows.
-  const contentW = Math.min(width - gutter * 2, MAX_W - (space.xl - 4) * 2);
+  const contentW = columnWidth(width);
   const load = useLibrary((s) => s.load);
   useEffect(() => {
     load();
@@ -79,13 +75,11 @@ export default function Files() {
 const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', device: 'device', all: 'documents', app: 'pages' };
 
 /** The places to browse (the archive first), for Documents → Folders; adding a folder opens it. */
-export function Roots({ bottom }: { bottom: number }) {
+export function Roots({ bottom, onError: setError }: { bottom: number; onError: (message: string) => void }) {
   const p = usePalette();
   const showAll = usePrefs((s) => s.allFiles);
   const archive = usePrefs((s) => s.archive);
-  const tabBar = useTabBar();
   const [roots, setRoots] = useState<FolderRoot[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     folders
@@ -93,19 +87,31 @@ export function Roots({ bottom }: { bottom: number }) {
       // The archive (synced) first.
       .then((list) => setRoots([...list.filter((r) => r.id === archive), ...list.filter((r) => r.id !== archive)]))
       .catch((e) => setError(opError(e)));
-  }, [showAll, archive]);
+  }, [showAll, archive, setError]);
   useEffect(refresh, [refresh]);
 
   const add = async () => {
     const r = await folders.add().catch((e) => void setError(opError(e)));
     if (r) go(r.id, r.name);
     refresh();
+    // What is in it is found and read.
+    if (r) schedule(1000);
   };
   // A single file from anywhere the system picker reaches (cloud drives, mail attachments…).
   const importFiles = useLibrary((s) => s.importFiles);
   const openOther = async () => {
     const [doc] = await importFiles(await pickPdfs());
     if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id } });
+  };
+  // The archive is chosen once, from the folders added (not a button beside each one: names need the room).
+  const candidates = (roots ?? []).filter((r) => r.kind === 'folder' && !r.locked);
+  const chooseArchive = () => {
+    const choose = (r: FolderRoot) => void setArchive(r.id).catch((e) => setError(opError(e)));
+    if (candidates.length === 1) return choose(candidates[0]);
+    showActions(
+      t.chooseArchive,
+      candidates.map((r, i) => ({ key: `archive-${i}`, icon: 'folder' as IconName, label: r.name, onPress: () => choose(r) })),
+    );
   };
   const unlockAndOpen = async (r: FolderRoot) => {
     if (r.locked && !(await folders.unlock(r.id).catch(() => false))) return;
@@ -162,10 +168,6 @@ export function Roots({ bottom }: { bottom: number }) {
                       <Icon name="chevronRight" size={18} color={p.muted} />
                     )}
                   </Pressable>
-                  {/* Beside the row, not in it (a button can't hold another). */}
-                  {!archive && r.kind === 'folder' && !r.locked && (
-                    <Button testID="use-archive" kind="quiet" label={t.useAsArchive} onPress={() => void setArchive(r.id).catch((e) => setError(opError(e)))} style={{ marginRight: space.md }} />
-                  )}
                 </View>
                 {r.id === archive && (
                   <Pressable
@@ -190,6 +192,15 @@ export function Roots({ bottom }: { bottom: number }) {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
             <Button testID="add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
             <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />
+            {!archive && candidates.length > 0 && (
+              <Button
+                testID="use-archive"
+                kind="quiet"
+                icon="inbox"
+                label={candidates.length === 1 ? t.useNamedAsArchive(candidates[0].name) : t.chooseArchive}
+                onPress={chooseArchive}
+              />
+            )}
           </View>
           <Pressable accessibilityRole="link" onPress={() => router.push('/settings')} style={{ alignSelf: 'flex-start' }}>
             <T v="caption" color={p.muted} style={{ textDecorationLine: 'underline' }}>
@@ -198,8 +209,6 @@ export function Roots({ bottom }: { bottom: number }) {
           </Pressable>
         </View>
       )}
-      <PasteBar here={null} bottom={bottom} onDone={refresh} onError={setError} />
-      <Toast message={error} onDismiss={() => setError(null)} above={tabBar ? TAB_BAR_H : 0} />
     </>
   );
 }
@@ -221,6 +230,8 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const p = usePalette();
   const [entries, setEntries] = useState<FolderEntry[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // It can't be read because the browser wants the user's OK again (after a restart): it can be given here.
+  const [locked, setLocked] = useState(false);
   const [sort, setSort] = useState<Sort>(root === 'all' ? 'date' : 'name');
   const [query, setQuery] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
@@ -243,7 +254,11 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
         setEntries(list);
         setFailed(false);
       })
-      .catch(() => live && setFailed(true));
+      .catch(() => {
+        if (!live) return;
+        setFailed(true);
+        folders.roots(false).then((rs) => live && setLocked(!!rs.find((r) => r.id === root)?.locked), () => {});
+      });
     return () => {
       live = false;
       cancelThumbs();
@@ -265,7 +280,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const picked = useMemo(() => (selected ? shown.filter((e) => selected.has(e.id)) : []), [selected, shown]);
   const toggle = (e: FolderEntry) => setSelected((s) => toggled(s, e.id));
 
-  /** Runs a file operation; the folder (and any folder below it on the stack) lists itself again. */
+  /** Runs a file operation; the folder (and any folder below it on the stack) lists itself again, Documents soon after. */
   const run = async (op: () => Promise<string | void>) => {
     try {
       const done = await op();
@@ -275,6 +290,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       setMessage(opError(e));
     }
     changed();
+    schedule(1000);
   };
 
   const open = async (e: FolderEntry) => {
@@ -297,9 +313,12 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
     const n = await ask({ title: t.newFolder, input: '', placeholder: t.folderName, confirm: t.newFolder });
     if (n) await run(() => folders.mkdir(root, dir, n));
   };
+  // A document keeps its extension (without it, it wouldn't be one any more): only the name before it is edited.
   const rename = async () => {
     const e = picked[0];
-    const n = await ask({ title: t.rename, input: e.name, placeholder: t.newName, confirm: t.rename });
+    const ext = e.kind === 'dir' ? '' : (/\.(pdf|epub)$/i.exec(e.name)?.[0] ?? '');
+    const typed = (await ask({ title: t.rename, input: ext ? e.name.slice(0, -ext.length) : e.name, placeholder: t.newName, confirm: t.rename }))?.trim();
+    const n = typed && ext && !/\.(pdf|epub)$/i.test(typed) ? `${typed}${ext}` : typed;
     if (!n || n === e.name) return;
     await run(async () => {
       const to = await folders.rename(root, dir, e, n);
@@ -336,19 +355,20 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   };
 
   const docs = entries?.filter((e) => e.kind !== 'dir').length ?? 0;
+  // On a phone the filter, Select and Sort go on a line of their own when they don't fit beside the count.
   const header = (
     <View style={styles.listHead}>
       <T v="kicker" color={p.muted}>
         {entries ? t.folderSummary(docs, entries.length - docs) : ''}
       </T>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+      <View style={styles.listTools}>
         {(entries?.length ?? 0) > 12 && (
           <View style={[styles.search, { backgroundColor: p.hairline }]}>
             <Icon name="search" size={15} color={p.muted} />
-            <TextInput value={query} onChangeText={setQuery} placeholder={t.filter} placeholderTextColor={p.muted} style={[styles.searchInput, { color: p.ink }]} />
+            <TextInput value={query} onChangeText={setQuery} placeholder={t.filter} accessibilityLabel={t.filter} placeholderTextColor={p.muted} style={[styles.searchInput, { color: p.ink }]} />
           </View>
         )}
-        {(entries?.length ?? 0) > 0 && <SelectChip onPress={() => setSelected(new Set())} />}
+        {(entries?.length ?? 0) > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
         <SortChip
           label={sortName[sort]}
           onPress={() =>
@@ -365,15 +385,22 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   return (
     <>
       {selected ? (
-        <SelectBar count={selected.size} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((e) => e.id)))} />
+        <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((e) => e.id)))} />
       ) : (
-        <ScreenHeader title={name ?? rootName} over={name ? rootName : t.foldersView}>
+        <ScreenHeader title={name ?? rootName} over={name ? rootName : t.foldersView} up={() => goTab('documents', 'folders')}>
           {editable && <IconButton testID="new-folder" icon="folderAdd" label={t.newFolder} onPress={newFolder} />}
           <LayoutToggle />
         </ScreenHeader>
       )}
       {failed ? (
-        <T color={p.muted}>{t.folderError}</T>
+        locked ? (
+          <View style={{ gap: space.md, alignItems: 'flex-start' }}>
+            <T color={p.muted}>{t.folderLocked}</T>
+            <Button testID="folder-unlock" label={t.allowAccess} onPress={() => void folders.unlock(root).then((ok) => ok && changed(), () => {})} />
+          </View>
+        ) : (
+          <T color={p.muted}>{t.folderError}</T>
+        )
       ) : !entries ? (
         <ActivityIndicator color={p.muted} />
       ) : (
@@ -430,9 +457,9 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
             onPress={() => void run(async () => t.readingAddedN(await addToReading(filesAsDocs(root, dir, picked))))}
           />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!picked.length} onPress={() => clip(false)} />
-          <Action testID="act-move" icon="move" label={t.move} disabled={!picked.length} onPress={() => clip(true)} />
-          <Action testID="act-rename" icon="pencil" label={t.rename} disabled={picked.length !== 1} onPress={rename} />
-          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!picked.length} onPress={remove} />
+          <Action testID="act-move" icon="move" label={t.move} disabled={!editable || !picked.length} onPress={() => clip(true)} />
+          <Action testID="act-rename" icon="pencil" label={t.rename} disabled={!editable || picked.length !== 1} onPress={rename} />
+          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!editable || !picked.length} onPress={remove} />
         </ActionBar>
       ) : (
         <PasteBar here={editable ? here : null} bottom={bottom} onDone={() => {}} onError={setMessage} onMessage={setMessage} />
@@ -447,7 +474,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
 }
 
 /** "Copy n items here" / "Move n items here" while items wait on the clipboard. */
-function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | null; bottom: number; onDone: () => void; onError: (msg: string) => void; onMessage?: (msg: string) => void }) {
+export function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | null; bottom: number; onDone: () => void; onError: (msg: string) => void; onMessage?: (msg: string) => void }) {
   const p = usePalette();
   const clip = useClipboard((s) => s.clip);
   const setClip = useClipboard((s) => s.set);
@@ -472,7 +499,7 @@ function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | 
         const moved = await folders.transfer(from, entries, here, clip.move);
         if (clip.move) await followFiles(moved);
       }
-      if (clip.move) schedule(1000);
+      schedule(1000);
       onMessage?.(clip.move ? t.movedN(count) : t.copiedN(count));
       setClip(null);
     } catch (e) {
@@ -506,9 +533,11 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: space.md, paddingTop: space.xxxl, paddingHorizontal: space.lg },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   rootRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.lg, minHeight: 56 },
-  listHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36, marginBottom: space.xs },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.pill, paddingHorizontal: space.md, height: 32 },
-  searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 120, height: 32, outlineStyle: 'none' } as object,
+  listHead: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: space.md, rowGap: space.xs, minHeight: 36, marginBottom: space.xs },
+  listTools: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto', flexShrink: 1, maxWidth: '100%' },
+  // Narrower where there is little room (a phone, in German).
+  search: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.pill, paddingHorizontal: space.md, height: 32, flexShrink: 1, minWidth: 96 },
+  searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 120, minWidth: 0, flexShrink: 1, height: 32, outlineStyle: 'none' } as object,
   bar: {
     position: 'absolute',
     left: 0,

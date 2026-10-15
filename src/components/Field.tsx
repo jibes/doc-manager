@@ -17,6 +17,7 @@ export function Field({ label, value, onChange, testID, placeholder, error }: { 
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
+        accessibilityLabel={label}
         placeholderTextColor={p.muted}
         style={[styles.input, { color: p.ink, borderColor: error ? p.markRing : p.hairline }]}
       />

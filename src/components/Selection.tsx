@@ -92,7 +92,8 @@ export function Action({ icon, label, disabled, onPress, testID }: { icon: IconN
       ]}
     >
       <Icon name={icon} size={22} color={p.ink} />
-      <T v="caption" numberOfLines={1} style={{ fontSize: 11 }}>
+      {/* Two lines where a word is too long for one (German): it breaks where it may. */}
+      <T v="caption" numberOfLines={2} style={{ fontSize: 11, lineHeight: 13, textAlign: 'center' }}>
         {label}
       </T>
     </Pressable>
@@ -123,6 +124,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  action: { flex: 1, minWidth: 0, alignItems: 'center', gap: 2, paddingVertical: space.xs, paddingHorizontal: 2, borderRadius: radius.md },
+  action: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'flex-start', alignSelf: 'stretch', gap: 2, paddingVertical: space.xs, paddingHorizontal: 2, borderRadius: radius.md },
   check: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 });

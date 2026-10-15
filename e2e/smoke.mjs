@@ -1016,10 +1016,11 @@ async function foldersDesktop() {
   check(await inOpfs('Archive'), 'folders: a new folder is made in the folder');
   await text('form.pdf').click({ button: 'right' });
   await vis('act-rename').click();
-  await page.getByTestId('ask-input').fill('visit.pdf');
+  check((await page.getByTestId('ask-input').inputValue()) === 'form', 'folders: rename edits the name without its extension');
+  await page.getByTestId('ask-input').fill('visit');
   await page.getByTestId('ask-confirm').click();
   await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await inOpfs('visit.pdf')) && !(await inOpfs('form.pdf')), 'folders: right-click selects; a document can be renamed');
+  check((await inOpfs('visit.pdf')) && !(await inOpfs('form.pdf')), 'folders: right-click selects; a document can be renamed (and keeps .pdf)');
   await text('visit.pdf').click({ button: 'right' });
   await vis('act-move').click();
   await text('Archive').click();
@@ -1692,7 +1693,7 @@ async function documentsScreen() {
   // Both documents, the library one with its new details (indexing may still be going).
   let rows = [];
   for (let i = 0; i < 60 && !(rows.length === 2 && rows.some((r) => /Nordkorn/.test(r))); i++) rows = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
-  check(rows.length === 2 && rows.some((r) => /Nordkorn · 2026-09-28/.test(r)), `documents: every document is listed with its details (${rows.map((r) => r.replace(/\n/g, ' / '))})`);
+  check(rows.length === 2 && rows.some((r) => /Nordkorn · Sep 28, 2026/.test(r)), `documents: every document is listed with its details (${rows.map((r) => r.replace(/\n/g, ' / '))})`);
 
   // Sorting: chosen from a menu, which shows the order in use.
   const titles = async () => (await vis('archive-hit').allInnerTexts()).map((r) => r.split('\n')[0]);
@@ -1809,7 +1810,7 @@ async function inbox() {
   check((await vis('inbox-here-switch').getAttribute('aria-checked')) === 'true', 'inbox: this device sorts the inbox');
   await vis('screen-back').click();
   await openDocs(page);
-  await vis('docs-inbox').click();
+  await vis('side-inbox').click();
   const card = (name) => page.getByTestId('inbox-item').filter({ hasText: name });
   await card('scan-1.pdf').waitFor({ timeout: 20000 });
   await card('notes.pdf').waitFor({ timeout: 20000 });
@@ -1903,7 +1904,7 @@ async function searchable() {
   await vis('inbox-here-switch').click();
   await vis('screen-back').click();
   await openDocs(page);
-  await vis('docs-inbox').click();
+  await vis('side-inbox').click();
   const card = page.getByTestId('inbox-item').filter({ hasText: 'letter.pdf' });
   await card.getByTestId('inbox-no-text').waitFor({ timeout: 120000 });
   check(true, 'inbox: an image-only document is marked to be made searchable');
@@ -2071,7 +2072,7 @@ async function syncSafety() {
   await vis('inbox-here-switch').click();
   await vis('screen-back').click();
   await openDocs(page);
-  await vis('docs-inbox').click();
+  await vis('side-inbox').click();
   await vis('inbox-duplicate').waitFor({ timeout: 30000 }).catch(() => {});
   check(/Already in the archive: dup-/.test(await vis('inbox-duplicate').innerText().catch(() => '')), 'inbox: a document already filed is pointed out');
   await vis('inbox-discard').click();
@@ -2387,6 +2388,15 @@ async function tabs() {
     await openDocs(page);
     await vis('docs-search').waitFor();
     check((await vis('tab-documents').getAttribute('aria-selected')) === 'true', `tabs (${name}): Documents opens from its tab, with search first`);
+    if (name === 'wide') {
+      // Going between Documents' parts in the sidebar keeps its search.
+      await vis('docs-search').fill('columns');
+      await vis('side-folders').click();
+      await vis('add-folder').first().waitFor();
+      await vis('tab-documents').click();
+      check((await vis('docs-search').inputValue()) === 'columns', 'tabs (wide): Documents keeps its search when coming back from Folders');
+      await vis('docs-search').fill('');
+    }
     await vis('docs-folders').click();
     await vis('add-folder').first().waitFor();
     check((await vis('open-other').count()) === 1, `tabs (${name}): Folders offers adding folders and other locations`);
@@ -2400,6 +2410,22 @@ async function tabs() {
     check(true, `tabs (${name}): Scan opens the camera`);
     await ctx.close();
   }
+  // A document dropped anywhere opens (not only on Reading).
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`tabs: ${e.message}`));
+  await page.goto(BASE);
+  await openDocs(page);
+  await page.getByTestId('docs-search').locator('visible=true').waitFor();
+  const pdf = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url)).toString('base64');
+  await page.evaluate((b64) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'dropped.pdf', { type: 'application/pdf' }));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, pdf);
+  await page.waitForURL(/\/read\//, { timeout: 15000 }).catch(() => {});
+  check(/\/read\//.test(page.url()), 'tabs: a document dropped on Documents opens');
+  await ctx.close();
 }
 
 // Appearance: Light / Dark / Auto; in Dark pages are dimmed, not inverted; "Invert colours" is per document.

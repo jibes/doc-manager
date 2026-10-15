@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { deleteForever, purge, restore, useTrash, type TrashItem } from '@/archive/trash';
+import { goTab } from '@/components/AppNav';
 import { Icon } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -45,7 +46,7 @@ export default function Trash() {
     <View style={{ flex: 1, backgroundColor: p.canvas }}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4, gap: space.md }}>
-          <ScreenHeader title={t.trashTitle}>
+          <ScreenHeader title={t.trashTitle} up={() => goTab('documents', 'folders')}>
             {items.length > 0 && <Button testID="trash-empty" kind="quiet" label={t.trashEmptyAll} onPress={() => void emptyAll()} />}
           </ScreenHeader>
           {!archive ? (

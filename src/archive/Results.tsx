@@ -82,7 +82,7 @@ export function HitRow({
       testID="archive-hit"
       picture={place.kind === 'folder' ? { kind: 'file', root: place.root, entry: place.entry } : { kind: 'cover', uri: cover, aspect: aspect ?? 1.414 }}
       title={realTitle(h.doc.title) || h.doc.name.replace(/\.(pdf|epub)$/i, '')}
-      meta={[h.doc.sender, docDate(h.doc), bytes, where].filter(Boolean).join(' · ')}
+      meta={[h.doc.sender, t.docDay(docDate(h.doc)), bytes, where].filter(Boolean).join(' · ')}
       extra={
         h.snippet && (
           <T v="caption" color={p.inkSoft} numberOfLines={2}>

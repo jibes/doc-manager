@@ -7,6 +7,7 @@ import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInbox
 import type { Details } from '@/archive/pdfInfo';
 import { openDoc } from '@/archive/Results';
 import { discard } from '@/archive/trash';
+import { goTab } from '@/components/AppNav';
 import { Thumbnail } from '@/components/DocItems';
 import { Field } from '@/components/Field';
 import { Button, IconButton, T } from '@/components/primitives';
@@ -164,7 +165,7 @@ export default function Inbox() {
     <View style={{ flex: 1, backgroundColor: p.canvas }}>
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
-          <ScreenHeader title={t.inboxTitle}>
+          <ScreenHeader title={t.inboxTitle} up={() => goTab('documents')}>
             {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push('/rules')} />}
             {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} disabled={filingAll} onPress={() => void fileAll()} />}
           </ScreenHeader>

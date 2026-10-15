@@ -1,6 +1,6 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
@@ -10,7 +10,7 @@ import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
-import { AppFrame, AppHeader, TAB_BAR_H, useDocsView, useMainWidth, useTabBar } from '@/components/AppNav';
+import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useDocsView, useMainWidth, useTabBar, useWide } from '@/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
 import { SelectChip, SortChip } from '@/components/SortChip';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
@@ -26,9 +26,8 @@ import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { folders } from '@/lib/folders';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
-import { Roots } from './files';
+import { PasteBar, Roots } from './files';
 
-const MAX_W = 820;
 /** Rows shown at first, and added by "Show more". */
 const PAGE = 100;
 /** While indexing, the list and the search are read again at most this often. */
@@ -66,7 +65,9 @@ export default function Documents() {
   const inboxCount = useInboxCount((s) => s.count);
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
   const tabBar = useTabBar();
+  const wide = useWide();
   const mainWidth = useMainWidth();
+  const pasting = useClipboard((s) => !!s.clip);
   const [place, setPlace] = useState<Where | undefined>(undefined);
   // Opened on Folders (from an old Files link), then counted and remembered as the place last used.
   useEffect(() => {
@@ -91,19 +92,28 @@ export default function Documents() {
   const views = useViews((s) => s.views);
 
   const [all, setAll] = useState<IndexedDoc[]>([]);
+  // Until the index has answered once, nothing is known (not "no documents").
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     let alive = true;
-    allDocs().then((d) => alive && setAll(d.filter((x) => !x.failed)));
+    allDocs().then((d) => {
+      if (!alive) return;
+      setAll(d.filter((x) => !x.failed));
+      setReady(true);
+    });
     return () => {
       alive = false;
     };
   }, [changed]);
 
-  useEffect(() => {
-    loadViews().catch(() => {});
-    // The search index is built ahead, so the first search answers at once.
-    warmSearch();
-  }, []);
+  // The search index is built ahead, so the first search answers at once.
+  useEffect(() => warmSearch(), []);
+  // Views as stored now, each time the screen comes back (another device may have changed them).
+  useFocusEffect(
+    useCallback(() => {
+      loadViews().catch(() => {});
+    }, []),
+  );
 
   // Search results, kept with the query they answer (so an older answer never shows for a newer query).
   const [found, setFound] = useState<{ query: string; hits: Hit[] } | null>(null);
@@ -121,12 +131,14 @@ export default function Documents() {
     };
   }, [q, changed]);
 
+  // The answer to an earlier query stays while the new one is on its way (no "0 documents" in between).
+  const pending = searching && found?.query !== q;
   // With a query, best matches first; without, every document by date or name.
   const base = useMemo(() => {
-    const answer = found?.query === q ? found.hits : [];
+    const answer = found?.hits ?? [];
     const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc)) : sortDocs(all, sort).map(asHit);
     return place ? hits.filter((h) => placeOf(h.doc, archive) === place) : hits;
-  }, [searching, found, q, all, sort, bestFirst, place, archive]);
+  }, [searching, found, all, sort, bestFirst, place, archive]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -231,9 +243,10 @@ export default function Documents() {
     ]);
   // Room for the action bar while picking.
   // Nothing indexed yet (and not searching): what to do instead of an empty list with its filters.
-  const nothing = all.length === 0 && !searching;
+  const nothing = ready && all.length === 0 && !searching;
   const layout = useLayout();
-  const grid = gridOf(Math.min(mainWidth, MAX_W) - 2 * (space.xl - 4));
+  const column = columnWidth(mainWidth);
+  const grid = gridOf(column);
   const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0);
 
   const picked = selected ? shown.filter((h) => selected.has(h.doc.key)).map((h) => h.doc) : [];
@@ -270,9 +283,20 @@ export default function Documents() {
     if (!name) return;
     await batch(() => renameDoc(d, name));
   };
+  // Documents only in this library leave it (as on Reading); files are deleted.
+  const onlyHere = (list: IndexedDoc[]) => list.length > 0 && list.every((d) => d.place.kind === 'library');
   const remove = async () => {
     const list = picked;
-    if (deletesForGood(list)) {
+    if (onlyHere(list)) {
+      const one = list.length === 1;
+      const yes = await ask({
+        title: one ? t.removeTitle : t.removeManyTitle(list.length),
+        body: one ? t.removeConfirm(list[0].title || list[0].name) : t.removeManyBody,
+        confirm: t.remove,
+        destructive: true,
+      });
+      if (yes == null) return;
+    } else if (deletesForGood(list)) {
       const yes = await ask({ title: t.deleteTitle(list.length), body: t.deleteBody(list.length, list[0].title || list[0].name), confirm: t.delete, destructive: true });
       if (yes == null) return;
     }
@@ -285,7 +309,7 @@ export default function Documents() {
         return;
       }
       settle();
-      return t.deletedN(list.length);
+      return onlyHere(list) ? t.removedN(list.length) : t.deletedN(list.length);
     });
   };
 
@@ -296,7 +320,7 @@ export default function Documents() {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
-        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
+        <View style={{ width: column }}>
           {selected && view === 'all' ? (
             <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
           ) : (
@@ -328,7 +352,7 @@ export default function Documents() {
           )}
 
           {view === 'folders' ? (
-            <Roots bottom={0} />
+            <Roots bottom={0} onError={say} />
           ) : (
           <>
 
@@ -339,25 +363,40 @@ export default function Documents() {
               value={query}
               onChangeText={(text) => {
                 if (!query.trim() && text.trim()) setBestFirst(true);
+                // A new search starts afresh (an answer from long ago isn't shown while it runs).
+                if (text.trim().length < 2) setFound(null);
                 setQuery(text);
                 setLimit(PAGE);
               }}
               placeholder={t.documentsSearch}
+              accessibilityLabel={t.documentsSearch}
               placeholderTextColor={p.muted}
               style={[styles.searchInput, { color: p.ink }]}
             />
-            {!!query && <IconButton icon="close" size={32} label={t.cancel} onPress={() => setQuery('')} />}
+            {!!query && (
+              <IconButton
+                icon="close"
+                size={32}
+                label={t.clearSearch}
+                onPress={() => {
+                  setQuery('');
+                  setFound(null);
+                }}
+              />
+            )}
           </View>
 
           {nothing ? (
             <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.supported ? () => useDocsView.setState({ view: 'folders' }) : undefined} />
+          ) : !ready && !searching ? (
+            <ActivityIndicator color={p.muted} style={{ marginTop: space.xl }} />
           ) : (
           <>
-          {/* One row: what is waiting (inbox, sync issues), the filters in use, and the saved views. */}
+          {/* One row: the filters (first: always in reach), what is waiting (the inbox, on phones; sync issues), and the saved views. */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
-            {archive && inboxHere && <Chip testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />}
-            {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
             <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
+            {archive && inboxHere && !wide && <Chip testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />}
+            {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
             {place && <Chip testID="facet-place" label={placeName(place)} on onPress={choosePlace} />}
             {FACETS.filter((f) => filter[f]).map((f) => (
               <Chip key={f} testID={`facet-${f}`} label={filter[f]!} on onPress={() => choose(f)} />
@@ -390,12 +429,15 @@ export default function Documents() {
             )}
           </ScrollView>
 
+          {/* The count, and Select and Sort beside it (under it, when a phone has no room for both). */}
           <View style={styles.countRow}>
-            <T v="kicker" color={p.muted} testID="docs-count" style={{ flex: 1 }}>
-              {t.documentsCount(shown.length)}
+            <T v="kicker" color={p.muted} testID="docs-count" numberOfLines={1}>
+              {pending && !shown.length ? '' : t.documentsCount(shown.length)}
             </T>
-            {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
-            <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} onPress={chooseSort} />
+            <View style={styles.countTools}>
+              {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
+              <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} onPress={chooseSort} />
+            </View>
           </View>
           {shown.length > 0 ? (
             <DocList layout={layout} gap={grid.gap}>
@@ -416,6 +458,8 @@ export default function Documents() {
                 />
               ))}
             </DocList>
+          ) : pending ? (
+            <ActivityIndicator color={p.muted} />
           ) : (
             <T color={p.muted}>{t.documentsEmpty}</T>
           )}
@@ -438,7 +482,12 @@ export default function Documents() {
             icon="readingAdd"
             label={t.readingList}
             disabled={!picked.length}
-            onPress={() => void batch(async () => t.readingAddedN(await addToReading(picked)))}
+            onPress={() =>
+              void batch(async () => {
+                const n = await addToReading(picked);
+                return n ? t.readingAddedN(n) : t.readingAlready;
+              })
+            }
           />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!allInFolders(picked)} onPress={() => clip(false)} />
           <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => clip(true)} />
@@ -449,15 +498,11 @@ export default function Documents() {
             disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root)}
             onPress={() => void rename()}
           />
-          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => void remove()} />
+          <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => void remove()} />
         </ActionBar>
       )}
-      <Toast
-        message={notice}
-        onDismiss={dismiss}
-        action={action}
-        above={tabBar ? TAB_BAR_H : 0}
-      />
+      {view === 'folders' && <PasteBar here={null} bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} onDone={() => {}} onError={say} />}
+      <Toast message={notice} onDismiss={dismiss} action={action} above={(tabBar ? TAB_BAR_H : 0) + (pasting && view === 'folders' ? 64 : 0)} />
     </AppFrame>
   );
 }
@@ -512,5 +557,6 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36 },
   empty: { alignItems: 'center', gap: space.md, paddingVertical: space.xxxl, paddingHorizontal: space.lg },
-  countRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.lg, marginBottom: space.sm },
+  countRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: space.md, rowGap: space.xs, marginTop: space.lg, marginBottom: space.sm, minHeight: 32 },
+  countTools: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' },
 });

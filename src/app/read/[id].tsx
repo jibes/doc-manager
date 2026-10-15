@@ -75,7 +75,7 @@ export default function ReadScreen() {
         </T>
         <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md }}>
           {action}
-          <Button label={t.backToLibrary} kind="quiet" onPress={goBack} />
+          <Button label={t.back} kind="quiet" onPress={goBack} />
         </View>
       </View>
     );

@@ -10,12 +10,15 @@ import { IconButton, T } from './primitives';
 /** Back to where the user came from, or home when the screen was opened directly. */
 export const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
-/** Back button, title (with an optional line above it) and actions on the right. */
-export function ScreenHeader({ title, over, children }: { title: string; over?: string; children?: ReactNode }) {
+/**
+ * Back button, title (with an optional line above it) and actions on the right. `up`: where Back goes when the
+ * screen was opened directly (the screen it belongs to), instead of home.
+ */
+export function ScreenHeader({ title, over, up, children }: { title: string; over?: string; up?: () => void; children?: ReactNode }) {
   const p = usePalette();
   return (
     <View style={styles.bar}>
-      <IconButton testID="screen-back" icon="back" label={t.back} onPress={goBack} style={{ marginLeft: -space.sm }} />
+      <IconButton testID="screen-back" icon="back" label={t.back} onPress={() => (up && !router.canGoBack() ? up() : goBack())} style={{ marginLeft: -space.sm }} />
       <View style={{ flex: 1, minWidth: 0 }}>
         {over ? (
           <T v="caption" color={p.muted} numberOfLines={1}>

@@ -32,9 +32,13 @@ export const scanSupported = Platform.OS === 'web';
 export type DocsView = 'all' | 'folders';
 export const useDocsView = create<{ view: DocsView }>(() => ({ view: 'all' }));
 
-/** Switching places never stacks screens: the place is brought back if it is open underneath. */
-export function goTab(tab: Tab, view?: DocsView) {
+/**
+ * Switching places never stacks screens: the place is brought back if it is open underneath. `from`: the place
+ * shown now; going to it only changes its view (it keeps its search and filters).
+ */
+export function goTab(tab: Tab, view?: DocsView, from?: Tab) {
   if (view) useDocsView.setState({ view });
+  if (from === tab) return;
   const href = tab === 'documents' ? '/documents' : '/';
   // Back to it when it is open underneath; else in place of the current screen (never one over the other).
   if (router.canDismiss()) router.dismissTo(href);
@@ -42,6 +46,11 @@ export function goTab(tab: Tab, view?: DocsView) {
 }
 
 export const useWide = () => useWindowDimensions().width >= WIDE;
+
+/** Widest column of content (lists, settings) on any screen. */
+const COLUMN_W = 780;
+/** A screen's column of content in `avail` (the window, or beside the sidebar): the same on every screen. */
+export const columnWidth = (avail: number) => Math.min(avail - 2 * (avail < 600 ? space.xl - 4 : space.xxxl), COLUMN_W);
 
 /** The width beside the sidebar (wide windows) or the window's (phones). */
 export function useMainWidth(): number {
@@ -126,7 +135,7 @@ function BarItem({ tab, current, badge = 0 }: { tab: Tab; current: Tab; badge?: 
   const p = usePalette();
   const on = tab === current;
   return (
-    <Pressable testID={`tab-${tab}`} role="tab" aria-selected={on} aria-label={tabLabel(tab)} onPress={() => goTab(tab, tab === 'documents' && on ? 'all' : undefined)} style={styles.barItem}>
+    <Pressable testID={`tab-${tab}`} role="tab" aria-selected={on} aria-label={tabLabel(tab)} onPress={() => goTab(tab, tab === 'documents' && on ? 'all' : undefined, current)} style={styles.barItem}>
       <View>
         <Icon name={tabIcon[tab]} size={22} color={on ? p.accent : p.muted} strokeWidth={on ? 1.9 : 1.6} />
         {badge > 0 && <Badge n={badge} />}
@@ -165,10 +174,10 @@ function Sidebar({ current }: { current: Tab }) {
         <T style={{ fontFamily: fonts.sansSemi, fontSize: 21, letterSpacing: -0.5 }}>Tessel</T>
       </View>
       <View role="tablist" style={{ gap: 2 }}>
-        <SideItem testID="tab-reading" role="tab" icon="pages" label={t.readingTab} on={current === 'reading'} onPress={() => goTab('reading')} />
-        <SideItem testID="tab-documents" role="tab" icon="documents" label={t.documentsTitle} on={docs && view === 'all'} onPress={() => goTab('documents', 'all')} />
+        <SideItem testID="tab-reading" role="tab" icon="pages" label={t.readingTab} on={current === 'reading'} onPress={() => goTab('reading', undefined, current)} />
+        <SideItem testID="tab-documents" role="tab" icon="documents" label={t.documentsTitle} on={docs && view === 'all'} onPress={() => goTab('documents', 'all', current)} />
         {inboxShown && <SideItem testID="side-inbox" icon="inbox" label={t.inboxTitle} sub badge={badge} onPress={() => router.push('/inbox')} />}
-        {folders.supported && <SideItem testID="side-folders" icon="folder" label={t.foldersView} sub on={docs && view === 'folders'} onPress={() => goTab('documents', 'folders')} />}
+        {folders.supported && <SideItem testID="side-folders" icon="folder" label={t.foldersView} sub on={docs && view === 'folders'} onPress={() => goTab('documents', 'folders', current)} />}
         {archive && <SideItem testID="side-trash" icon="trash" label={t.trashTitle} sub onPress={() => router.push('/trash')} />}
       </View>
       <View style={{ flex: 1 }} />

@@ -3,13 +3,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppFrame, AppHeader, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
+import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { DocItem, DocList, gridOf, LayoutToggle, useLayout, type Layout } from '@/components/DocItems';
 import { SelectChip } from '@/components/SortChip';
 import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
 import { shareDocs } from '@/lib/fileActions';
-import { DropZone } from '@/components/DropZone';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
 import { Icon } from '@/components/Icon';
 import { Button, T } from '@/components/primitives';
@@ -24,7 +23,6 @@ import { useLibrary, type ImportItem } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 
-const MAX_W = 820;
 /** Opened as an app (the Android app, an installed web app): it opens where it was. A browser tab follows its URL. */
 const launchedAsApp = () => !!shell || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
 /** Set once the app has opened its first place (later visits here don't jump away). */
@@ -79,9 +77,7 @@ export default function Home() {
     if (added.length === 1) open(added[0]);
   };
 
-  const gutter = width < 600 ? space.xl - 4 : space.xxxl;
-  // As wide as every other document screen; the gutter only matters on narrower windows.
-  const contentW = Math.min(width - gutter * 2, MAX_W - (space.xl - 4) * 2);
+  const contentW = columnWidth(width);
   const layout = useLayout();
   const grid = gridOf(contentW);
   const wide = width >= 760;
@@ -130,7 +126,7 @@ export default function Home() {
 
   return (
     <AppFrame tab="reading">
-    <DropZone onFiles={add}>
+    <View style={{ flex: 1 }}>
       <ScrollView
         style={{ flex: 1, backgroundColor: p.canvas }}
         contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0), alignItems: 'center', flexGrow: 1 }}
@@ -212,7 +208,7 @@ export default function Home() {
                     {t.recentTitle}
                   </T>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-                    {recent.length > 0 && <SelectChip onPress={() => setSelected(new Set())} />}
+                    {recent.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
                     <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                   </View>
                 </View>
@@ -265,7 +261,7 @@ export default function Home() {
         </ActionBar>
       )}
       <Toast message={error ?? hint ?? notice} onDismiss={() => (error ? clearError() : hint ? setHint(null) : setNotice(null))} above={tabBar ? TAB_BAR_H : 0} />
-    </DropZone>
+    </View>
     </AppFrame>
   );
 }

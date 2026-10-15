@@ -7,6 +7,12 @@ export const size = (bytes: number, dot: string) =>
 export type AgoWords = { now: string; min: (n: number) => string; h: (n: number) => string; d: (n: number) => string; locale: string };
 const AGO_EN: AgoWords = { now: 'just now', min: (n) => `${n} min ago`, h: (n) => `${n} h ago`, d: (n) => (n === 1 ? 'yesterday' : `${n} days ago`), locale: 'en' };
 
+/** A document's date (YYYY-MM-DD) as dates are written in `locale`; anything else as it is. */
+export function isoDay(iso: string, locale: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) : iso;
+}
+
 /** Coarse relative time; older than a week shows the date. */
 export function ago(ts: number, w: AgoWords): string {
   const s = (Date.now() - ts) / 1000;
@@ -41,7 +47,7 @@ export const en = {
   adding: 'Adding…',
   pages: (n: number) => plural(n, 'page', 'pages'),
   remove: 'Remove',
-  removeFromLibrary: 'Remove from library',
+  removeFromLibrary: 'Remove from Tessel',
   rowHint: 'Press and hold for more',
   moreFor: (title: string) => `More for ${title}`,
   removeTitle: 'Remove document',
@@ -90,12 +96,13 @@ export const en = {
   fileMeta: (bytes: number, modified: number) => [size(bytes, '.'), modified ? ago(modified, AGO_EN) : ''].filter(Boolean).join(' · '),
   fileSize: (bytes: number) => size(bytes, '.'),
   day: (ms: number) => new Date(ms).toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' }),
+  docDay: (iso: string) => isoDay(iso, 'en'),
   dayTime: (ms: number) => new Date(ms).toLocaleString('en', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
   allDocuments: 'All documents',
   internalStorage: 'Internal storage',
   allFilesTitle: 'All files access',
   allFilesSwitch: 'Show every document on this device',
-  allFilesNote: 'Adds “All documents” and “Internal storage” to Files. Android asks you to allow access to all files; without it, Tessel only sees the folders you add.',
+  allFilesNote: 'Adds “All documents” and “Internal storage” to Folders. Android asks you to allow access to all files; without it, Tessel only sees the folders you add.',
   allFilesDenied: 'Access to all files is off in Android settings.',
   allFilesOffNote: 'To withdraw the permission too: Android settings → Apps → Tessel → Permissions.',
   fileGone: 'The file is no longer there.',
@@ -112,6 +119,7 @@ export const en = {
   showAsGrid: 'Show as grid',
   selectedCount: (n: number) => `${n} selected`,
   readingAddedN: (n: number) => (n === 1 ? 'Added to the reading list.' : `Added ${n} documents to the reading list.`),
+  readingAlready: 'Already on the reading list.',
   readingRemovedN: (n: number) => (n === 1 ? 'Taken off the reading list.' : `Took ${n} documents off the reading list.`),
   removeManyTitle: (n: number) => `Remove ${n} documents?`,
   removeManyBody: 'They leave Tessel; the original files stay where they are.',
@@ -166,7 +174,6 @@ export const en = {
   passwordProtected: 'This PDF is password protected.',
   openFailed: 'This file couldn’t be read as a PDF.',
   bookFailed: 'This file couldn’t be read as an EPUB book.',
-  backToLibrary: 'Back to library',
   passwordTitle: 'Password required',
   passwordBody: (name: string) => `“${name}” is protected. Enter its password to open it.`,
   passwordPlaceholder: 'Password',
@@ -180,7 +187,6 @@ export const en = {
   openLink: (url: string) => `Open link: ${url}`,
   goToPageN: (n: number) => `Go to page ${n}`,
   // Reader chrome
-  library: 'Library',
   searchShortcut: 'Search',
   ctrlKey: 'Ctrl+',
   contentsShortcut: 'Contents (T)',
@@ -389,6 +395,7 @@ export const en = {
   rulesTemplate: 'Where filed documents go',
   rulesTemplateNote: 'Folders and file name from {year}, {month}, {day}, {date}, {sender}, {type} and {title}.',
   ruleWhen: 'When the text has…',
+  ruleWhenHint: 'Acme, oat flakes',
   ruleAdd: 'Add rule',
   ruleRemove: 'Remove rule',
   ruleSummary: (match: string) => `“${match}”`,
@@ -447,7 +454,8 @@ export const en = {
   archiveSynced: 'Archive · synced',
   /** For a folder that is called Archive already. */
   syncedOnly: 'Synced with your other devices',
-  useAsArchive: 'Use as archive',
+  useNamedAsArchive: (name: string) => `Make “${name}” the archive`,
+  chooseArchive: 'Choose the archive folder…',
   keepInArchive: 'Keep in archive',
   keptInArchive: 'Kept in the archive’s Inbox: it syncs to your other devices.',
   details: 'Details',

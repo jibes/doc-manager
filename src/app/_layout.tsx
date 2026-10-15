@@ -6,7 +6,7 @@ import { Newsreader_400Regular_Italic } from '@expo-google-fonts/newsreader/400R
 import { Newsreader_500Medium } from '@expo-google-fonts/newsreader/500Medium';
 import { Newsreader_600SemiBold } from '@expo-google-fonts/newsreader/600SemiBold';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -15,6 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ActionSheet } from '@/components/ActionSheet';
 import { AskDialog } from '@/components/AskDialog';
+import { DropZone } from '@/components/DropZone';
 import { PasswordDialog } from '@/components/PasswordDialog';
 import { ShellOpen } from '@/components/ShellOpen';
 import { shell } from '@/lib/shell';
@@ -23,9 +24,15 @@ import { usePalette, usePrefs } from '@/state/prefs';
 import { schedule, startIndexing } from '@/archive/indexer';
 import { startSharing } from '@/archive/sharing';
 import { refreshInboxCount } from '@/archive/inbox';
-import { useLibrary } from '@/state/library';
+import { useLibrary, type ImportItem } from '@/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+/** Files dropped on the window (or opened with the app): into the library, and one of them opened. */
+async function dropped(items: ImportItem[]) {
+  const added = await useLibrary.getState().importFiles(items);
+  if (added.length === 1) router.push({ pathname: '/read/[id]', params: { id: added[0].id } });
+}
 
 export default function RootLayout() {
   const p = usePalette();
@@ -46,6 +53,8 @@ export default function RootLayout() {
 
   // Search across documents: the index is built in the background, and again when the library changes.
   useEffect(() => {
+    // Every screen works with the library (opening, deleting, the reading list), whichever the app starts on.
+    void useLibrary.getState().load();
     startIndexing();
     startSharing();
     void refreshInboxCount();
@@ -69,13 +78,15 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: p.canvas }}>
       <StatusBar style={p.dark ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: p.canvas },
-          animation: 'fade_from_bottom',
-        }}
-      />
+      <DropZone onFiles={(items) => void dropped(items)}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: p.canvas },
+            animation: 'fade_from_bottom',
+          }}
+        />
+      </DropZone>
       <ShellOpen />
       <PasswordDialog />
       <ActionSheet />

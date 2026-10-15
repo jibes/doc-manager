@@ -490,7 +490,7 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
           <Round icon="close" label={t.scanCloseCamera} onPress={onClose} />
           <View style={{ flexDirection: 'row', gap: space.sm }}>
             {torch.available && <Round icon={torch.on ? 'flash' : 'flashOff'} label={t.scanFlash} active={torch.on} onPress={() => void toggleTorch()} />}
-            {!retakeId && (
+            {!retakeId && !cameraError && (
               <Pressable
                 accessibilityRole="switch"
                 aria-checked={autoCapture}
@@ -510,6 +510,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
         <View style={styles.side}>
           <Round testID="scan-import" icon="image" label={t.scanImport} onPress={() => input.current?.click()} />
         </View>
+        {/* No camera (or none allowed): photos can still be imported; nothing to take or time. */}
+        {cameraError ? <View style={styles.shutter} /> : (
         <Pressable
           testID="scan-shutter"
           accessibilityRole="button"
@@ -536,6 +538,7 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, onAutoC
           </svg>
           <View style={styles.shutterCore} />
         </Pressable>
+        )}
         <View style={[styles.side, { alignItems: 'flex-end' }]}>
           {!retakeId && last && (
             <Pressable testID="scan-done" accessibilityRole="button" accessibilityLabel={t.scanDoneA11y(pages.length)} onPress={onClose} style={styles.done}>

@@ -26,7 +26,7 @@ export default function Rules() {
     <View style={{ flex: 1, backgroundColor: p.canvas }}>
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
-          <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} />
+          <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} up={() => router.replace('/inbox')} />
           {archive ? (
             <RulesEditor archive={archive} onError={(e) => setNotice(opError(e))} />
           ) : (
@@ -87,7 +87,7 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
         </View>
       )}
       <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-        <Field label={t.ruleWhen} value={draft.match} onChange={(match) => setDraft({ ...draft, match })} testID="rule-match" placeholder="Nordkorn, Haferflocken" />
+        <Field label={t.ruleWhen} value={draft.match} onChange={(match) => setDraft({ ...draft, match })} testID="rule-match" placeholder={t.ruleWhenHint} />
         <View style={styles.fields}>
           <Field label={t.detailSender} value={draft.sender} onChange={(sender) => setDraft({ ...draft, sender })} testID="rule-sender" />
           <Field label={t.detailType} value={draft.type} onChange={(type) => setDraft({ ...draft, type })} testID="rule-type" />
