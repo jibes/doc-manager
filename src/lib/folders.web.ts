@@ -1,7 +1,7 @@
 import { createStore, del, entries, set } from 'idb-keyval';
 
 import { t } from '@/i18n';
-import type { FolderEntry, FolderRoot, FoldersApi } from './folderTypes';
+import { PartlyDone, type FolderEntry, type FolderRoot, type FoldersApi } from './folderTypes';
 import { canPickFolders, pickDirectory, type DirHandle, type FileHandle } from './fsa';
 import { shell, shellDocUrl, shellRequest, stageForShell } from './shell';
 
@@ -49,16 +49,24 @@ const shellFolders: FoldersApi = {
     return { id: made.uri, uri: made.uri, name: made.name, kind: kindOf(made.name) ?? 'pdf', size: data.size, modified: Date.now() };
   },
   rename: (_root, _dir, e, name) => shellRequest<string>('rename', { uri: e.uri, name }),
-  delete: (_root, _dir, list) => shellRequest('delete', { uris: list.map((e) => e.uri) }),
-  transfer: (from, list, to, move) =>
-    shellRequest('transfer', {
+  async delete(_root, _dir, list) {
+    const failed = (await shellRequest<{ uri: string; error: string }[] | null>('delete', { uris: list.map((e) => e.uri) })) ?? [];
+    if (failed.length) throw new PartlyDone(failed[0].error, list.map((e) => e.uri!).filter((u) => !failed.some((f) => f.uri === u)));
+  },
+  async transfer(from, list, to, move) {
+    const out = await shellRequest<{ from: string; to?: string; error?: string }[]>('transfer', {
       items: list.map((e) => ({ uri: e.uri, name: e.name, dir: e.kind === 'dir' })),
       srcRoot: from.root,
       srcDir: from.dir ?? '',
       root: to.root,
       dir: to.dir ?? '',
       move,
-    }),
+    });
+    const done = out.filter((x): x is { from: string; to: string } => !!x.to);
+    const failed = out.find((x) => x.error);
+    if (failed) throw new PartlyDone(failed.error!, done);
+    return done;
+  },
   share: (_root, list) => shellRequest('share', { uris: list.map((e) => e.uri) }),
   dirAt: async (root, path, create) => (path.length ? shellRequest<string | null>('dirAt', { root, path, create }) : undefined),
   listNames: (root, path) => shellRequest<string[]>('names', { root, path }),
@@ -199,14 +207,26 @@ const browserFolders: FoldersApi = {
   },
   async delete(root, dir, list) {
     const parent = await writable(root, dir);
-    for (const e of list) await parent.removeEntry(e.name, { recursive: true });
+    for (const [i, e] of list.entries()) {
+      try {
+        await parent.removeEntry(e.name, { recursive: true });
+      } catch (err) {
+        if (!i) throw err;
+        throw new PartlyDone(err instanceof Error ? err.message : String(err), []);
+      }
+    }
   },
   async transfer(from, list, to, move) {
     const src = await writable(from.root, from.dir);
     const dest = await writable(to.root, to.dir);
-    for (const e of list) {
-      await copyEntry(src, e.name, e.kind === 'dir', dest, await freeName(dest, e.name, e.kind === 'dir'));
-      if (move) await src.removeEntry(e.name, { recursive: true });
+    for (const [i, e] of list.entries()) {
+      try {
+        await copyEntry(src, e.name, e.kind === 'dir', dest, await freeName(dest, e.name, e.kind === 'dir'));
+        if (move) await src.removeEntry(e.name, { recursive: true });
+      } catch (err) {
+        if (!i) throw err;
+        throw new PartlyDone(err instanceof Error ? err.message : String(err), []);
+      }
     }
     return [];
   },

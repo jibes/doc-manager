@@ -2,6 +2,7 @@ import { memo, useRef, useState, type CSSProperties, type SyntheticEvent } from 
 
 import type { FormField, FormValue } from '@/engine/types';
 import { t } from '@/i18n';
+import { useDrafts } from './drafts';
 
 /**
  * Form fields over the page. PDFium draws every field (value, check mark, highlight); these controls are
@@ -114,7 +115,9 @@ function TextField({
   const h = (style.height as number) ?? 20;
   const fontSize = f.multiline ? Math.max(11, Math.min(18, 11 * scale)) : Math.max(11, Math.min(h * 0.68, 18 * scale));
   const commit = () => {
-    if (!cancelRef.current && draft !== null && draft !== value) void onChange(f.index, draft);
+    // Typed text counts as an edit until the engine has it (leaving before then asks first).
+    if (!cancelRef.current && draft !== null && draft !== value) void onChange(f.index, draft).finally(() => useDrafts.setState({ field: false }));
+    else useDrafts.setState({ field: false });
     cancelRef.current = false;
     setDraft(null);
   };
@@ -126,7 +129,10 @@ function TextField({
     value: draft ?? value,
     onFocus: () => setDraft(value),
     onBlur: commit,
-    onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
+    onChange: (e: { target: { value: string } }) => {
+      setDraft(e.target.value);
+      useDrafts.setState({ field: e.target.value !== value });
+    },
     onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
       if (e.key === 'Escape') {
         e.stopPropagation();

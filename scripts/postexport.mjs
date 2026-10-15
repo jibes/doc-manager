@@ -1,6 +1,6 @@
 // Finalises `expo export -p web` output for static hosting under EXPO_BASE_URL:
 // prefixes our hand-written absolute links in index.html, preloads the fonts, and adds a 404.html SPA fallback.
-import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 
 const base = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
 // dist for the website; the Android app bundles its own export (OUT_DIR, base "").
@@ -20,9 +20,18 @@ const html = readFileSync(file, 'utf8')
   .replace('</head>', `${fonts}</head>`);
 writeFileSync(file, html);
 copyFileSync(file, `${out}/404.html`);
-// The offline cache is this build's own (see public/sw.js): named by the version and when it was built.
+// The offline cache is this build's own (see public/sw.js): named by the version and when it was built, and holding
+// every file of the build (the code, fonts, icons and images the first screen needs), fetched when it installs.
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 const sw = `${out}/sw.js`;
-if (existsSync(sw)) writeFileSync(sw, readFileSync(sw, 'utf8').replace("const CACHE = 'tessel-dev';", `const CACHE = 'tessel-${version}-${Date.now().toString(36)}';`));
+const files = (dir) => (existsSync(`${out}/${dir}`) ? readdirSync(`${out}/${dir}`, { recursive: true }).map((f) => `${dir}/${String(f).replaceAll('\\', '/')}`).filter((f) => statSync(`${out}/${f}`).isFile()) : []);
+const build = [...files('_expo'), ...files('assets'), ...files('icons')];
+if (existsSync(sw)) {
+  const stamped = readFileSync(sw, 'utf8')
+    .replace("const CACHE = 'tessel-dev';", `const CACHE = 'tessel-${version}-${Date.now().toString(36)}';`)
+    .replace('const BUILD = [];', `const BUILD = ${JSON.stringify(build)};`);
+  if (!build.length || stamped.includes('const BUILD = [];')) throw new Error('postexport: the build list did not go into sw.js');
+  writeFileSync(sw, stamped);
+}
 writeFileSync(`${out}/.nojekyll`, '');
 console.log(`postexport: base="${base || '/'}"`);

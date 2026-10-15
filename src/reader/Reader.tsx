@@ -30,7 +30,9 @@ import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 import { detailsOf, saveDetails } from '@/archive/details';
-import { allDocs, invalidate, pauseIndexing, schedule } from '@/archive/indexer';
+import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/archive/indexer';
+import type { IndexedDoc } from '@/archive/search';
+import { useThrottled } from '@/lib/useThrottled';
 import { inboxDir, refreshInboxCount } from '@/archive/inbox';
 import { docKey } from '@/archive/shared';
 import { folders } from '@/lib/folders';
@@ -47,6 +49,7 @@ import { ReflowView, type ReflowApi } from './ReflowView';
 import { NoteDialog, type NoteRequest } from './NoteDialog';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
+import { discardDetails, useDrafts } from './drafts';
 import { useMoving } from './useMoving';
 import { MoreMenu, type MenuItem } from './MoreMenu';
 import { isWide } from './Panel';
@@ -128,6 +131,7 @@ export function Reader({
 
   // A document not in the archive yet (only on this device, or in another folder) can be kept there.
   const archive = usePrefs((s) => s.archive);
+  const indexed = useThrottled(useIndex((s) => s.changed), 1500);
   const [outside, setOutside] = useState(false);
   useEffect(() => {
     if (!archive || Platform.OS !== 'web') return;
@@ -136,15 +140,22 @@ export function Reader({
     const timer = setTimeout(() => {
       (async () => {
         const key = doc.shareKey ?? (await docKey(await handle.bytes()));
-        const docs = await allDocs();
-        if (alive) setOutside(!docs.some((d) => d.share === key && d.place.kind === 'folder' && d.place.root === archive));
+        const filed = (await allDocs()).filter((d) => d.place.kind === 'folder' && d.place.root === archive);
+        // Its own file may be there with other bytes (its edits saved since): told by where the file is.
+        const link = doc.linked ? await repo.linkOf(doc.id) : undefined;
+        const own = doc.linked && !link ? await repo.handleOf(doc.id) : undefined;
+        const isOwn = async (d: IndexedDoc) =>
+          d.place.kind === 'folder' && ((!!link && d.place.entry.uri === link) || (!!own && !!d.place.entry.handle && d.name === doc.fileName && (await own.isSameEntry(d.place.entry.handle).catch(() => false))));
+        let inside = filed.some((d) => d.share === key);
+        for (const d of filed) if (!inside) inside = await isOwn(d);
+        if (alive) setOutside(!inside);
       })().catch(() => {});
     }, 2000);
     return () => {
       alive = false;
       clearTimeout(timer);
     };
-  }, [archive, doc.shareKey, handle]);
+  }, [archive, doc.shareKey, doc.linked, doc.id, doc.fileName, handle, indexed]);
   const keepInArchive = async () => {
     if (!archive) return;
     try {
@@ -177,8 +188,11 @@ export function Reader({
   const addText = async () => {
     if (reading) return;
     setReading({ done: 0, total: 0 });
+    // Once reading starts, the open document may have the text and the file not: then it is opened again.
+    let started = false;
     try {
       if (!(await repo.requestAccess(doc.id, true))) throw new Error('denied');
+      started = true;
       const bytes = await makeSearchable(handle, (done, total) => setReading({ done, total }));
       if (typeof bytes === 'string') {
         setReloaded(bytes === 'has-text' ? t.searchableNothing : t.searchableNone);
@@ -191,7 +205,11 @@ export function Reader({
       else setReloaded(t.searchableDone);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      setReloaded(t.searchableFailed(m === 'denied' ? t.writeDenied : m));
+      const failed = t.searchableFailed(m === 'denied' ? t.writeDenied : m);
+      if (started && onReload) {
+        afterReload = failed;
+        onReload();
+      } else setReloaded(failed);
     } finally {
       setReading(null);
     }
@@ -440,7 +458,8 @@ export function Reader({
       noteBusy.current = true;
       try {
         await handle.updateAnnotation(a.page, a.index, { contents });
-        setAnnots((list) => list && list.map((x) => (x === a ? { ...x, contents } : x)));
+        // By place, not by object: a list read meanwhile has new ones.
+        setAnnots((list) => list && list.map((x) => (x.page === a.page && x.index === a.index ? { ...x, contents } : x)));
         annotated([a.page]);
       } finally {
         noteBusy.current = false;
@@ -454,8 +473,8 @@ export function Reader({
       noteBusy.current = true;
       try {
         await handle.removeAnnotation(a.page, a.index);
-        // Later annotations on that page move up one place.
-        setAnnots((list) => list && list.filter((x) => x !== a).map((x) => (x.page === a.page && x.index > a.index ? { ...x, index: x.index - 1 } : x)));
+        // Later annotations on that page move up one place (matched by place: a list read meanwhile has new objects).
+        setAnnots((list) => list && list.filter((x) => x.page !== a.page || x.index !== a.index).map((x) => (x.page === a.page && x.index > a.index ? { ...x, index: x.index - 1 } : x)));
         annotated([a.page]);
       } finally {
         noteBusy.current = false;
@@ -565,6 +584,8 @@ export function Reader({
   const closeSomething = useCallback(() => {
     if (noteRequest) return noteRequest.resolve(null), true;
     if (menu) return setMenu(false), true;
+    // Details typed in and not saved are asked about first.
+    if (panel === 'details' && useDrafts.getState().details) return void discardDetails().then((yes) => yes && setPanel(null)), true;
     if (panel) return setPanel(null), true;
     return false;
   }, [noteRequest, menu, panel]);
@@ -572,7 +593,7 @@ export function Reader({
     () =>
       onBack(() => {
         if (closeSomething()) return true;
-        if (!edits.dirty) return false;
+        if (!edits.unsaved) return false;
         edits.leave();
         return true;
       }),
@@ -591,7 +612,7 @@ export function Reader({
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '') || !!target?.closest?.('.fl');
       if (mod && e.key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
       // ⌘S saves edits when there are any; otherwise it downloads, as before.
-      if (mod && e.key === 's') return e.preventDefault(), void (edits.dirty ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
+      if (mod && e.key === 's') return e.preventDefault(), void (edits.dirty || useDrafts.getState().field ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
       if (mod && e.key === 'f') {
         e.preventDefault();
         setChrome(true);

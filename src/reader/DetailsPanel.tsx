@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
@@ -7,6 +7,7 @@ import { fonts, radius, space, type Palette } from '@/design/tokens';
 import { t } from '@/i18n';
 import type { Details } from '@/archive/pdfInfo';
 import { Panel } from './Panel';
+import { discardDetails, useDrafts } from './drafts';
 
 /** A document's details as kept in the PDF: title, sender, type, date and tags. */
 export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { palette: Palette; initial: Details; busy: boolean; onSave: (d: Details) => void; onClose: () => void }) {
@@ -14,6 +15,16 @@ export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { p
   const [tag, setTag] = useState('');
   const [bad, setBad] = useState(false);
   const set = (patch: Partial<Details>) => setD((x) => ({ ...x, ...patch }));
+  // Changes not saved yet: closing the panel, or leaving the document, asks first.
+  const changed = !!tag.trim() || JSON.stringify(d) !== JSON.stringify(initial);
+  useEffect(() => {
+    useDrafts.setState({ details: changed });
+  }, [changed]);
+  useEffect(() => () => useDrafts.setState({ details: false }), []);
+  const close = () => {
+    if (!changed) return onClose();
+    void discardDetails().then((yes) => yes && onClose());
+  };
   const addTag = (raw: string) => {
     const words = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (words.length) set({ tags: [...new Set([...d.tags, ...words])] });
@@ -43,7 +54,7 @@ export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { p
   );
 
   return (
-    <Panel title={t.details} onClose={onClose} testID="details-panel">
+    <Panel title={t.details} onClose={close} testID="details-panel">
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.lg }}>
         {field('detail-title', t.detailTitle, d.title, (title) => set({ title }))}
         {field('detail-sender', t.detailSender, d.sender, (sender) => set({ sender }))}

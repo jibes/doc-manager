@@ -83,6 +83,10 @@ export const repo: LibraryRepo = {
     const stored = await get<unknown>(id, files);
     return isShellLink(stored) ? stored.uri : undefined;
   },
+  async handleOf(id) {
+    const stored = await get<unknown>(id, files);
+    return isFileHandle(stored) ? stored : undefined;
+  },
   async saveCover(id, cover) {
     await set(id, cover, covers);
   },

@@ -25,6 +25,19 @@ describe('shared reading', () => {
     expect(record(later, [{ key: 'k', doc: doc({ position: { page: 4, offset: 0.5 } }) }], 3000).k.reading).toEqual({ v: null, at: 3000 });
   });
 
+  it('one document in two places: the record changed last tells, whatever the library order', () => {
+    const before = record({}, [{ key: 'k', doc: doc({ position: { page: 3, offset: 0 }, openedAt: 100 }) }], 500);
+    const reading = doc({ id: 'new', position: { page: 9, offset: 0 }, openedAt: 900, bookmarks: [4] });
+    const stale = doc({ id: 'old', position: { page: 3, offset: 0 }, openedAt: 100 });
+    for (const docs of [[reading, stale], [stale, reading]]) {
+      const own = record(before, docs.map((d) => ({ key: 'k', doc: d })), 1000);
+      expect(own.k.position).toEqual({ v: { page: 9, offset: 0 }, at: 1000 });
+      expect(own.k.bookmarks).toEqual({ v: [4], at: 900 });
+      // Both records then follow it.
+      expect(changesFor(stale, merge([{ device: 'a', docs: own }]).k)).toEqual({ position: { page: 9, offset: 0 }, bookmarks: [4] });
+    }
+  });
+
   it('takes the newest of each value over all devices', () => {
     const a: DeviceState = { device: 'a', docs: { k: { title: 'R', position: { v: { page: 2, offset: 0 }, at: 10 }, bookmarks: { v: [1], at: 50 } } } };
     const b: DeviceState = { device: 'b', docs: { k: { title: 'R', position: { v: { page: 7, offset: 0 }, at: 20 }, bookmarks: { v: [], at: 5 }, reading: { v: { since: 3 }, at: 3 } } } };

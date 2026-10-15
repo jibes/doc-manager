@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.provider.MediaStore
@@ -206,11 +207,19 @@ class Folders(private val context: Context) {
 
     // ---------- reading and writing ----------
 
+    /** Every storage volume's root (internal storage, SD cards, USB drives): all files access reaches them all. */
+    private fun volumes(): List<File> {
+        val roots = if (Build.VERSION.SDK_INT >= 30) context.getSystemService(StorageManager::class.java)?.storageVolumes?.mapNotNull { it.directory }
+        else context.getExternalFilesDirs(null).filterNotNull().mapNotNull { f -> f.path.substringBefore("/Android/data/", "").ifEmpty { null }?.let(::File) }
+        return roots.orEmpty().ifEmpty { listOf(storageRoot) }
+    }
+
     /** A file the user can reach through a granted folder, or anywhere with all files access. */
     private fun allowed(uri: Uri): Boolean = when (uri.scheme) {
         "content" -> allFilesGranted() || grantedTree(uri) != null
         "file" -> File(uri.path ?: "").let { f ->
-            (allFilesGranted() && f.canonicalPath.startsWith(storageRoot.canonicalPath)) || (appFolderUsable() && isInAppFolder(f))
+            val path = f.canonicalPath
+            (allFilesGranted() && volumes().any { v -> v.canonicalPath.let { path == it || path.startsWith(it + File.separator) } }) || (appFolderUsable() && isInAppFolder(f))
         }
         else -> false
     }
@@ -234,9 +243,25 @@ class Folders(private val context: Context) {
     /** Replaces a document's bytes with `source` (the reader saved form fields or annotations). */
     fun write(uri: Uri, source: File) {
         check(uri)
-        if (uri.scheme == "file") replace(File(uri.path!!)) { out -> source.inputStream().use { it.copyTo(out) } }
-        else resolver.openOutputStream(uri, "wt")!!.use { out -> source.inputStream().use { it.copyTo(out) } }
+        if (uri.scheme == "file") return replace(File(uri.path!!)) { out -> source.inputStream().use { it.copyTo(out) } }
+        // Written beside it first: a provider that can't take it all (storage full) fails there, the document still whole.
+        val trial = besides(uri)
+        try {
+            if (trial != null) resolver.openOutputStream(trial, "w")!!.use { out -> source.inputStream().use { it.copyTo(out) } }
+            resolver.openOutputStream(uri, "wt")!!.use { out -> source.inputStream().use { it.copyTo(out) } }
+        } finally {
+            if (trial != null) runCatching { DocumentsContract.deleteDocument(resolver, trial) }
+        }
     }
+
+    /** A new hidden document in the same folder as `uri`, where its provider can say which folder that is. */
+    private fun besides(uri: Uri): Uri? = runCatching {
+        val tree = grantedTree(uri) ?: return null
+        val ids = DocumentsContract.findDocumentPath(resolver, uri)?.path ?: return null
+        if (ids.size < 2) return null
+        val name = resolver.query(uri, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "document"
+        DocumentsContract.createDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, ids[ids.size - 2]), "application/octet-stream", ".$name.tessel-tmp")
+    }.getOrNull()
 
     /**
      * Writes a file whole or not at all: into a hidden temporary file beside it, then renamed over it, so a sync
@@ -340,7 +365,11 @@ class Folders(private val context: Context) {
             is TreePlace -> DocumentsContract.createDocument(resolver, at.dir, mime, name) ?: throw IllegalStateException("Can't create $name")
             is PathPlace -> Uri.fromFile(freeName(at.dir, name).also { if (!it.createNewFile()) throw IllegalStateException("Can't create $name") })
         }
-        write(uri, source)
+        // Not left behind empty or half written (a sync tool would spread it).
+        runCatching { write(uri, source) }.onFailure { e ->
+            runCatching { delete(uri) }
+            throw e
+        }
         val created = if (uri.scheme == "file") File(uri.path!!).name
         else resolver.query(uri, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } ?: name
         return JSONObject().put("uri", uri.toString()).put("name", created)
@@ -423,28 +452,57 @@ class Folders(private val context: Context) {
     }
 
     /**
-     * Copies (or moves) items into a folder; returns where each one went. Within one provider a move is a
-     * move; across places it is a copy followed by deleting the original.
+     * Copies (or moves) items into a folder; returns where each one went, or why it didn't. Within one provider a
+     * move is a move; across places it is a copy followed by deleting the original.
      */
     fun transfer(items: List<Triple<Uri, String, Boolean>>, srcParent: Uri?, root: String, dir: String?, move: Boolean): JSONArray {
         val at = place(root, dir)
         val out = JSONArray()
         for ((uri, name, isDir) in items) {
-            check(uri)
-            val to = when {
-                move && uri.scheme == "file" && at is PathPlace -> {
-                    val target = freeName(at.dir, name)
-                    if (!File(uri.path!!).renameTo(target)) throw IllegalStateException("Can't move $name")
-                    Uri.fromFile(target)
+            runCatching {
+                check(uri)
+                // Into itself, a copy would copy its own copy again and again (until the storage is full).
+                if (isDir && within(at, uri)) throw IllegalArgumentException("inside-itself")
+                when {
+                    move && uri.scheme == "file" && at is PathPlace -> {
+                        val target = freeName(at.dir, name)
+                        if (!File(uri.path!!).renameTo(target)) throw IllegalStateException("Can't move $name")
+                        Uri.fromFile(target)
+                    }
+                    move && uri.scheme == "content" && at is TreePlace && srcParent != null && uri.authority == at.dir.authority ->
+                        runCatching { DocumentsContract.moveDocument(resolver, uri, srcParent, at.dir) }.getOrNull() ?: copyThenDelete(uri, name, isDir, at)
+                    move -> copyThenDelete(uri, name, isDir, at)
+                    else -> copyInto(uri, name, isDir, at)
                 }
-                move && uri.scheme == "content" && at is TreePlace && srcParent != null && uri.authority == at.dir.authority ->
-                    runCatching { DocumentsContract.moveDocument(resolver, uri, srcParent, at.dir) }.getOrNull() ?: copyThenDelete(uri, name, isDir, at)
-                move -> copyThenDelete(uri, name, isDir, at)
-                else -> copyInto(uri, name, isDir, at)
-            }
-            out.put(JSONObject().put("from", uri.toString()).put("to", to.toString()))
+            }.onSuccess { to -> out.put(JSONObject().put("from", uri.toString()).put("to", to.toString())) }
+                .onFailure { out.put(JSONObject().put("from", uri.toString()).put("error", it.message ?: it.javaClass.simpleName)) }
         }
         return out
+    }
+
+    /** Where a folder is on the device: file URIs, and internal storage's documents (their IDs are paths there). */
+    private fun pathOf(uri: Uri): File? = when (uri.scheme) {
+        "file" -> uri.path?.let(::File)
+        "content" -> if (uri.authority != "com.android.externalstorage.documents") null
+        else runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()?.takeIf { it.startsWith("primary:") }?.let { File(storageRoot, it.removePrefix("primary:")) }
+        else -> null
+    }
+
+    /** Whether the place `at` is the folder `dir` or inside it. */
+    private fun within(at: Place, dir: Uri): Boolean {
+        val target = when (at) {
+            is PathPlace -> Uri.fromFile(at.dir)
+            is TreePlace -> at.dir
+        }
+        val a = pathOf(target)?.canonicalPath
+        val d = pathOf(dir)?.canonicalPath
+        if (a != null && d != null) return a == d || a.startsWith(d + File.separator)
+        if (target.scheme != "content" || dir.scheme != "content" || target.authority != dir.authority) return false
+        return runCatching {
+            val ta = DocumentsContract.getDocumentId(target)
+            val td = DocumentsContract.getDocumentId(dir)
+            ta == td || ta.startsWith("$td/") || DocumentsContract.isChildDocument(resolver, dir, target)
+        }.getOrDefault(false)
     }
 
     private fun copyThenDelete(uri: Uri, name: String, isDir: Boolean, at: Place): Uri = copyInto(uri, name, isDir, at).also { delete(uri) }
@@ -458,6 +516,8 @@ class Folders(private val context: Context) {
                 }
             }
         }
+        // What the folder holds before its copy is made (were the copy inside it, it would be among them).
+        val kids = children(uri)
         val made = Uri.parse(
             when (at) {
                 is PathPlace -> Uri.fromFile(freeName(at.dir, name).also { it.mkdir() }).toString()
@@ -465,7 +525,7 @@ class Folders(private val context: Context) {
             },
         )
         val inner: Place = if (made.scheme == "file") PathPlace(File(made.path!!)) else TreePlace(made)
-        for ((child, childName, childDir) in children(uri)) copyInto(child, childName, childDir, inner)
+        for ((child, childName, childDir) in kids) copyInto(child, childName, childDir, inner)
         return made
     }
 

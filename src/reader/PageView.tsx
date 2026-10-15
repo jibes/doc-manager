@@ -51,6 +51,8 @@ function usePageExtras(handle: DocHandle, page: number) {
 function useFields(cache: RasterCache, page: number, onEdited?: () => void) {
   const { handle } = cache;
   const [fields, setFields] = useState<{ page: number; list: FormField[] } | null>(null);
+  // Read again whenever the page changes (a note deleted shifts the places fields are addressed by).
+  const version = useSyncExternalStore(cache.subscribe, () => cache.version(page));
   useEffect(() => {
     if (!handle.hasForm) return;
     let alive = true;
@@ -58,7 +60,7 @@ function useFields(cache: RasterCache, page: number, onEdited?: () => void) {
     return () => {
       alive = false;
     };
-  }, [handle, page]);
+  }, [handle, page, version]);
   const change = useCallback(
     (index: number, value: FormValue) =>
       handle.setField(page, index, value).then((list) => {

@@ -691,13 +691,20 @@ function setFormField(docId: number, pageIndex: number, index: number, value: Fo
   return formFields(docId, pageIndex);
 }
 
-/** The document as it is now (edits included), as PDF bytes. */
+/** FPDF_SaveAsCopy flag: append the changes, keeping the file's bytes as they were. */
+const FPDF_INCREMENTAL = 1;
+
+/**
+ * The document as it is now (edits included), as PDF bytes. A signed one is saved as an update appended to its
+ * bytes, which its signatures still cover (PDFium's update holds the whole document again: only where needed).
+ */
 function save(docId: number): ArrayBuffer {
   const d = getDoc(docId);
   if (d.form) M.FORM_ForceToKillFocus(d.form);
   const w = M.PDFiumExt_OpenFileWriter();
   try {
-    if (!M.PDFiumExt_SaveAsCopy(d.ptr, w)) throw new Error('Could not save the PDF');
+    const signed = M.FPDF_GetSignatureCount(d.ptr) > 0;
+    if (!(signed ? M.FPDF_SaveAsCopy(d.ptr, w, FPDF_INCREMENTAL) : M.PDFiumExt_SaveAsCopy(d.ptr, w))) throw new Error('Could not save the PDF');
     const n = M.PDFiumExt_GetFileWriterSize(w);
     return withScratch(n, (p) => {
       M.PDFiumExt_GetFileWriterData(w, p, n);
@@ -711,8 +718,6 @@ function save(docId: number): ArrayBuffer {
 // ---------- recognised text ----------
 
 const FPDF_TEXTRENDERMODE_INVISIBLE = 3;
-/** FPDF_SaveAsCopy flag: append the changes, keeping the file's bytes as they were. */
-const FPDF_INCREMENTAL = 1;
 
 /** The next word continues this one's line: overlaps it vertically by half and starts to its right. */
 function sameLine(a: NormRect, b: NormRect): boolean {

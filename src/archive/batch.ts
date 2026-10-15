@@ -1,4 +1,5 @@
 import { folders, type FolderEntry, type Place as FolderPlace } from '@/lib/folders';
+import { PartlyDone } from '@/lib/folderTypes';
 import { shareDocs } from '@/lib/fileActions';
 import { useLibrary } from '@/state/library';
 import type { DocRecord } from '@/storage';
@@ -85,7 +86,11 @@ export async function deleteAll(docs: IndexedDoc[]): Promise<{ trashed: { root: 
       trashed.push({ root: from.root, items: await moveToTrash(from.root, from.dir, entries) });
       kept.push(...urisOf(entries));
     } else {
-      await folders.delete(from.root, from.dir, entries);
+      await folders.delete(from.root, from.dir, entries).catch(async (e: unknown) => {
+        // The library forgets what did go before the error is told.
+        if (e instanceof PartlyDone) await useLibrary.getState().forgetFiles([...gone, ...(e.done as string[])]);
+        throw e;
+      });
       gone.push(...urisOf(entries));
     }
   }

@@ -7,6 +7,7 @@ import type { PageSpec } from './engine/pipeline';
 import { forgetExport, onPageTurned, resetExports } from './exportCache';
 import { dropRenders } from './renderCache';
 import { forgetPage } from './services';
+import type { SaveProgress } from './save';
 import type { Page } from './types';
 
 /**
@@ -47,9 +48,14 @@ type ScanState = {
   applyToAll(filter: FilterId): () => void;
   setTitle(title: string): void;
   setAiRead(on: boolean): void;
+  /** Undos offered so far do nothing (the document is being saved as it is now). */
+  seal(): void;
   /** Ends the document (`ids`: only those pages, the ones just saved; others taken meanwhile stay). */
   clear(ids?: string[]): void;
 };
+
+/** The save under way, from whichever review started it: every review shows it, and waits. */
+export const useScanSaving = create<{ progress: SaveProgress | null; controller: AbortController | null }>(() => ({ progress: null, controller: null }));
 
 /**
  * What the scanner has to say (a photo that couldn't be read, a page deleted with its Undo), shown by whichever
@@ -61,6 +67,12 @@ export const sayScan = (text: string | null, undo?: () => void) => useScanMessag
 let pending = false;
 /** Bumped when the document is discarded, so an Undo offered for the old one does nothing in the new one. */
 let generation = 0;
+/** Read once, however many screens ask at the same time (two reads would add every page twice). */
+let restoring: Promise<void> | null = null;
+/** Pages of the draft whose photos couldn't be read now: kept in the draft, for the next start to try again. */
+let unread: PageRecord[] = [];
+/** The draft couldn't be read at all: it isn't written over either. */
+let unreadable = false;
 
 export const useScan = create<ScanState>((setState, getState) => {
   // Changes made together (one tap) are written together.
@@ -73,8 +85,8 @@ export const useScan = create<ScanState>((setState, getState) => {
   const flush = () => {
     pending = false;
     const { pages, title, loaded } = getState();
-    if (!loaded) return;
-    const draft: Draft = { pages: pages.map(({ source: _, ...rest }) => rest), title };
+    if (!loaded || unreadable) return;
+    const draft: Draft = { pages: [...pages.map(({ source: _, ...rest }) => rest), ...unread], title };
     set('draft', draft, store()).catch(failed);
   };
   const savePhoto = (page: Page) => {
@@ -134,22 +146,33 @@ export const useScan = create<ScanState>((setState, getState) => {
     aiRead: false,
     unsaved: false,
 
-    async restore() {
-      if (getState().loaded) return;
-      try {
-        const draft = await get<Draft>('draft', store());
+    restore() {
+      if (getState().loaded) return Promise.resolve();
+      restoring ??= (async () => {
+        let draft: Draft | undefined;
+        try {
+          draft = await get<Draft>('draft', store());
+        } catch (e) {
+          // Not written over: the pages taken now are kept in this session only.
+          console.warn('Scan draft could not be restored', e);
+          unreadable = true;
+          setState({ loaded: true, unsaved: true });
+          return;
+        }
         const pages: Page[] = [];
         for (const rec of draft?.pages ?? []) {
-          const source = await get<Blob>(photoKey(rec.id), store());
-          if (source) pages.push({ ...rec, source });
+          try {
+            const source = await get<Blob>(photoKey(rec.id), store());
+            if (source) pages.push({ ...rec, source });
+          } catch {
+            unread.push(rec);
+          }
         }
         // Pages taken while the draft was loading go after the saved ones (and into the draft with them).
         setState((s) => ({ pages: [...pages, ...s.pages], title: s.title || draft?.title || '', loaded: true }));
-      } catch (e) {
-        console.warn('Scan draft could not be restored', e);
-        setState({ loaded: true });
-      }
-      save();
+        save();
+      })();
+      return restoring;
     },
 
     add(page) {
@@ -256,20 +279,27 @@ export const useScan = create<ScanState>((setState, getState) => {
 
     setAiRead: (aiRead) => setState({ aiRead }),
 
+    seal() {
+      generation++;
+    },
+
     clear(ids) {
       generation++;
-      const { pages, title } = getState();
+      // What the scanner said was about this document (an Undo with it).
+      sayScan(null);
+      const { pages } = getState();
       const gone = ids ? pages.filter((p) => ids.includes(p.id)) : pages;
       const kept = ids ? pages.filter((p) => !ids.includes(p.id)) : [];
       for (const page of gone) forget(page);
-      if (kept.length) setState({ pages: kept });
-      else {
-        setState({ pages: [], title: '', aiRead: false, unsaved: false });
-        // Nothing left to prepare: the export cache empties and its workers close.
-        resetExports();
-      }
-      const draft: Draft = { pages: kept.map(({ source: _, ...rest }) => rest), title: kept.length ? title : '' };
-      Promise.all([set('draft', draft, store()), delMany(gone.map((p) => photoKey(p.id)), store())]).catch(() => {});
+      // Pages taken while it was saved are a new document: its own title, and no AI reading unless switched on for it.
+      setState({ pages: kept, title: '', aiRead: false, ...(kept.length ? {} : { unsaved: false }) });
+      // Nothing left to prepare: the export cache empties and its workers close.
+      if (!kept.length) resetExports();
+      const lost = ids ? [] : unread;
+      if (!ids) unread = [];
+      if (unreadable) return;
+      const draft: Draft = { pages: [...kept.map(({ source: _, ...rest }) => rest), ...unread], title: '' };
+      Promise.all([set('draft', draft, store()), delMany([...gone, ...lost].map((p) => photoKey(p.id)), store())]).catch(() => {});
     },
   };
 });

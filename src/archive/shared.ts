@@ -40,19 +40,27 @@ function since(d: DocRecord, f: Field): number {
   return d.openedAt ?? d.addedAt;
 }
 
-/** This device's state brought up to date with its library: a value that changed since is stamped `now`. */
+/**
+ * This device's state brought up to date with its library: a value that changed since is stamped `now`. One
+ * document may be in the library more than once (the same file in two places): of its records, the one that
+ * changed most recently tells.
+ */
 export function record(own: Record<string, SharedDoc>, docs: { key: string; doc: DocRecord }[], now: number): Record<string, SharedDoc> {
   const out: Record<string, SharedDoc> = { ...own };
-  for (const { key, doc } of docs) {
+  const byKey = new Map<string, DocRecord[]>();
+  for (const { key, doc } of docs) byKey.set(key, [...(byKey.get(key) ?? []), doc]);
+  for (const [key, list] of byKey) {
     const prev = own[key];
-    const next: SharedDoc = { ...prev, title: doc.title };
+    const newest = (f: Field) => [...list].sort((a, b) => since(b, f) - since(a, f));
+    const next: SharedDoc = { ...prev, title: newest('position')[0].title };
     for (const f of FIELDS) {
-      const v = value(doc, f);
       const known = prev?.[f];
-      if (known && same(known.v, v)) continue;
-      // A default (not on the list, no bookmarks, at the start) is no news until it replaces something.
-      if (!known && isDefault(f, v)) continue;
-      (next as Record<Field, Stamped<unknown>>)[f] = { v, at: known ? now : since(doc, f) };
+      const doc = newest(f).find((d) => {
+        const v = value(d, f);
+        // A default (not on the list, no bookmarks, at the start) is no news until it replaces something.
+        return known ? !same(known.v, v) : !isDefault(f, v);
+      });
+      if (doc) (next as Record<Field, Stamped<unknown>>)[f] = { v: value(doc, f), at: known ? now : since(doc, f) };
     }
     out[key] = next;
   }

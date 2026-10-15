@@ -64,6 +64,8 @@ export interface LibraryRepo {
   relink(id: string, uri: string): Promise<void>;
   /** Android app: the URI of the file a document is linked to (to hand it to other apps); undefined for a copy. */
   linkOf(id: string): Promise<string | undefined>;
+  /** Chromium: the handle of the file a document is linked to; undefined for a copy. */
+  handleOf(id: string): Promise<FileHandle | undefined>;
   /** Displayable URI (object URL on web, file URI on native) or null. */
   coverUri(id: string): Promise<string | null>;
   /** Text recognized on-device for scanned PDFs, per page; undefined = not recognized yet. */

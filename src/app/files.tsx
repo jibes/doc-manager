@@ -16,6 +16,7 @@ import { useNotice } from '@/components/useNotice';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, opError, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
+import { PartlyDone } from '@/lib/folderTypes';
 import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { setArchive } from '@/archive/views';
@@ -496,7 +497,11 @@ export function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: P
       for (const { from, entries } of clip.items) {
         // Already here: nothing to move.
         if (clip.move && from.root === here.root && (from.dir ?? '') === (here.dir ?? '')) continue;
-        const moved = await folders.transfer(from, entries, here, clip.move);
+        const moved = await folders.transfer(from, entries, here, clip.move).catch(async (e: unknown) => {
+          // What did move is followed all the same (its library documents go with it).
+          if (clip.move && e instanceof PartlyDone) await followFiles(e.done as { from: string; to: string }[]);
+          throw e;
+        });
         if (clip.move) await followFiles(moved);
       }
       schedule(1000);

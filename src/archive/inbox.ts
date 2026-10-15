@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { engine } from '@/engine';
 import { folders } from '@/lib/folders';
+import { startsWith } from '@/lib/bytes';
 import type { FolderEntry } from '@/lib/folderTypes';
 import type { PageWords } from '@/engine/types';
 import { describeWithAi, type AiSettings } from '@/scan/ai';
@@ -113,11 +114,24 @@ const stem = (name: string) => name.replace(/\.pdf$/i, '');
 export async function propose(archive: string, entry: FolderEntry, rules: Rules): Promise<Proposal> {
   const bytes = await (await folders.read(archive, entry)).arrayBuffer();
   // The same document already filed (outside the inbox): the same bytes, or the same document with the details
-  // filing added to it (its key stays through them).
+  // filing added to it (its key stays through them). Looked at, not taken from the index: that may still list a
+  // file that has moved (into the inbox, say), and a later revision of it (signed) is not filed yet.
   const [hash, share] = await Promise.all([contentHash(bytes), docKey(bytes)]);
-  const duplicateOf = (await allDocs()).find(
+  const candidates = (await allDocs()).filter(
     (d) => (d.hash === hash || d.share === share) && d.place.kind === 'folder' && d.place.root === archive && !d.place.inbox && d.key !== `${archive}:${entry.id}`,
   );
+  let duplicateOf: IndexedDoc | undefined;
+  for (const d of candidates) {
+    if (d.place.kind !== 'folder') continue;
+    const filed = await folders
+      .read(d.place.root, d.place.entry)
+      .then((b) => b.arrayBuffer())
+      .catch(() => null);
+    if (filed && startsWith(filed, bytes)) {
+      duplicateOf = d;
+      break;
+    }
+  }
   const handle = await engine.open({ kind: 'bytes', bytes });
   try {
     const m = handle.metadata;

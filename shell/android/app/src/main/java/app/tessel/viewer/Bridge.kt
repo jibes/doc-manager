@@ -1,7 +1,9 @@
 package app.tessel.viewer
 
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.net.Uri
+import android.os.Environment
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import android.print.PageRange
@@ -27,6 +29,9 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.UUID
@@ -58,10 +63,29 @@ class Bridge(private val activity: MainActivity) {
     private val calls = HashMap<String, okhttp3.Call>()
     private val cancelled = HashSet<String>()
 
-    /** Registers files from a VIEW/SEND intent; returns how many were usable. */
-    fun accept(uris: List<Uri>): Int {
+    /** Registers files from a VIEW/SEND intent (off the main thread); `done` gets how many were usable, on the main thread. */
+    fun accept(uris: List<Uri>, done: (Int) -> Unit) {
+        worker.execute {
+            val n = runCatching { accept(uris) }.getOrDefault(0)
+            activity.runOnUiThread { done(n) }
+        }
+    }
+
+    /**
+     * A file:// another app sends is read with Tessel's own rights: only from shared storage (never Tessel's private
+     * files, which a hostile app could ask it to copy out).
+     */
+    private fun shared(uri: Uri): Boolean {
+        if (uri.scheme != "file") return uri.scheme == "content"
+        val path = runCatching { File(uri.path ?: return false).canonicalPath }.getOrNull() ?: return false
+        val storage = Environment.getExternalStorageDirectory().canonicalPath
+        return path.startsWith(storage + File.separator) && !path.startsWith("$storage/Android/data/")
+    }
+
+    private fun accept(uris: List<Uri>): Int {
         var n = 0
         for (uri in uris) {
+            if (!shared(uri)) continue
             var name = uri.lastPathSegment?.substringAfterLast('/') ?: "document"
             var size = -1L
             runCatching {
@@ -145,11 +169,23 @@ class Bridge(private val activity: MainActivity) {
     fun request(id: String, method: String, args: String) {
         val a = runCatching { JSONObject(args) }.getOrElse { JSONObject() }
         val done = { value: Any? -> activity.reply(id, true, value) }
+        val fail = { e: Throwable -> activity.reply(id, false, e.message ?: e.javaClass.simpleName) }
         when (method) {
             // Interactive: answered when the user comes back from the system screen.
             "pickFolder" -> activity.runOnUiThread { activity.pickFolder { tree -> done(tree?.let { JSONObject().put("uri", it.toString()).put("name", folders.treeName(it)) }) } }
             "requestAllFiles" -> activity.runOnUiThread { activity.requestAllFiles { done(it) } }
-            "http" -> network.execute { runCatching { http(id, a) }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) } }
+            "http" -> network.execute { runCatching { http(id, a) }.onSuccess(done).onFailure(fail) }
+            // Types are asked for here (one call per file), the share sheet opened on the main thread.
+            "share" -> worker.execute {
+                runCatching {
+                    val list = a.getJSONArray("uris")
+                    if (list.length() > MAX_SHARE) throw IllegalArgumentException("too-many:$MAX_SHARE")
+                    val uris = ArrayList((0 until list.length()).map { folders.shareable(Uri.parse(list.getString(it))) })
+                    uris to shareType(uris)
+                }.onSuccess { (uris, type) ->
+                    activity.runOnUiThread { runCatching { shareUris(uris, type) }.onSuccess { done(null) }.onFailure(fail) }
+                }.onFailure(fail)
+            }
             else -> worker.execute {
                 runCatching<Any?> {
                     when (method) {
@@ -163,34 +199,59 @@ class Bridge(private val activity: MainActivity) {
                         "writeText" -> a.getJSONArray("path").let { p -> folders.writeText(a.getString("root"), (0 until p.length()).map { p.getString(it) }, a.getString("text")) }.let { null }
                         "mkdir" -> folders.mkdir(a.getString("root"), a.optString("dir").ifEmpty { null }, a.getString("name"))
                         "rename" -> folders.rename(Uri.parse(a.getString("uri")), a.getString("name"))
-                        "delete" -> a.getJSONArray("uris").let { list -> for (i in 0 until list.length()) folders.delete(Uri.parse(list.getString(i))) }.let { null }
+                        // Each one on its own: the web app learns which didn't go.
+                        "delete" -> a.getJSONArray("uris").let { list ->
+                            JSONArray().apply {
+                                for (i in 0 until list.length()) {
+                                    val uri = list.getString(i)
+                                    runCatching { folders.delete(Uri.parse(uri)) }.onFailure { put(JSONObject().put("uri", uri).put("error", it.message ?: it.javaClass.simpleName)) }
+                                }
+                            }
+                        }
                         "transfer" -> {
                             val list = a.getJSONArray("items")
                             val items = (0 until list.length()).map { i -> list.getJSONObject(i).let { Triple(Uri.parse(it.getString("uri")), it.getString("name"), it.optBoolean("dir")) } }
                             val from = folders.parentOf(a.getString("srcRoot"), a.optString("srcDir").ifEmpty { null })
                             folders.transfer(items, from, a.getString("root"), a.optString("dir").ifEmpty { null }, a.optBoolean("move"))
                         }
-                        "share" -> {
-                            val list = a.getJSONArray("uris")
-                            val uris = ArrayList((0 until list.length()).map { folders.shareable(Uri.parse(list.getString(it))) })
-                            activity.runOnUiThread { shareUris(uris) }
-                            null
-                        }
                         "create" -> {
                             val (file, _) = synchronized(this) { outgoing.remove(a.getString("token")) } ?: throw IllegalStateException("Nothing to write")
-                            folders.create(a.getString("root"), a.optString("dir").ifEmpty { null }, a.getString("name"), a.getString("mime"), file).also { file.delete() }
+                            try {
+                                folders.create(a.getString("root"), a.optString("dir").ifEmpty { null }, a.getString("name"), a.getString("mime"), file)
+                            } finally {
+                                file.parentFile?.deleteRecursively()
+                            }
                         }
                         "write" -> {
                             val (file, _) = synchronized(this) { outgoing.remove(a.getString("token")) } ?: throw IllegalStateException("Nothing to write")
-                            folders.write(Uri.parse(a.getString("uri")), file)
-                            file.delete()
+                            try {
+                                folders.write(Uri.parse(a.getString("uri")), file)
+                            } finally {
+                                file.parentFile?.deleteRecursively()
+                            }
                             null
                         }
                         else -> throw IllegalArgumentException("Unknown request: $method")
                     }
-                }.onSuccess(done).onFailure { activity.reply(id, false, it.message ?: it.javaClass.simpleName) }
+                }.onSuccess(done).onFailure(fail)
             }
         }
+    }
+
+    /** Outgoing copies older than a day (shares other apps have long read, saves cut short) go. */
+    fun sweep() {
+        io.execute {
+            val cutoff = System.currentTimeMillis() - 86_400_000L
+            File(activity.cacheDir, "outgoing").listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
+        }
+    }
+
+    /** The activity is gone: its threads stop, and requests still running are cancelled. */
+    fun close() {
+        synchronized(calls) { calls.values.forEach { it.cancel() } }
+        worker.shutdown()
+        network.shutdown()
+        io.shutdown()
     }
 
     /** Stops a request the web app no longer waits for (AI reading cancelled): its connection closes. */
@@ -206,7 +267,9 @@ class Bridge(private val activity: MainActivity) {
      * {url, method, headers, body} → {status, body}.
      */
     private fun http(id: String, a: JSONObject): JSONObject {
-        val url = a.getString("url").toHttpUrlOrNull() ?: throw IllegalArgumentException("Not a web address")
+        val url = a.getString("url").toHttpUrlOrNull() ?: throw IllegalArgumentException("ai:bad-url")
+        // Unencrypted only to this device or the local network: elsewhere the key would travel in the clear.
+        if (!url.isHttps && !local(url.host)) throw IllegalArgumentException("ai:insecure")
         val headers = a.optJSONObject("headers")
         val method = a.optString("method", "POST").uppercase()
         val type = headers?.optString("content-type")?.ifEmpty { null }?.toMediaTypeOrNull()
@@ -226,11 +289,33 @@ class Bridge(private val activity: MainActivity) {
         }
         try {
             call.execute().use { r -> return JSONObject().put("status", r.code).put("body", r.body?.string() ?: "") }
-        } catch (e: UnknownHostException) {
-            throw UnknownHostException("Can't find ${url.host}: neither this device's DNS nor Cloudflare's knows it. If a browser on this device reaches it, check that Tessel may use the network (app info, firewall or VPN apps).")
+        } catch (e: IOException) {
+            // Codes the web app words in the user's language.
+            throw when {
+                call.isCanceled() -> e
+                !online() -> IOException("ai:offline")
+                e is UnknownHostException -> IOException("ai:unknown-host:${url.host}")
+                e is InterruptedIOException -> IOException("ai:timeout")
+                else -> IOException("ai:unreachable:${url.host}")
+            }
         } finally {
             synchronized(calls) { calls.remove(id) }
         }
+    }
+
+    private fun online(): Boolean = activity.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null
+
+    /** This device, the local network (private or link-local addresses) or a .local name. */
+    private fun local(host: String): Boolean {
+        if (host == "localhost" || host.endsWith(".local") || host.endsWith(".localhost")) return true
+        // Only an address written as numbers is judged by them (a name is never looked up here).
+        val literal = host.contains(':') || host.all { it.isDigit() || it == '.' }
+        if (!literal) return false
+        val ip = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return false
+        val b = ip.address
+        return ip.isLoopbackAddress || ip.isLinkLocalAddress || ip.isSiteLocalAddress ||
+            (ip is Inet6Address && (b[0].toInt() and 0xfe) == 0xfc) ||
+            (ip is Inet4Address && (b[0].toInt() and 0xff) == 100 && (b[1].toInt() and 0xc0) == 64)
     }
 
     /**
@@ -278,12 +363,21 @@ class Bridge(private val activity: MainActivity) {
         activity.runOnUiThread { activity.applyTheme(background, dark) }
     }
 
+    private fun shareType(uris: List<Uri>): String {
+        val types = uris.map { activity.contentResolver.getType(it) }
+        return when {
+            types.all { it == Folders.EPUB } -> Folders.EPUB
+            types.size == 1 -> types[0] ?: "*/*"
+            types.all { it == Folders.PDF } -> Folders.PDF
+            else -> "*/*"
+        }
+    }
+
     /** Documents from the file browser, to any app (mail, chat, cloud storage). */
-    private fun shareUris(uris: ArrayList<Uri>) {
+    private fun shareUris(uris: ArrayList<Uri>, type: String) {
         val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
         else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-        send.setType(if (uris.all { activity.contentResolver.getType(it) == Folders.EPUB }) Folders.EPUB else if (uris.size == 1) activity.contentResolver.getType(uris[0]) ?: "*/*" else "*/*")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.setType(type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         send.clipData = android.content.ClipData.newRawUri(null, uris[0]).apply { uris.drop(1).forEach { addItem(android.content.ClipData.Item(it)) } }
         activity.startActivity(Intent.createChooser(send, activity.getString(R.string.share_title)))
     }
@@ -322,5 +416,7 @@ class Bridge(private val activity: MainActivity) {
     private companion object {
         /** Files from other apps known at a time (see accept). */
         const val KEEP_INCOMING = 16
+        /** Documents handed to another app at once: more make the hand-over too big for Android. */
+        const val MAX_SHARE = 300
     }
 }

@@ -3,4 +3,6 @@
     <string name="app_name">Tessel</string>
     <string name="share_title">Share</string>
     <string name="print_job">Tessel document</string>
+    <string name="save_failed">The file couldn’t be saved there.</string>
+    <string name="save_busy">Another file is being saved. Try again in a moment.</string>
 </resources>

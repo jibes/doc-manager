@@ -17,7 +17,8 @@ import { defaultTitle } from '@/scan/export';
 import { prefetchExports } from '@/scan/exportCache';
 import { saveScan, type SaveProgress } from '@/scan/save';
 import { aiHost, aiReady } from '@/scan/ai';
-import { sayScan, useScan, useScanMessage } from '@/scan/session';
+import { sayScan, useScan, useScanMessage, useScanSaving } from '@/scan/session';
+import { holdBrowserBack, onBack } from '@/lib/backGuard';
 import { FilterChips } from '@/scan/ui/FilterChips';
 import { PageImage } from '@/scan/ui/PageImage';
 import { Unsupported } from '@/scan/ui/Unsupported';
@@ -34,7 +35,7 @@ export default function ScanReview() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { pages, title, loaded, aiRead, unsaved, restore, setTitle, setAiRead, applyToAll, clear, moveTo, moveMany, removeMany, updateMany } = useScan();
+  const { pages, title, loaded, aiRead, unsaved, restore, setTitle, setAiRead, applyToAll, clear, seal, moveTo, moveMany, removeMany, updateMany } = useScan();
   const focused = useIsFocused();
   const scan = usePrefs((s) => s.scan);
   const scanTo = usePrefs((s) => s.scanTo);
@@ -44,13 +45,35 @@ export default function ScanReview() {
   const setPrefs = usePrefs((s) => s.set);
   const [roots, setRoots] = useState<FolderRoot[]>([]);
   const [choosing, setChoosing] = useState(false);
-  const [progress, setProgress] = useState<SaveProgress | null>(null);
+  // A save under way (started here or on another review of this scan): the document waits for it.
+  const progress = useScanSaving((s) => s.progress);
+  const saving = useScanSaving((s) => s.controller);
   // The scanner's messages (the camera's too: it may have closed since), with Undo for what they report.
   const { text: message, undo } = useScanMessage();
   // Select mode: the pages picked for a bulk action (null: not selecting).
   const [selected, setSelected] = useState<Set<string> | null>(null);
-  const saving = useRef<AbortController | null>(null);
   const grid = useRef<View>(null);
+  // Whether this screen is still the one in front when its save ends (else it doesn't take the user anywhere).
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = focused;
+  }, [focused]);
+  useEffect(
+    () => () => {
+      here.current = false;
+    },
+    [],
+  );
+  // Back waits for the save (Cancel stops it): leaving would start another document over the one being saved.
+  useEffect(() => {
+    if (!saving) return;
+    const off = onBack(() => true);
+    const unhold = holdBrowserBack(() => {});
+    return () => {
+      off();
+      unhold();
+    };
+  }, [saving]);
   const placeholder = useMemo(() => defaultTitle(), []);
   const dismiss = () => sayScan(null);
   const notify = (text: string, back?: () => void) => sayScan(text, back);
@@ -111,16 +134,21 @@ export default function ScanReview() {
   };
 
   const save = async () => {
-    if (saving.current || !pages.length) return;
+    if (useScanSaving.getState().controller || !pages.length) return;
     const controller = new AbortController();
-    saving.current = controller;
-    setProgress({ phase: 'render', done: 0, total: pages.length });
+    // Saved as it is now: an Undo offered before (a page deleted) can't change what is being written.
+    sayScan(null);
+    seal();
+    const setProgress = (next: SaveProgress) => useScanSaving.setState({ progress: next });
+    useScanSaving.setState({ controller, progress: { phase: 'render', done: 0, total: pages.length } });
     // The pages being saved: only they leave the scan when it is saved.
     const saved = pages.map((pg) => pg.id);
     try {
       const to = toInbox ? { root: archive!, dir: await inboxDir(archive!) } : target && { root: target.id };
       const { doc, aiError, unread } = await saveScan(pages, scan, title, placeholder, to, setProgress, controller.signal, aiOffered && aiRead ? ai : undefined);
       clear(saved);
+      // Moved on meanwhile (the camera, say): the document is in the library; nothing takes the user away.
+      if (!here.current) return;
       if (aiError) await ask({ title: t.scanAiFailedTitle, body: t.scanAiFailed(aiError), confirm: t.done });
       if (unread) await ask({ title: t.scanUnreadTitle(unread), body: t.ocrFailed, confirm: t.done });
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
@@ -128,8 +156,7 @@ export default function ScanReview() {
     } catch (e) {
       if (!controller.signal.aborted) notify(t.scanSaveFailed(e instanceof Error ? e.message : String(e)));
     } finally {
-      saving.current = null;
-      setProgress(null);
+      useScanSaving.setState({ controller: null, progress: null });
     }
   };
 
@@ -327,7 +354,7 @@ export default function ScanReview() {
                       ? t.scanReading(progress.done + 1, progress.total)
                       : t.scanPreparing(Math.min(progress.done + 1, progress.total), progress.total)}
                 </T>
-                <Button kind="quiet" label={t.cancel} onPress={() => saving.current?.abort()} />
+                <Button kind="quiet" label={t.cancel} onPress={() => saving?.abort()} />
               </>
             ) : (
               <>

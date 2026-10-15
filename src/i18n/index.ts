@@ -53,6 +53,9 @@ export function opError(e: unknown): string {
   const taken = /^exists:(.*)$/.exec(m);
   if (taken) return `${t.opFailed} ${t.nameTaken(taken[1])}`;
   if (m === 'denied' || m === t.writeDenied) return `${t.opFailed} ${t.writeDenied}`;
+  if (m === 'inside-itself') return `${t.opFailed} ${t.intoItself}`;
+  const many = /^too-many:(\d+)$/.exec(m);
+  if (many) return `${t.opFailed} ${t.tooManyToShare(Number(many[1]))}`;
   if (m === t.settingsUnreadable) return m;
   return m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
 }

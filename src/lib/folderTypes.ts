@@ -31,6 +31,16 @@ export type FolderEntry = {
 /** A folder: a root, and a folder inside it (undefined for the root itself). */
 export type Place = { root: string; dir?: string };
 
+/** Some of several items were done before one failed (its message): `done` says which, to follow or forget them. */
+export class PartlyDone<T> extends Error {
+  constructor(
+    message: string,
+    readonly done: T,
+  ) {
+    super(message);
+  }
+}
+
 export type FoldersApi = {
   /** Folders can be browsed on this platform. */
   supported: boolean;
@@ -60,8 +70,9 @@ export type FoldersApi = {
   create(at: Place, name: string, data: Blob): Promise<FolderEntry>;
   /** Returns the item's new URI where it has one (Android app), for documents in the library. */
   rename(root: string, dir: string | undefined, e: FolderEntry, name: string): Promise<string | undefined>;
+  /** Throws PartlyDone (with the URIs that went, Android app) when some could not be deleted. */
   delete(root: string, dir: string | undefined, entries: FolderEntry[]): Promise<void>;
-  /** Copies or moves items into a folder; returns old → new URIs (Android app). */
+  /** Copies or moves items into a folder; returns old → new URIs (Android app). Throws PartlyDone with those when one fails. */
   transfer(from: Place, entries: FolderEntry[], to: Place, move: boolean): Promise<{ from: string; to: string }[]>;
   share(root: string, entries: FolderEntry[]): Promise<void>;
   /**

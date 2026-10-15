@@ -11,6 +11,8 @@ import type { FileHandle } from '@/lib/fsa';
 import type { FolderEntry } from '@/lib/folderTypes';
 import { folders } from '@/lib/folders';
 import { sameOrRenamed } from '@/lib/names';
+import { startsWith } from '@/lib/bytes';
+import { readStored, writeStored } from '@/lib/stored';
 import { docKey } from '@/archive/shared';
 import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
@@ -165,20 +167,6 @@ async function importBook(item: ImportItem, source: DocSource, set: (fn: (s: Lib
 /** When moving copies into the Tessel folder last failed; tried again after a day. */
 const MOVE_FAILED = 'tessel.moveCopiesFailed';
 const MOVE_RETRY_MS = 86_400_000;
-const readStored = (key: string) => {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-};
-const writeStored = (key: string, value: string) => {
-  try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
-  } catch {
-    // Tried again next start.
-  }
-};
 
 const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.openedAt ?? a.addedAt);
 
@@ -249,24 +237,33 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
   /**
    * The library's document of this item already: the same file, for a file in a folder; else (a picked or shared
-   * file) the same content, as told by its share key (read for documents that may be it).
+   * file) a document with these bytes, perhaps with what Tessel saved into it since (`exact`: nothing). Its share
+   * key finds the documents that may be it. Another revision (signed elsewhere, say) has the same key, but is not
+   * it: opened as it, a save would write the one over the other.
    */
-  const findExisting = async (item: ImportItem): Promise<DocRecord | undefined> => {
+  const findExisting = async (item: ImportItem): Promise<{ doc: DocRecord; exact: boolean } | undefined> => {
     const docs = get().docs;
-    const among = (ids: string[]) => docs.find((d) => ids.includes(d.id));
+    const among = (ids: string[]) => {
+      const doc = docs.find((d) => ids.includes(d.id));
+      return doc && { doc, exact: true };
+    };
     if (item.link) return among((await repo.linkedTo([item.link])).get(item.link) ?? []);
     if (item.handle) return among(await repo.linkedToHandle(item.handle).catch(() => []));
     const named = (d: DocRecord) => d.bytes === item.size && sameOrRenamed(d.fileName, item.name);
-    if (!item.file) return docs.find(named);
-    const key = await docKey(await item.file.arrayBuffer());
-    const known = docs.find((d) => d.shareKey === key);
-    if (known) return known;
-    for (const d of docs.filter((x) => !x.shareKey && named(x))) {
+    if (!item.file) {
+      const doc = docs.find(named);
+      return doc && { doc, exact: true };
+    }
+    const bytes = await item.file.arrayBuffer();
+    const key = await docKey(bytes);
+    for (const d of docs) {
+      if (d.shareKey ? d.shareKey !== key : !named(d)) continue;
       const src = await repo.source(d.id).catch(() => null);
       if (src?.kind !== 'bytes') continue;
-      const k = await docKey(src.bytes);
-      patch(d.id, (x) => ({ ...x, shareKey: k }));
-      if (k === key) return get().docs.find((x) => x.id === d.id);
+      const k = d.shareKey ?? (await docKey(src.bytes));
+      if (!d.shareKey) patch(d.id, (x) => ({ ...x, shareKey: k }));
+      const doc = get().docs.find((x) => x.id === d.id);
+      if (doc && k === key && startsWith(src.bytes, bytes)) return { doc, exact: src.bytes.byteLength === bytes.byteLength };
     }
     return undefined;
   };
@@ -315,7 +312,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       for (let item of items) {
         const existing = await findExisting(item).catch(() => undefined);
         if (existing) {
-          added.push(existing);
+          added.push(existing.doc);
           continue;
         }
         const label = item.name;
@@ -383,8 +380,10 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!opened) return null;
       const handle = opened.value;
       if (existing) {
-        preopen(existing.id, handle);
-        return existing;
+        // The reader opens it from what was opened (no second read); not when the library's has more in it.
+        if (existing.exact) preopen(existing.doc.id, handle);
+        else handle.close();
+        return existing.doc;
       }
       const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
       const id = newId();

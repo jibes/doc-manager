@@ -2,4 +2,6 @@
 <resources>
     <string name="share_title">Teilen</string>
     <string name="print_job">Tessel-Dokument</string>
+    <string name="save_failed">Die Datei konnte dort nicht gespeichert werden.</string>
+    <string name="save_busy">Gerade wird eine andere Datei gespeichert. Versuche es gleich noch einmal.</string>
 </resources>

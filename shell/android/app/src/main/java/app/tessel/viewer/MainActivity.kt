@@ -13,12 +13,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Log
 import android.view.ViewGroup
+import android.widget.Toast
 import android.content.pm.PackageManager
 import android.webkit.ConsoleMessage
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -43,6 +46,7 @@ import java.util.concurrent.Executors
  */
 class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
+    private lateinit var root: FrameLayout
     private lateinit var appAssets: AppAssets
     private val bridge by lazy { Bridge(this) }
     private var pageReady = false
@@ -64,13 +68,20 @@ class MainActivity : ComponentActivity() {
     /** Copies to where the user saves: off the main thread (a big PDF would freeze the app). */
     private val saving = Executors.newSingleThreadExecutor()
     private val saver = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val file = pendingSave ?: return@registerForActivityResult
-        pendingSave = null
         val target = result.data?.data
+        val file = pendingSave ?: run {
+            // The app was restarted while the dialog was up: what it made there stays empty, so it goes.
+            if (result.resultCode == RESULT_OK && target != null) saving.execute { runCatching { DocumentsContract.deleteDocument(contentResolver, target) } }
+            return@registerForActivityResult
+        }
+        pendingSave = null
         saving.execute {
             if (result.resultCode == RESULT_OK && target != null) {
-                runCatching { contentResolver.openOutputStream(target)?.use { out -> file.inputStream().use { it.copyTo(out) } } }
-                    .onFailure { Log.w(TAG, "save failed", it) }
+                runCatching { contentResolver.openOutputStream(target, "wt")?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: error("No stream") }
+                    .onFailure {
+                        Log.w(TAG, "save failed", it)
+                        runOnUiThread { Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show() }
+                    }
             }
             file.delete()
         }
@@ -95,33 +106,16 @@ class MainActivity : ComponentActivity() {
     private val accessSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { accessDone() }
     private val accessPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { accessDone() }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         appAssets = AppAssets(assets)
 
-        web = WebView(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                allowFileAccess = false
-                allowContentAccess = false
-                setSupportMultipleWindows(false)
-                // The app sets its own type scale (and has its own text size setting).
-                textZoom = 100
-                userAgentString = "$userAgentString TesselShell/${BuildConfig.VERSION_NAME}"
-            }
-            addJavascriptInterface(bridge, "TesselShell")
-            webViewClient = Client()
-            webChromeClient = Chrome()
-        }
+        web = makeWeb()
 
         // Keep the web app clear of the status bar, navigation bar, cutouts and keyboard.
-        val root = FrameLayout(this)
+        root = FrameLayout(this)
         root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime())
@@ -147,6 +141,49 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         // Always start fresh: the app itself restores the library and each document's position.
         web.loadUrl("${AppAssets.ORIGIN}/")
+        bridge.sweep()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun makeWeb() = WebView(this).apply {
+        setBackgroundColor(Color.TRANSPARENT)
+        settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            allowFileAccess = false
+            allowContentAccess = false
+            setSupportMultipleWindows(false)
+            // The app sets its own type scale (and has its own text size setting).
+            textZoom = 100
+            userAgentString = "$userAgentString TesselShell/${BuildConfig.VERSION_NAME}"
+        }
+        addJavascriptInterface(bridge, "TesselShell")
+        webViewClient = Client()
+        webChromeClient = Chrome()
+    }
+
+    /**
+     * The page's process ended (out of memory, a huge scan): a new one starts the app again, instead of Android
+     * closing Tessel. The library, scans and positions are kept by the app itself.
+     */
+    private fun restartWeb() {
+        root.removeView(web)
+        web.destroy()
+        pageReady = false
+        web = makeWeb()
+        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        web.loadUrl("${AppAssets.ORIGIN}/")
+    }
+
+    override fun onDestroy() {
+        if (::web.isInitialized) {
+            root.removeView(web)
+            web.destroy()
+        }
+        saving.shutdown()
+        bridge.close()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -157,13 +194,17 @@ class MainActivity : ComponentActivity() {
     /** Files from "Open with" or "Share": hand them to the web app, which adds and opens them. */
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
-        val uris = when (intent.action) {
-            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
-            Intent.ACTION_SEND -> listOfNotNull(streamExtra(intent))
-            Intent.ACTION_SEND_MULTIPLE -> streamListExtra(intent)
-            else -> emptyList()
-        }
-        if (uris.isNotEmpty() && bridge.accept(uris) > 0 && pageReady) notifyWeb()
+        // A malformed extra (another app's mistake) is no file, not a crash.
+        val uris = runCatching {
+            when (intent.action) {
+                Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+                Intent.ACTION_SEND -> listOfNotNull(streamExtra(intent))
+                Intent.ACTION_SEND_MULTIPLE -> streamListExtra(intent)
+                else -> emptyList()
+            }
+        }.getOrDefault(emptyList())
+        // The sending app's provider is asked for names and sizes off the main thread (a slow one would freeze Tessel).
+        if (uris.isNotEmpty()) bridge.accept(uris) { n -> if (n > 0 && pageReady) notifyWeb() }
     }
 
     private fun notifyWeb() = web.evaluateJavascript("window.dispatchEvent(new Event('tessel-shell-open'))", null)
@@ -177,10 +218,21 @@ class MainActivity : ComponentActivity() {
         (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java) else intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM))
             ?: emptyList()
 
-    /** "Download" in the app: the system's save dialog (any folder or cloud provider). */
+    /** "Download" in the app: the system's save dialog (any folder or cloud provider). One at a time. */
     fun saveAs(file: File, mime: String) {
+        if (pendingSave != null) {
+            file.delete()
+            Toast.makeText(this, R.string.save_busy, Toast.LENGTH_LONG).show()
+            return
+        }
         pendingSave = file
-        saver.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, file.name))
+        try {
+            saver.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, file.name))
+        } catch (_: ActivityNotFoundException) {
+            pendingSave = null
+            file.delete()
+            Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     // ---------- ambient light (the "light sensor" theme) ----------
@@ -295,8 +347,15 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
+            if (view != web) return
             pageReady = true
             notifyWeb()
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            Log.w(TAG, "web page process gone (crashed: ${detail.didCrash()})")
+            if (view == web) restartWeb()
+            return true
         }
     }
 

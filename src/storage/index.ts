@@ -62,6 +62,7 @@ export const repo: LibraryRepo = {
   linkedTo: async () => new Map(),
   linkedToHandle: async () => [],
   linkOf: async () => undefined,
+  handleOf: async () => undefined,
   relink: async () => {},
   async saveCover(id, data) {
     if (typeof data !== 'string') throw new Error('Native covers are file URIs');

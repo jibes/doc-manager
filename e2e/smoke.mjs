@@ -471,6 +471,13 @@ async function forms() {
     (await page.getByTestId('field-site').inputValue()) === '2' &&
     (await page.getByTestId('field-agree').getAttribute('aria-checked')) === 'true';
   check(kept, 'forms: text, radio, dropdown and checkbox values saved');
+  // Typing in a field and leaving straight away (no Enter, no tap elsewhere): asked first, nothing lost.
+  await name.click();
+  await page.keyboard.type(' Jr');
+  await page.getByTestId('back').click();
+  const askedTyping = await page.getByTestId('ask-confirm').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).last().click().catch(() => {});
+  check(askedTyping && (await page.getByTestId('reader').count()) === 1 && /Jr$/.test(await name.inputValue()), 'forms: leaving while a field is being typed in asks first');
   await ctx.close();
 }
 
@@ -1555,7 +1562,16 @@ async function details() {
   await page.getByTestId('detail-date').fill('2.10.2026');
   await page.getByTestId('details-save').click();
   check(await page.getByText('Write the date as YYYY-MM-DD.').isVisible(), 'details: a date not in YYYY-MM-DD is refused');
+  // Details typed in and not saved: closing the panel, or leaving the document, asks first.
   await page.keyboard.press('Escape');
+  const askedClose = await page.getByTestId('ask-dialog').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  await page.getByTestId('ask-cancel').click().catch(() => {});
+  await page.getByTestId('back').click();
+  const askedLeave = await page.getByTestId('ask-dialog').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  await page.getByTestId('ask-cancel').click().catch(() => {});
+  check(askedClose && askedLeave && (await page.getByTestId('details-panel').isVisible()), `details: unsaved details are asked about before they go (close ${askedClose}, leave ${askedLeave})`);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('ask-confirm').click();
 
   // Protected PDF.
   await page.goto(BASE);
