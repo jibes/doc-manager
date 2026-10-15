@@ -6,7 +6,7 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
 import { mergeGraphics } from '../geometry';
-import type { Annotation, FormField, FormValue, Graphic, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
+import type { Annotation, FormField, FormValue, Graphic, NormRect, OcrLayer, OutlineItem, PageWords, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -20,6 +20,7 @@ const FPDF_ERR_PASSWORD = 4;
 const MAX_DIM = 8192;
 const MAX_PIXELS = 32e6;
 const SEARCH_PAGES_PER_SLICE = 8;
+const FPDF_PAGEOBJ_TEXT = 1;
 const FPDF_PAGEOBJ_PATH = 2;
 const FPDF_PAGEOBJ_IMAGE = 3;
 const FPDF_PAGEOBJ_SHADING = 4;
@@ -731,13 +732,20 @@ function sameLine(a: NormRect, b: NormRect): boolean {
  * its box along the line's direction, whatever the page's rotation. Returns the file with the text appended as
  * an incremental update.
  */
-function addTextLayer(docId: number, pages: { page: number; turn?: number; words: { text: string; box: NormRect }[] }[]): ArrayBuffer {
+function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   const d = getDoc(docId);
-  for (const { page: pageIndex, words, turn = 0 } of pages) {
-    if (!words.length) continue;
+  for (const { page: pageIndex, words, turn = 0, replace } of pages) {
+    if (!words.length && !replace) continue;
     const page = M.FPDF_LoadPage(d.ptr, pageIndex);
     if (!page) continue;
     try {
+      // The earlier layer goes: only invisible text on the page itself (what recognition adds), never what is seen.
+      if (replace)
+        for (let i = M.FPDFPage_CountObjects(page) - 1; i >= 0; i--) {
+          const obj = M.FPDFPage_GetObject(page, i);
+          if (M.FPDFPageObj_GetType(obj) !== FPDF_PAGEOBJ_TEXT || M.FPDFTextObj_GetTextRenderMode(obj) !== FPDF_TEXTRENDERMODE_INVISIBLE) continue;
+          if (M.FPDFPage_RemoveObject(page, obj)) M.FPDFPageObj_Destroy(obj);
+        }
       const { toPage: shownToPage } = pageTransform(d, pageIndex, page);
       // A point of the upright text → the page as shown → page space.
       const toPage = (u: number, v: number) => {
@@ -801,6 +809,55 @@ function addTextLayer(docId: number, pages: { page: number; turn?: number; words
   } finally {
     M.PDFiumExt_CloseFileWriter(w);
   }
+}
+
+/** The text of a text object (as its font maps it to Unicode). */
+function objectText(obj: number, text: number): string {
+  const n = M.FPDFTextObj_GetText(obj, text, 0, 0);
+  if (n <= 2) return '';
+  return withScratch(n, (p) => (M.FPDFTextObj_GetText(obj, text, p, n), M.pdfium.UTF16ToString(p)));
+}
+
+/**
+ * A page's invisible text: each text object drawn invisibly on the page itself (a word, or a line, as the tool
+ * that added it wrote it), with its box on the page as shown. Text seen on the page, text inside nested
+ * objects, or invisible text that isn't upright make the page `other`: its text is the page's own, not a layer
+ * to read again.
+ */
+function ocrLayer(docId: number, pageIndex: number): OcrLayer {
+  const d = getDoc(docId);
+  const { width, height } = d.pageSizes[pageIndex];
+  return withTextPage(d, pageIndex, { words: [], other: true }, (page, text, norm) => {
+    const words: OcrLayer['words'] = [];
+    let inLayer = 0;
+    let other = false;
+    withScratch(24, (s) => {
+      const f = (o: number) => M.pdfium.getValue(s + o, 'float');
+      const n = M.FPDFPage_CountObjects(page);
+      for (let i = 0; i < n; i++) {
+        const obj = M.FPDFPage_GetObject(page, i);
+        if (M.FPDFPageObj_GetType(obj) !== FPDF_PAGEOBJ_TEXT || M.FPDFTextObj_GetTextRenderMode(obj) !== FPDF_TEXTRENDERMODE_INVISIBLE) continue;
+        const str = objectText(obj, text).replace(/\s+/g, ' ').trim();
+        if (!str) continue;
+        // Upright on the page as shown: its baseline runs left to right.
+        if (M.FPDFPageObj_GetMatrix(obj, s)) {
+          const [a, b, e, g] = [f(0), f(4), f(16), f(20)];
+          const p0 = norm(e, g, e, g);
+          const p1 = norm(e + a, g + b, e + a, g + b);
+          const [dx, dy] = [(p1.x - p0.x) * width, (p1.y - p0.y) * height];
+          if (!(dx > 0) || Math.abs(dy) > dx * 0.2) other = true;
+        }
+        if (!M.FPDFPageObj_GetBounds(obj, s, s + 4, s + 8, s + 12)) continue;
+        inLayer += str.replace(/\s/g, '').length;
+        words.push({ text: str, box: norm(f(0), f(12), f(8), f(4)) });
+      }
+    });
+    // Everything the page's text holds, against what the layer holds: more is text of the page's own.
+    let all = 0;
+    const count = M.FPDFText_CountChars(text);
+    for (let i = 0; i < count; i++) if (String.fromCharCode(M.FPDFText_GetUnicode(text, i)).trim()) all++;
+    return { words, other: other || all > inLayer + 3 };
+  });
 }
 
 // ---------- annotations ----------
@@ -1129,6 +1186,8 @@ async function run(job: Job) {
       const bytes = addTextLayer(job.doc, job.pages);
       return post({ id: job.id, ok: true, result: bytes }, [bytes]);
     }
+    case 'ocrLayer':
+      return post({ id: job.id, ok: true, result: ocrLayer(job.doc, job.page) });
     case 'save': {
       const bytes = save(job.doc);
       return post({ id: job.id, ok: true, result: bytes }, [bytes]);

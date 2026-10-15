@@ -108,6 +108,7 @@ function handleFrom(r: OpenResult): DocHandle {
     save: () => client.call('save', { doc: r.doc }),
     bytes: () => client.call('bytes', { doc: r.doc }),
     addTextLayer: (pages) => client.call('addText', { doc: r.doc, pages }),
+    ocrLayer: (page) => client.call('ocrLayer', { doc: r.doc, page }),
     // A slice of pages per request: a long document's notes don't hold up the pages being drawn meanwhile.
     annotations: async () => {
       const out: Annotation[] = [];

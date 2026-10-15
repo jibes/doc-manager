@@ -1,4 +1,4 @@
-import type { Annotation, DocMetadata, PageWords, FormField, FormValue, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
+import type { Annotation, DocMetadata, OcrLayer, PageWords, FormField, FormValue, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
 
 export type Request =
   | { id: number; type: 'open'; bytes: ArrayBuffer; password?: string }
@@ -13,6 +13,7 @@ export type Request =
   | { id: number; type: 'save'; doc: number }
   | { id: number; type: 'bytes'; doc: number }
   | { id: number; type: 'addText'; doc: number; pages: PageWords[] }
+  | { id: number; type: 'ocrLayer'; doc: number; page: number }
   | { id: number; type: 'annots'; doc: number; from?: number; to?: number }
   | { id: number; type: 'addHighlight'; doc: number; page: number; rects: NormRect[]; color: string; contents?: string }
   | { id: number; type: 'updateAnnot'; doc: number; page: number; index: number; contents?: string; color?: string }
@@ -41,6 +42,7 @@ export type ResultMap = {
   save: ArrayBuffer;
   bytes: ArrayBuffer;
   addText: ArrayBuffer;
+  ocrLayer: OcrLayer;
   annots: Annotation[];
   addHighlight: null;
   updateAnnot: null;

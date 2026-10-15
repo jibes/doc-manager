@@ -18,7 +18,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { opError, t } from '@/i18n';
+import { aiMessage, opError, t } from '@/i18n';
 import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
@@ -26,7 +26,7 @@ import type { Annotation, DocHandle, PageLink, SearchHit } from '@/engine/types'
 import { canDownload, downloadDoc, printDoc, shareDoc } from '@/lib/fileActions';
 import { onBack } from '@/lib/backGuard';
 import { shortcut, withKey, withShortcut } from '@/lib/keys';
-import { useAsk } from '@/state/ask';
+import { ask, useAsk } from '@/state/ask';
 import { libraryActions } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
@@ -38,6 +38,8 @@ import { inboxDir, refreshInboxCount } from '@/archive/inbox';
 import { docKey } from '@/archive/shared';
 import { folders } from '@/lib/folders';
 import { anyPageWithoutText, makeSearchable, pagesWithoutText } from '@/archive/searchable';
+import { improveWithAi } from '@/archive/improve';
+import { aiHost, aiReady, type AiSettings } from '@/scan/ai';
 import type { Details } from '@/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
 import { DetailsPanel } from './DetailsPanel';
@@ -92,6 +94,24 @@ async function keptInArchive(doc: DocRecord, handle: DocHandle, archive: string)
   const type = doc.format === 'epub' ? 'application/epub+zip' : 'application/pdf';
   const entry = await folders.create({ root: archive, dir: await inboxDir(archive) }, doc.fileName, new Blob([bytes], { type }));
   await libraryActions().linkTo(doc.id, { name: entry.name, size: bytes.byteLength, handle: entry.handle, link: entry.uri });
+}
+
+/** The pages' text read again by the model and written into the file (see textAdded for what it came to). */
+async function textImproved(id: string, handle: DocHandle, ai: AiSettings, onProgress: (done: number, total: number) => void, signal: AbortSignal): Promise<TextAdded & { said?: string }> {
+  let started = false;
+  try {
+    if (!(await repo.requestAccess(id, true))) return { done: false, message: t.improveFailed(t.writeDenied), started };
+    started = true;
+    const result = await improveWithAi(handle, ai, onProgress, signal);
+    if (!result) return { done: false, message: t.improveNothing, started: false };
+    await repo.writeFile(id, result.bytes);
+    return { done: true, said: t.improveDone(result.pages, result.skipped) };
+  } catch (e) {
+    if (signal.aborted) return { done: false, message: t.improveStopped, started: false };
+    const m = e instanceof Error ? e.message : String(e);
+    const why = m === 'denied' ? t.writeDenied : /Could not write the text/.test(m) ? t.searchableNoWrite : /can.t be read here/.test(m) ? t.searchableNoPages : aiMessage(e);
+    return { done: false, message: t.improveFailed(why), started: false };
+  }
 }
 
 /** What making a document searchable came to. `started`: the open document may have the text and the file not. */
@@ -213,7 +233,13 @@ export function Reader({
 
   // A PDF with pages without text (a scan, or scanned pages after typed ones) can get their text read and added.
   const [textless, setTextless] = useState(false);
-  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  // Reading text: on the device (Make searchable) or by the model (Improve text with AI).
+  const [reading, setReading] = useState<{ done: number; total: number; ai?: boolean } | null>(null);
+  const ai = usePrefs((s) => s.ai);
+  const canImprove = Platform.OS === 'web' && doc.format !== 'epub' && aiReady(ai);
+  // Leaving the document stops a reading by the model.
+  const stopImproving = useRef<AbortController | null>(null);
+  useEffect(() => () => stopImproving.current?.abort(), []);
   useEffect(() => {
     if (Platform.OS !== 'web' || doc.format === 'epub') return;
     let alive = true;
@@ -225,6 +251,24 @@ export function Reader({
       alive = false;
     };
   }, [handle, doc.format]);
+  const improveText = async () => {
+    if (reading) return;
+    const yes = await ask({ title: t.improveAsk, body: t.improveAskBody(handle.pageCount, aiHost(ai)), confirm: t.improveGo });
+    if (yes === null) return;
+    const stop = new AbortController();
+    stopImproving.current = stop;
+    setReading({ done: 0, total: 0, ai: true });
+    const result = await textImproved(doc.id, handle, ai, (done, total) => setReading({ done, total, ai: true }), stop.signal);
+    stopImproving.current = null;
+    setReading(null);
+    if (stop.signal.aborted && !result.done) return;
+    if (result.done) {
+      invalidate(doc.id);
+      afterReload = result.said ?? t.searchableDone;
+      if (onReload) onReload();
+      else setReloaded(afterReload);
+    } else setReloaded(result.message);
+  };
   const addText = async () => {
     if (reading) return;
     setReading({ done: 0, total: 0 });
@@ -819,6 +863,7 @@ export function Reader({
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
     ...(outside && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
+    ...(canImprove && !edits.dirty ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
@@ -1096,7 +1141,7 @@ export function Reader({
       {reading && (
         <View pointerEvents="none" testID="searchable-progress" style={[styles.reading, { top: insets.top + TOP_BAR + space.md, backgroundColor: p.glass, borderColor: p.hairline }]}>
           <T v="caption" color={p.ink}>
-            {reading.total ? t.searchableProgress(reading.done, reading.total) : t.makeSearchable}
+            {reading.ai ? (reading.total ? t.improveProgress(reading.done, reading.total) : t.improveWithAi) : reading.total ? t.searchableProgress(reading.done, reading.total) : t.makeSearchable}
           </T>
         </View>
       )}

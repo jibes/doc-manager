@@ -56,7 +56,7 @@ export async function anyPageWithoutText(handle: DocHandle, limit: number, stop?
 }
 
 /** Reads one page: its words, with boxes normalized to the page as shown. */
-async function readPage(handle: DocHandle, page: number, signal?: AbortSignal): Promise<PageWords> {
+export async function readPage(handle: DocHandle, page: number, signal?: AbortSignal): Promise<PageWords> {
   const size = handle.pageSizes[page];
   const width = Math.round(size.width >= size.height ? OCR_EDGE : (OCR_EDGE * size.width) / size.height);
   const raster = await handle.renderPage(page, { width, signal });

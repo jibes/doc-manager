@@ -390,6 +390,17 @@ export const de: Strings = {
   searchableNothing: 'Alle Seiten haben schon Text.',
   searchableNone: 'Auf den Seiten wurde kein Text gefunden.',
   searchableFailed: (message: string) => `Der Text konnte nicht hinzugefügt werden: ${message}`,
+  improveWithAi: 'Text mit KI verbessern',
+  improveAsk: 'Text mit KI verbessern?',
+  improveAskBody: (pages: number, host: string) =>
+    `${pages === 1 ? 'Die Seite geht' : `Die ${pages} Seiten gehen`} als Bilder mit dem darauf gefundenen Text an ${host}, um neu gelesen zu werden. Der verbesserte Text ersetzt den unsichtbaren Text; Seiten mit eigenem, getipptem Text bleiben, wie sie sind.`,
+  improveGo: 'Verbessern',
+  improveProgress: (done: number, total: number) => `Text wird verbessert … Seite ${Math.min(done + 1, total)} von ${total}`,
+  improveDone: (pages: number, skipped: number) =>
+    `${pages === 1 ? 'Text auf 1 Seite verbessert' : `Text auf ${pages} Seiten verbessert`}${skipped ? `; ${skipped === 1 ? '1 Seite' : `${skipped} Seiten`} mit getipptem Text unverändert` : ''}.`,
+  improveNothing: 'Alle Seiten haben eigenen, getippten Text: Es gibt keinen erkannten Text zu verbessern.',
+  improveStopped: 'Abgebrochen: Der Text bleibt, wie er war.',
+  improveFailed: (message: string) => `Der Text konnte nicht verbessert werden: ${message}`,
   inboxNoText: 'Ohne eigenen Text: Er wird auf diesem Gerät gelesen, und beim Ablegen wird das Dokument durchsuchbar.',
   trashedN: (n: number) => (n === 1 ? 'In den Papierkorb verschoben.' : `${n} Elemente in den Papierkorb verschoben.`),
   trashTitle: 'Papierkorb',

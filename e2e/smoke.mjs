@@ -2737,6 +2737,84 @@ async function batch() {
   await ctx.close();
 }
 
+// Improve text with AI: a document's recognised text is read again by the model and replaces the invisible text;
+// typed pages stay as they are. The fake model gives its corrections from what it is sent.
+async function improve() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`improve: ${e.message}`));
+  const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+  const sent = [];
+  let first = 'Improved Line One';
+  await ctx.route('https://ai.test/**', async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const body = req.postDataJSON();
+    sent.push(body);
+    const prompt = body.messages[0].content.at(-1).text;
+    const images = body.messages[0].content.filter((c) => c.type === 'image_url').length;
+    // Every line sent comes back as it was, but the first; one page gets handwriting.
+    const ids = [...prompt.matchAll(/^(\d+\.\d+)\t(.*)$/gm)].map((m) => [m[1], m[2]]);
+    const pages = Array.from({ length: images }, (_, i) => ({
+      page: i + 1,
+      lines: ids.filter(([id]) => id.startsWith(`${i + 1}.`)).map(([id, text], j) => ({ id, text: j === 0 ? first : text })),
+      added: i === 0 ? [{ text: 'handwritten note', box: [100, 900, 500, 950] }] : [],
+    }));
+    const text = JSON.stringify({ title: '', date: '', sender: '', type: '', keywords: [], pages });
+    return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: text } }] }) });
+  });
+  await page.goto(BASE);
+  await openFolders(page);
+  await vis('home-settings').click();
+  await vis('ai-api-openai').click();
+  await vis('ai-url').fill('https://ai.test/v1');
+  await vis('ai-key').fill('sk-test');
+  await vis('ai-model').fill('test-model');
+  await page.waitForTimeout(300);
+
+  await openFixture(page, 'mixed.pdf');
+  await page.waitForTimeout(800);
+  // How often the document has `q` (the find panel's count, once the search has settled).
+  const found = async (q) => {
+    if (!(await vis('find-panel').count())) await vis('open-find').click();
+    await vis('search-input').fill(q);
+    await page.waitForTimeout(1500);
+    return vis('find-panel')
+      .innerText()
+      .then((x) => /\d+ results?|No matches/.exec(x)?.[0] ?? 'none');
+  };
+  const closeFind = async () => {
+    // One Esc at a time: a second one while the panel is still closing would close the document.
+    for (let i = 0; i < 3 && (await vis('find-panel').count()); i++) await page.keyboard.press('Escape').then(() => page.waitForTimeout(400));
+    if (await vis('find-clear').count()) await vis('find-clear').click();
+  };
+  const run = async () => {
+    await closeFind();
+    await page.getByTestId('open-more').click();
+    await page.getByTestId('menu-improve').click();
+    const asked = await page.getByText(/go to ai\.test as images/).waitFor({ timeout: 5000 }).then(() => true, () => false);
+    await page.getByTestId('ask-confirm').click();
+    const said = await page.getByText(/Text improved on/).waitFor({ timeout: 240000 }).then(() => page.getByText(/Text improved on/).innerText(), () => '');
+    await page.getByTestId('reader').waitFor();
+    await page.waitForTimeout(800);
+    return { asked, said };
+  };
+  const one = await run();
+  check(one.asked, 'improve: asks first, naming where the pages go');
+  check(/on 1 page; 1 page with typed text left as it is/.test(one.said), `improve: the scanned page is read again, the typed one left alone (${one.said})`);
+  const req = sent.at(-1);
+  check(sent.length === 1 && req.messages[0].content.filter((c) => c.type === 'image_url').length === 1 && /2\.1|1\.1\t\S/.test(req.messages[0].content.at(-1).text), 'improve: the page image goes with the text read on the device');
+  check((await found('Improved Line One')) === '1 result' && (await found('handwritten note')) === '1 result', 'improve: the corrected text and what the model added are in the document');
+  check((await found('Orderly Notes')) !== 'No matches', 'improve: the typed page keeps its own text');
+  // Again: the layer is replaced, not added to.
+  first = 'Second Pass Line';
+  const two = await run();
+  check(/on 1 page/.test(two.said) && (await found('Improved Line One')) === 'No matches' && (await found('Second Pass Line')) === '1 result', `improve: done again, the earlier text is replaced (${two.said})`);
+  check((await found('handwritten note')) === '1 result', 'improve: …once, not twice');
+  await ctx.close();
+}
+
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
 await step('german', german);
 await step('locked', locked);
@@ -2750,6 +2828,7 @@ await step('search', searchArchive);
 await step('documents', documentsScreen);
 await step('inbox', inbox);
 await step('searchable', searchable);
+await step('improve', improve);
 await step('sync', syncSafety);
 await step('batch', batch);
 await step('shared', sharedReading);

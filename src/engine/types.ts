@@ -13,7 +13,13 @@ export type NormRect = { x: number; y: number; w: number; h: number };
  * Words recognised on a page, in reading order. Boxes are normalized to the page as shown turned by `turn`
  * clockwise quarter turns (so the text reads upright: a page scanned sideways has turn 1 or 3).
  */
-export type PageWords = { page: number; turn?: number; words: { text: string; box: NormRect }[] };
+/** Words to put over a page as invisible text. `replace`: the page's invisible text (an earlier layer) goes first. */
+export type PageWords = { page: number; turn?: number; words: { text: string; box: NormRect }[]; replace?: boolean };
+/**
+ * A page's invisible text (a text layer added by recognition), as upright words in reading order. `other`: the
+ * page has text that isn't such a layer (typed text, sideways or nested text), so its text is left as it is.
+ */
+export type OcrLayer = { words: { text: string; box: NormRect }[]; other: boolean };
 
 export type DocMetadata = {
   title?: string;
@@ -166,8 +172,10 @@ export interface DocHandle {
   save(): Promise<ArrayBuffer>;
   /** The file as it is: the bytes it was opened from, or (with unsaved edits) as save() writes it. */
   bytes(): Promise<ArrayBuffer>;
-  /** The file with invisible text over recognised words (an incremental update to bytes()); the handle is unchanged. */
+  /** The file with invisible text over recognised words (an incremental update to bytes()); reopen it to see it. */
   addTextLayer(pages: PageWords[]): Promise<ArrayBuffer>;
+  /** A page's invisible text layer, to be read again (by a model). */
+  ocrLayer(page: number): Promise<OcrLayer>;
   close(): void;
 }
 

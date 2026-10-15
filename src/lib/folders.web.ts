@@ -42,7 +42,7 @@ const shellFolders: FoldersApi = {
     if (!res.ok) throw new Error(t.fileGone);
     return res.blob();
   },
-  canEdit: (root) => root !== 'all',
+  canEdit: (root, entry) => root !== 'all' || !!entry?.uri?.startsWith('file:'),
   canShare: true,
   mkdir: (root, dir, name) => shellRequest('mkdir', { root, dir: dir ?? '', name }),
   async create(at, name, data) {

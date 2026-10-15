@@ -417,6 +417,17 @@ export const en = {
   searchableNothing: 'Every page already has text.',
   searchableNone: 'No text was found on the pages.',
   searchableFailed: (message: string) => `The text couldn’t be added: ${message}`,
+  improveWithAi: 'Improve text with AI',
+  improveAsk: 'Improve the text with AI?',
+  improveAskBody: (pages: number, host: string) =>
+    `${pages === 1 ? 'The page goes' : `The ${pages} pages go`} to ${host} as images, with the text found on them, to be read again. The corrected text replaces the invisible text; pages with typed text of their own stay as they are.`,
+  improveGo: 'Improve',
+  improveProgress: (done: number, total: number) => `Improving the text… page ${Math.min(done + 1, total)} of ${total}`,
+  improveDone: (pages: number, skipped: number) =>
+    `${pages === 1 ? 'Text improved on 1 page' : `Text improved on ${pages} pages`}${skipped ? `; ${skipped === 1 ? '1 page' : `${skipped} pages`} with typed text left as ${skipped === 1 ? 'it is' : 'they are'}` : ''}.`,
+  improveNothing: 'Every page has typed text of its own: there is no recognised text to improve.',
+  improveStopped: 'Stopped: the text stays as it was.',
+  improveFailed: (message: string) => `The text couldn’t be improved: ${message}`,
   inboxNoText: 'No text of its own: it is read on this device and becomes searchable when filed.',
   trashedN: (n: number) => (n === 1 ? 'Moved to the trash.' : `Moved ${n} items to the trash.`),
   trashTitle: 'Trash',

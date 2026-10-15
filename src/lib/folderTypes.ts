@@ -65,8 +65,11 @@ export type FoldersApi = {
   list(root: string, dir?: string): Promise<FolderEntry[]>;
   /** The file's bytes. */
   read(root: string, e: FolderEntry): Promise<Blob>;
-  /** File operations: available for picked folders and internal storage, not in "All documents" (no folder to work in). */
-  canEdit(root: string): boolean;
+  /**
+   * File operations on what is in `root`: picked folders and internal storage. "All documents" is no folder to
+   * make folders or paste in; its files (`entry`) can be renamed, moved and deleted where the app has their path.
+   */
+  canEdit(root: string, entry?: FolderEntry): boolean;
   /** Can send documents to other apps. */
   canShare: boolean;
   mkdir(root: string, dir: string | undefined, name: string): Promise<void>;

@@ -497,15 +497,15 @@ export default function Documents() {
             }
           />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!allInFolders(picked)} onPress={() => clip(false)} />
-          <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => clip(true)} />
+          <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => clip(true)} />
           <Action
             testID="act-rename"
             icon="pencil"
             label={t.rename}
-            disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root)}
+            disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
             onPress={() => void rename()}
           />
-          <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => void remove()} />
+          <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => void remove()} />
         </ActionBar>
       )}
       {view === 'folders' && <PasteBar here={null} bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4} onDone={() => {}} onError={say} />}

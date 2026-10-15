@@ -278,6 +278,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const setClip = useClipboard((s) => s.set);
   const changed = useClipboard((s) => s.changed);
   const here: Place = useMemo(() => ({ root, dir }), [root, dir]);
+  // New folders and pasting need a folder; renaming, moving and deleting need only the files ("All documents" too).
   const editable = folders.canEdit(root);
 
   useEffect(() => {
@@ -313,6 +314,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const { cols, gap, tile } = gridOf(width);
 
   const picked = useMemo(() => (selected ? shown.filter((e) => selected.has(e.id)) : []), [selected, shown]);
+  const pickedEditable = picked.every((e) => folders.canEdit(root, e));
   const toggle = (e: FolderEntry) => setSelected((s) => toggled(s, e.id));
 
   /** Runs a file operation; the folder (and any folder below it on the stack) lists itself again, Documents soon after. */
@@ -494,9 +496,9 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
             onPress={() => void run(async () => readingAddedText(await addToReading(filesAsDocs(root, dir, picked))))}
           />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!picked.length} onPress={() => clip(false)} />
-          <Action testID="act-move" icon="move" label={t.move} disabled={!editable || !picked.length} onPress={() => clip(true)} />
-          <Action testID="act-rename" icon="pencil" label={t.rename} disabled={!editable || picked.length !== 1} onPress={rename} />
-          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!editable || !picked.length} onPress={remove} />
+          <Action testID="act-move" icon="move" label={t.move} disabled={!pickedEditable || !picked.length} onPress={() => clip(true)} />
+          <Action testID="act-rename" icon="pencil" label={t.rename} disabled={!pickedEditable || picked.length !== 1} onPress={rename} />
+          <Action testID="act-delete" icon="trash" label={t.delete} disabled={!pickedEditable || !picked.length} onPress={remove} />
         </ActionBar>
       ) : (
         <PasteBar here={editable ? here : null} bottom={bottom} onDone={() => {}} onError={setMessage} onMessage={setMessage} />

@@ -45,6 +45,7 @@ export const engine: DocumentEngine = {
       addTextLayer: async () => {
         throw new Error('Saving is not available in the app yet');
       },
+      ocrLayer: async () => ({ words: [], other: true }),
       close: () => PdfEngine.close(r.handle),
     };
     return handle;
