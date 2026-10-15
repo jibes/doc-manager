@@ -10,6 +10,7 @@ export const folders: FoldersApi = {
   appFolder: async () => null,
   add: async () => null,
   forget: async () => {},
+  nestings: async () => [],
   canEdit: () => false,
   canShare: false,
   mkdir: async () => {},

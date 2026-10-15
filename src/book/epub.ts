@@ -7,6 +7,10 @@ export type EpubPackage = {
   title?: string;
   author?: string;
   language?: string;
+  /** When it was published, as YYYY-MM-DD (only a full date). */
+  date?: string;
+  /** Its subjects (dc:subject), as keywords. */
+  subjects: string[];
   /** Content documents in reading order (linear items only). */
   spine: string[];
   toc: { title: string; href: string; depth: number }[];
@@ -99,7 +103,9 @@ export function readPackage(bytes: Uint8Array): EpubPackage {
     if (ncx && files[ncx.href]) toc = ncxToc(parseMarkup(text(files, ncx.href), true), ncx.href);
   }
 
-  return { title: meta('title'), author: meta('creator'), language: meta('language'), spine, toc, cover: cover && files[cover] ? cover : undefined, types, files };
+  const date = /^(\d{4}-\d{2}-\d{2})/.exec(meta('date') ?? '')?.[1];
+  const subjects = [...new Set(findAll(opf, (x) => local(x.name) === 'subject' && x.name.includes(':')).map((n) => textOf(n).replace(/\s+/g, ' ').trim()).filter(Boolean))];
+  return { title: meta('title'), author: meta('creator'), language: meta('language'), date, subjects, spine, toc, cover: cover && files[cover] ? cover : undefined, types, files };
 }
 
 function navToc(doc: XNode, base: string): EpubPackage['toc'] {

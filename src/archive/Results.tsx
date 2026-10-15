@@ -4,6 +4,7 @@ import { T } from '@/components/primitives';
 import { fonts } from '@/design/tokens';
 import { errorText, t } from '@/i18n';
 import { folders } from '@/lib/folders';
+import { APP_ROOT_ID } from '@/lib/nesting';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
 import { docDate } from './facets';
@@ -20,6 +21,8 @@ export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>
 /** The folders a file is in, for people: "Archive / 2024 / Arzt" (just the place where its folders can't be told). */
 export function whereIs(place: Extract<Place, { kind: 'folder' }>): string {
   if (place.entry.where) return place.entry.where === '/' ? place.rootName : place.entry.where.split('/').join(' / ');
+  // The Tessel folder is this device's own storage, as library copies are.
+  const name = place.root === APP_ROOT_ID ? t.placeDevice : place.rootName;
   let dir = place.dir ?? '';
   // Android folders: IDs such as "primary:Sync/Archive/2024" below the picked "primary:Sync/Archive".
   const tree = /\/tree\/([^/]+)/.exec(place.root);
@@ -30,7 +33,7 @@ export function whereIs(place: Extract<Place, { kind: 'folder' }>): string {
     const at = dir.lastIndexOf(`/${place.rootName}/`);
     dir = at >= 0 ? dir.slice(at + place.rootName.length + 2) : '';
   } else if (dir.includes(':')) dir = '';
-  return [place.rootName, ...dir.split('/').filter(Boolean)].join(' / ');
+  return [name, ...dir.split('/').filter(Boolean)].join(' / ');
 }
 
 /** Opens a document at a page, with the query highlighted: a library document directly, a folder file via the library. */

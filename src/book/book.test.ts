@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { linkTarget, openBook, CHARS_PER_PAGE } from './index';
-import { resolvePath } from './epub';
+import { readPackage, resolvePath } from './epub';
 import { imageSize } from './image';
 
 const load = (f: string) => openBook(new Uint8Array(readFileSync(`e2e/fixtures/${f}`)));
@@ -73,6 +73,13 @@ describe('openBook (EPUB 2)', () => {
     expect(book.toc.map((e) => e.title)).toEqual(['Arrival', 'Departure']);
     expect(book.cover).toBe('cover.jpg');
     expect(imageSize(book.images['cover.jpg'].bytes)).toEqual({ w: 500, h: 750 });
+  });
+
+  it('reads the date and subjects for the index (a full date only, subjects once)', () => {
+    const three = readPackage(new Uint8Array(readFileSync('e2e/fixtures/book.epub')));
+    expect([three.date, three.subjects]).toEqual(['2019-04-02', ['Harbours', 'Travel']]);
+    const two = readPackage(new Uint8Array(readFileSync('e2e/fixtures/book2.epub')));
+    expect([two.date, two.subjects]).toEqual([undefined, []]);
   });
 
   it('rejects files that are not EPUBs', () => {

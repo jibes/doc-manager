@@ -5,9 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
-import { DocItem, DocList, gridOf, LayoutToggle, useLayout, type Layout } from '@/components/DocItems';
+import { DocItem, DocList, gridOf, LayoutToggle, rightClick, useLayout, type Layout } from '@/components/DocItems';
 import { SelectChip } from '@/components/SortChip';
-import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
+import { Action, ActionBar, Check, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { shareDocs } from '@/lib/fileActions';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
 import { Icon } from '@/components/Icon';
@@ -27,7 +27,7 @@ import { repo, type DocRecord } from '@/storage';
 const launchedAsApp = () => !!shell || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
 /** Set once the app has opened its first place (later visits here don't jump away). */
 let launched = false;
-/** Recently opened documents listed here; all of them are in Documents. */
+/** Recently opened documents listed here (not on the reading list); all of them are in Documents. */
 const RECENT = 20;
 /** AGPL §13: offer the source to network users. */
 const SOURCE_URL = 'https://github.com/jibes/doc-reader';
@@ -89,14 +89,16 @@ export default function Home() {
   const [current, ...shelf] = reading;
   // Nothing on the reading list: the document opened last is the one to continue.
   const lastRead = reading.length ? undefined : docs.find((d) => d.openedAt && !d.reading);
-  // Recently opened: the last few (every document is in Documents).
-  const recent = useMemo(() => docs.slice(0, RECENT), [docs]);
+  // Recently opened: the last few not shown above (every document is in Documents).
+  const recent = useMemo(() => docs.filter((d) => !d.reading && d !== lastRead).slice(0, RECENT), [docs, lastRead]);
 
   if (!loaded) return <View style={{ flex: 1, backgroundColor: p.canvas }} />;
 
   const removeDoc = (d: DocRecord) => void confirmRemove(d, remove);
 
   const picked = selected ? docs.filter((d) => selected.has(d.id)) : [];
+  // Everything on the screen, each once: for Select all.
+  const shown = [...(lastRead ? [lastRead] : []), ...reading, ...(showFinished ? finished : []), ...recent];
   const hold = (id: string) => {
     if (justSelected(id)) return;
     heldNow(id);
@@ -134,7 +136,7 @@ export default function Home() {
       >
         <View style={{ width: contentW, flexGrow: 1 }}>
           {selected ? (
-            <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(recent.map((d) => d.id)))} />
+            <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((d) => d.id)))} />
           ) : (
             <AppHeader tab="reading">
               <LayoutToggle />
@@ -153,7 +155,7 @@ export default function Home() {
             <>
               {lastRead && (
                 <View style={styles.section} testID="last-read">
-                  <ContinueCard doc={lastRead} cover={covers[lastRead.id]} wide={wide} />
+                  <ContinueCard doc={lastRead} cover={covers[lastRead.id]} wide={wide} {...selection(lastRead)} />
                   <View style={{ alignItems: 'flex-start', marginTop: space.sm }}>
                     <Button testID="continue-add" kind="quiet" icon="readingAdd" label={t.addToReadingList} onPress={() => toggleReading(lastRead.id)} />
                   </View>
@@ -164,11 +166,11 @@ export default function Home() {
                   <T v="kicker" color={p.muted} style={styles.kicker}>
                     {reading.length ? t.readingListCount(reading.length) : t.readingList}
                   </T>
-                  {current && <ContinueCard doc={current} cover={covers[current.id]} wide={wide} />}
+                  {current && <ContinueCard doc={current} cover={covers[current.id]} wide={wide} {...selection(current)} />}
                   {shelf.length > 0 && (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.lg, paddingTop: space.lg }}>
                       {shelf.map((d) => (
-                        <ShelfItem key={d.id} doc={d} cover={covers[d.id]} />
+                        <ShelfItem key={d.id} doc={d} cover={covers[d.id]} {...selection(d)} />
                       ))}
                     </ScrollView>
                   )}
@@ -203,11 +205,13 @@ export default function Home() {
 
               <View style={styles.section}>
                 <View style={styles.sectionHead}>
-                  <T v="kicker" color={p.muted}>
-                    {t.recentTitle}
-                  </T>
+                  {recent.length > 0 && (
+                    <T v="kicker" color={p.muted}>
+                      {t.recentTitle}
+                    </T>
+                  )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' }}>
-                    {recent.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
+                    {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
                     <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                   </View>
                 </View>
@@ -265,22 +269,35 @@ export default function Home() {
   );
 }
 
-function ContinueCard({ doc, cover, wide }: { doc: DocRecord; cover?: string | null; wide: boolean }) {
+/** Picking documents on this screen: undefined `selected` is not picking (as in every list). */
+type Picking = { selected?: boolean; onSelect: () => void; onToggle: () => void };
+
+/** A long press or right click picks it, a tap while picking picks one more (as rows do). */
+const pickable = (doc: DocRecord, { selected, onSelect, onToggle }: Picking) => ({
+  accessibilityRole: selected === undefined ? ('button' as const) : ('checkbox' as const),
+  'aria-checked': selected,
+  onPress: selected === undefined ? () => open(doc) : onToggle,
+  onLongPress: onSelect,
+  delayLongPress: 350,
+  ...rightClick(onSelect),
+});
+
+function ContinueCard({ doc, cover, wide, ...picking }: { doc: DocRecord; cover?: string | null; wide: boolean } & Picking) {
   const p = usePalette();
   const page = (doc.position?.page ?? 0) + 1;
   const pct = pctOf(doc);
   return (
     <Pressable
       testID="continue"
-      accessibilityRole="button"
       accessibilityLabel={t.continueReadingA11y(doc.title, page)}
-      onPress={() => open(doc)}
+      {...pickable(doc, picking)}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.continue,
-        { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, opacity: pressed ? 0.9 : 1 },
+        { backgroundColor: picking.selected ? p.hairline : hovered ? p.raised : p.surface, borderColor: p.hairline, opacity: pressed ? 0.9 : 1 },
         { padding: wide ? space.xl : space.lg, gap: wide ? space.xl + 4 : space.lg },
       ]}
     >
+      {picking.selected !== undefined && <Check on={picking.selected} style={styles.cardCheck} />}
       <Cover uri={cover} aspect={doc.coverAspect} width={wide ? 112 : 84} />
       <View style={{ flex: 1, justifyContent: 'center', gap: space.sm }}>
         <T v="kicker" color={p.accent}>
@@ -308,11 +325,14 @@ function ContinueCard({ doc, cover, wide }: { doc: DocRecord; cover?: string | n
   );
 }
 
-function ShelfItem({ doc, cover }: { doc: DocRecord; cover?: string | null }) {
+function ShelfItem({ doc, cover, ...picking }: { doc: DocRecord; cover?: string | null } & Picking) {
   const p = usePalette();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={doc.title} onPress={() => open(doc)} style={{ width: 96 }}>
-      <Cover uri={cover} aspect={doc.coverAspect} width={96} progress={progressOf(doc) || 0.001} />
+    <Pressable testID="shelf-item" accessibilityLabel={doc.title} {...pickable(doc, picking)} style={{ width: 96 }}>
+      <View>
+        <Cover uri={cover} aspect={doc.coverAspect} width={96} progress={progressOf(doc) || 0.001} />
+        {picking.selected !== undefined && <Check on={picking.selected} style={styles.shelfCheck} />}
+      </View>
       <T v="caption" numberOfLines={2} style={{ marginTop: space.md + 4, fontFamily: fonts.sansMedium }}>
         {doc.title}
       </T>
@@ -379,6 +399,8 @@ const styles = StyleSheet.create({
   section: { marginBottom: space.xxl },
   kicker: { marginBottom: space.md },
   continue: { flexDirection: 'row', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth },
+  cardCheck: { position: 'absolute', top: space.md, right: space.md },
+  shelfCheck: { position: 'absolute', top: 6, right: 6 },
   bar: { height: 3, borderRadius: 2, overflow: 'hidden' },
   finishedHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs, alignSelf: 'flex-start', paddingVertical: space.xs },
   // The heading and its actions side by side, the actions under it where both don't fit (German, phones).

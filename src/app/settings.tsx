@@ -10,6 +10,7 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { aiMessage, t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
+import { nestingNote } from './files';
 import { shareNow, useSharing } from '@/archive/sharing';
 import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
@@ -50,7 +51,9 @@ export default function Settings() {
   useEffect(refresh, [refresh]);
 
   const add = async () => {
-    await folders.add().catch(() => setError(t.opFailed));
+    const r = await folders.add().catch(() => void setError(t.opFailed));
+    const note = r && (await nestingNote(r));
+    if (note) setError(note);
     refresh();
     schedule(1000);
   };

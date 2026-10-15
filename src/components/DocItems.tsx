@@ -103,7 +103,8 @@ export type DocItemProps = {
   actions?: Action[];
 };
 
-const rightClick = (fn: () => void) =>
+/** A right click (web) does what a long press does. */
+export const rightClick = (fn: () => void) =>
   Platform.OS === 'web'
     ? {
         onContextMenu: (ev: { preventDefault(): void }) => {

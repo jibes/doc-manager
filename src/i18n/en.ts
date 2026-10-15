@@ -466,6 +466,10 @@ export const en = {
   placeArchive: 'Archive',
   placeFolders: 'Other folders',
   placeDevice: 'This device',
+  nestedInArchive: (name: string) => `“${name}” is inside the archive. Its files count once, in the archive.`,
+  nestedIn: (inner: string, outer: string) => `“${inner}” is inside “${outer}”. Its files count once, under “${inner}”.`,
+  nestedHolds: (outer: string, inner: string) => `“${outer}” holds “${inner}”. Those files count once, under “${inner}”.`,
+  bookType: 'Book',
   archiveSynced: 'Archive · synced',
   /** For a folder that is called Archive already. */
   syncedOnly: 'Synced with your other devices',

@@ -2,7 +2,9 @@ import { createStore, set, values, type UseStore } from 'idb-keyval';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
+import { readPackage } from '@/book/epub';
 import { engine } from '@/engine';
+import { t } from '@/i18n';
 import { BASE } from '@/lib/base';
 import { folders, type FolderRoot } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
@@ -221,21 +223,31 @@ type Candidate = { key: string; place: Place; name: string; size: number; modifi
  * The places to index: the archive first, the picked folders and Tessel's own; then, with all files access,
  * every other document on the device (those already found in a folder above are left out of it). Locked ones
  * (the browser wants the user's OK again) can't be read now: their records stay. Null: the places are unknown.
+ *
+ * `skip`: in each place, the folders inside it to leave alone. Where folders were added inside one another a file
+ * is still listed once: the archive keeps everything below it (a folder added inside it isn't read on its own);
+ * elsewhere the inner folder lists its own files (the Tessel folder inside "Documents" as This device, say).
  */
-async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[] } | null> {
-  if (!folders.supported) return { roots: [], locked: [] };
+async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[]; skip: Map<string, Set<string>> } | null> {
+  if (!folders.supported) return { roots: [], locked: [], skip: new Map() };
   const all = await folders.roots(true).catch(() => null);
   if (!all) return null;
   const archive = usePrefs.getState().archive;
   const rank = (r: FolderRoot) => (r.id === archive ? 0 : r.kind === 'all' ? 2 : 1);
-  const roots = all.filter((r) => !r.locked && r.kind !== 'device').sort((a, b) => rank(a) - rank(b));
-  return { roots, locked: all.filter((r) => r.locked).map((r) => r.id) };
+  const nest = await folders.nestings(all).catch(() => []);
+  const inArchive = new Set(nest.filter((n) => n.outer === archive).map((n) => n.inner));
+  const roots = all.filter((r) => !r.locked && r.kind !== 'device' && !inArchive.has(r.id)).sort((a, b) => rank(a) - rank(b));
+  const read = new Set(all.filter((r) => r.kind !== 'device' && !inArchive.has(r.id)).map((r) => r.id));
+  const skip = new Map<string, Set<string>>();
+  for (const n of nest) if (n.outer !== archive && read.has(n.inner)) skip.set(n.outer, (skip.get(n.outer) ?? new Set()).add(n.dir));
+  return { roots, locked: all.filter((r) => r.locked).map((r) => r.id), skip };
 }
 
 /** A folder whose listing failed: what is known in it (and below it) is kept until it can be listed again. */
 type Unlisted = { root: string; dir?: string };
 
-async function walk(root: FolderRoot, dir: string | undefined, depth: number, inbox: boolean, out: Candidate[], conflicts: Conflict[], failed: Unlisted[]): Promise<void> {
+/** `skip`: folders inside this one that are read on their own (added folders, the archive). */
+async function walk(root: FolderRoot, dir: string | undefined, depth: number, inbox: boolean, out: Candidate[], conflicts: Conflict[], failed: Unlisted[], skip?: Set<string>): Promise<void> {
   await whileOpen();
   const listed = await folders.list(root.id, dir);
   // "All documents" is every file on the device: those in a folder walked already are in the index as that.
@@ -247,9 +259,10 @@ async function walk(root: FolderRoot, dir: string | undefined, depth: number, in
     // Hidden folders (Syncthing's versions, Tessel's own .tessel and trash) and files Syncthing is still writing.
     if (syncTemporary(e.name)) continue;
     if (e.kind === 'dir') {
+      if (skip?.has(e.id)) continue;
       const intoInbox = inbox || (depth === 0 && root.id === archive && e.name.toLocaleLowerCase() === 'inbox');
-      if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, intoInbox, out, conflicts, failed).catch(() => failed.push({ root: root.id, dir: e.id }));
-    } else if (e.kind === 'pdf') {
+      if (depth < MAX_DEPTH) await walk(root, e.id, depth + 1, intoInbox, out, conflicts, failed, skip).catch(() => failed.push({ root: root.id, dir: e.id }));
+    } else {
       const conflict = parseConflict(e.name);
       // Conflict copies are resolved in the folders Tessel works in ("All documents" has no folders to work in).
       if (conflict) {
@@ -284,7 +297,7 @@ async function candidates(): Promise<{ list: Candidate[]; unlisted: Unlisted[]; 
   if (!places) return null;
   const unlisted: Unlisted[] = places.locked.map((root) => ({ root }));
   for (const root of places.roots) {
-    await walk(root, undefined, 0, false, list, conflicts, unlisted).catch(() => unlisted.push({ root: root.id }));
+    await walk(root, undefined, 0, false, list, conflicts, unlisted, places.skip.get(root.id)).catch(() => unlisted.push({ root: root.id }));
   }
   // Library documents that aren't files in those folders already (a document opened from a folder is linked to it).
   const uris = list.map((c) => (c.place.kind === 'folder' ? c.place.entry.uri : undefined)).filter((u): u is string => !!u);
@@ -292,7 +305,7 @@ async function candidates(): Promise<{ list: Candidate[]; unlisted: Unlisted[]; 
   // In a browser, folder files have no URI: a linked document is matched to its file by name and size.
   const inFolders = new Set(list.map((c) => `${c.name}|${c.size}`));
   for (const d of await repo.list().catch(() => [])) {
-    if (d.format === 'epub' || linked.has(d.id) || (d.linked && inFolders.has(`${d.fileName}|${d.bytes}`))) continue;
+    if (linked.has(d.id) || (d.linked && inFolders.has(`${d.fileName}|${d.bytes}`))) continue;
     list.push({ key: `lib:${d.id}`, place: { kind: 'library', id: d.id }, name: d.fileName, size: d.bytes, modified: d.addedAt });
   }
   return { list, unlisted, conflicts };
@@ -321,6 +334,15 @@ async function read(c: Candidate): Promise<Indexable | null> {
   if (!bytes) return null;
   const hash = await contentHash(bytes);
   const share = await docKey(bytes);
+  // A book: its title, author, date and subjects (its text isn't searched yet).
+  if (/\.epub$/i.test(c.name)) {
+    try {
+      const pkg = readPackage(new Uint8Array(bytes));
+      return { ...base, ...empty, hash, share, title: pkg.title ?? '', sender: pkg.author ?? '', type: t.bookType, tags: pkg.subjects.slice(0, 8), date: pkg.date ?? '' };
+    } catch {
+      return { ...base, ...empty, hash, share, type: t.bookType, failed: true };
+    }
+  }
   let handle;
   try {
     handle = await engine.open({ kind: 'bytes', bytes });

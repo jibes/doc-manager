@@ -24,6 +24,9 @@ async function newContext(opts, { fsa = false } = {}) {
   return ctx;
 }
 
+/** Library documents on the Reading screen that aren't on the reading list: the one to continue, then Recently opened. */
+const opened = (page) => page.locator('[data-testid="continue"], [data-testid="recent-row"]');
+
 /** Page ↔ text view: the Text view button in the bar. */
 async function switchView(page) {
   await page.getByTestId('view-toggle').click();
@@ -296,7 +299,8 @@ async function run(name, viewport, isMobile) {
   check(/%/.test(await page.getByTestId('page-label').innerText()), `${name}: reading-list document shows progress`);
   await page.getByTestId('back').click();
   await page.getByTestId('continue').waitFor();
-  check(await page.getByTestId('recent-row').first().isVisible(), `${name}: home shows Reading list and Recent`);
+  // On the reading list, it isn't listed again under Recently opened.
+  check((await page.getByTestId('reading-list').isVisible()) && (await page.getByTestId('recent-row').count()) === 0, `${name}: home shows the reading list, not the same document again under Recent`);
   await page.waitForTimeout(800);
   await shot('8-home');
 
@@ -345,9 +349,9 @@ async function locked() {
   const opened = await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.width > 300), null, { timeout: 10000 }).then(() => true, () => false);
   // Reload on the home screen (static servers without SPA fallback can't reload deep links), then reopen.
   await page.getByTestId('back').click();
-  await page.getByTestId('recent-row').first().waitFor();
+  await page.getByTestId('continue').waitFor();
   await page.reload();
-  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('continue').click();
   const asksAgain = await page.getByTestId('password-dialog').waitFor({ timeout: 5000 }).then(() => true, () => false);
   check(rejected && opened && asksAgain, `locked: wrong password rejected (${rejected}), right one opens (${opened}), asked again after reload (${asksAgain})`);
   await ctx.close();
@@ -371,9 +375,9 @@ async function tagged() {
   check(ok, 'tagged: text view keeps headings and drops running header/footer');
   // The view choice is remembered per document (reload from home: CI's static server has no SPA fallback).
   await page.getByTestId('back').click();
-  await page.getByTestId('recent-row').first().waitFor();
+  await page.getByTestId('continue').waitFor();
   await page.reload();
-  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('continue').click();
   await page.getByTestId('text-view').waitFor({ timeout: 15000 }).then(
     () => check(true, 'tagged: text view remembered after reload'),
     () => check(false, 'tagged: text view remembered after reload'),
@@ -430,9 +434,9 @@ async function scan() {
     () => check(false, 'scan: OCR recognizes the scanned text'),
   );
   await page.getByTestId('back').click();
-  await page.getByTestId('recent-row').first().waitFor();
+  await page.getByTestId('continue').waitFor();
   await page.reload();
-  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('continue').click();
   await recognized().then(
     () => check(true, 'scan: recognized text is kept for next time'),
     () => check(false, 'scan: recognized text is kept for next time'),
@@ -464,9 +468,9 @@ async function forms() {
   await page.getByTestId('save').click();
   await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
   await page.getByTestId('back').click();
-  await page.getByTestId('recent-row').first().waitFor();
+  await page.getByTestId('continue').waitFor();
   await page.reload();
-  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('continue').click();
   await name.waitFor({ timeout: 10000 });
   const kept =
     (await name.inputValue()) === 'Ada Lovelace' &&
@@ -545,9 +549,9 @@ async function annotations() {
   check((await rows.count()) === 1, `annotations: saving details after a save keeps the notes (${await rows.count()})`);
   await page.keyboard.press('Escape');
   await page.getByTestId('back').click();
-  await page.getByTestId('recent-row').first().waitFor();
+  await page.getByTestId('continue').waitFor();
   await page.reload();
-  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('continue').click();
   await page.getByTestId('open-find').click();
   await page.getByTestId('tab-notes').click();
   await rows.first().waitFor({ timeout: 5000 });
@@ -566,7 +570,7 @@ async function annotations() {
   check((await page.getByTestId('save').isVisible()) && /\/read\//.test(page.url()), 'annotations: staying keeps the edits (and the address)');
   await page.goBack();
   await page.getByTestId('ask-confirm').click();
-  await page.getByTestId('recent-row').first().waitFor({ timeout: 5000 });
+  await page.getByTestId('continue').waitFor({ timeout: 5000 });
   check(true, 'annotations: discarding them goes back');
   await ctx.close();
 }
@@ -734,7 +738,7 @@ async function books() {
   await page.keyboard.press('Escape');
   await page.getByTestId('reading-list').waitFor();
   const card = await page.getByTestId('reading-list').innerText();
-  check(/Harbour Notes/.test(card) && /EPUB/.test(await page.getByTestId('recent-row').first().innerText()), 'books: listed as EPUB on the reading list');
+  check(/Harbour Notes/.test(card) && (await page.getByTestId('recent-row').count()) === 0, 'books: on the reading list (not again under Recent)');
   await page.reload();
   await page.getByTestId('continue').click();
   await view.waitFor();
@@ -774,7 +778,7 @@ async function books() {
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   // Not really an EPUB.
-  await page.getByTestId('recent-row').first().waitFor();
+  await page.getByTestId('continue').waitFor();
   const [fc2] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc2.setFiles({ name: 'broken.epub', mimeType: 'application/epub+zip', buffer: Buffer.from('not a zip') });
   await page.getByText('couldn’t be read as an EPUB book').waitFor({ timeout: 5000 }).then(
@@ -839,7 +843,7 @@ async function shellBridge() {
   check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
   // Shown before it was stored: it is in the library after a restart all the same.
   await page.goto(BASE);
-  const kept = await page.getByTestId('recent-row').filter({ hasText: 'Orderly Notes' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  const kept = await page.getByTestId('last-read').filter({ hasText: 'Orderly Notes' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
   check(kept, 'shell: the opened file is kept in the library');
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
@@ -902,6 +906,11 @@ async function linked() {
   await page.getByTestId('reader').waitFor();
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'linked: opens the picked file in place');
   await page.getByTestId('back').click();
+  // The one opened last is to continue; opening the sample again puts it under Recent.
+  check((await page.getByTestId('recent-row').count()) === 1 && /Orderly Notes/.test(await page.getByTestId('last-read').innerText()), 'linked: the document opened last is to continue, the other one under Recent');
+  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('back').click();
   check((await page.getByTestId('recent-row').first().innerText()).includes('In place'), 'linked: library marks it as opened in place');
   // Edited elsewhere: the library reads the file as it is now.
   await put('linked.pdf', 'tagged.pdf');
@@ -912,7 +921,7 @@ async function linked() {
   await page.getByTestId('back').click();
   // Moved away: say so, and let the reader find it again.
   await page.evaluate(async () => (await navigator.storage.getDirectory()).removeEntry('linked.pdf'));
-  await page.getByTestId('recent-row').first().click();
+  await page.getByTestId('continue').click();
   await page.getByTestId('open-error').waitFor();
   check(/isn’t where it was/.test(await page.getByTestId('open-error').innerText()), 'linked: a moved file is reported as moved');
   await put('found.pdf', 'columns.pdf');
@@ -1010,8 +1019,8 @@ async function foldersDesktop() {
   await page.getByTestId('reader').waitFor();
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'folders: a document opens from the grid');
   await page.goto(BASE);
-  await page.getByTestId('recent-row').first().waitFor();
-  check((await page.getByTestId('recent-row').first().innerText()).includes('In place'), 'folders: opened documents stay where they are (in place)');
+  await page.getByTestId('last-read').waitFor();
+  check(/Orderly Notes/.test(await page.getByTestId('last-read').innerText()) && (await page.getByTestId('recent-row').count()) === 0, 'folders: an opened document is the one to continue (not listed twice)');
   // Thumbnails are kept: on return they come from the cache, without reading the files again.
   await openFolders(page);
   await vis('folder-root').click();
@@ -1308,9 +1317,9 @@ async function foldersShell() {
   check((await names()).includes('two columns'), 'folders-shell: a document can be renamed');
   await page.goto(BASE);
   await toReading(page);
-  await page.getByTestId('recent-row').first().waitFor();
-  const rows = await page.getByTestId('recent-row').allInnerTexts();
-  const row = page.getByTestId('recent-row').filter({ hasText: 'Orderly Notes' });
+  await opened(page).first().waitFor();
+  const rows = await opened(page).allInnerTexts();
+  const row = opened(page).filter({ hasText: 'Orderly Notes' });
   check(rows.some((r) => r.includes('Orderly Notes')), 'folders-shell: the library keeps a moved and renamed document');
   await row.first().click();
   await page.getByTestId('reader').waitFor();
@@ -1344,8 +1353,8 @@ async function foldersShell() {
   check(!(await names()).includes('two columns'), 'folders-shell: a document can be deleted');
   await page.goto(BASE);
   await toReading(page);
-  await page.getByTestId('recent-row').first().waitFor();
-  const left = await page.getByTestId('recent-row').allInnerTexts();
+  await opened(page).first().waitFor();
+  const left = await opened(page).allInnerTexts();
   check(!left.some((r) => r.includes('Orderly Notes')), `folders-shell: a deleted document leaves the library (${left.length} left)`);
 
   // All files access (Settings): every document on the device, and internal storage.
@@ -1387,8 +1396,8 @@ async function foldersShell() {
   check(rewritten.startsWith(created.data.slice(0, 200)) && /\/Author \(ACME Instruments\)/.test(rewritten) && rewritten.length > created.data.length, `folders-shell: details are appended to the file in its folder (${rewritten.length} bytes)`);
   await page.goto(BASE);
   await toReading(page);
-  await page.getByTestId('recent-row').first().waitFor();
-  check((await page.getByTestId('recent-row').first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
+  await opened(page).first().waitFor();
+  check((await opened(page).first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
 
   // A file opened from elsewhere (system picker) becomes a real file in Documents/Tessel, not a hidden copy.
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
@@ -1401,6 +1410,19 @@ async function foldersShell() {
   await openFolders(page);
   const first = await vis('folder-root').first().innerText();
   check(first.startsWith('Tessel'), `folders-shell: the Tessel folder is the first place in Files (${first.split('\n')[0]})`);
+  // Documents: books are listed with their details; the Tessel folder is this device's own storage.
+  await openDocs(page);
+  let hits = [];
+  for (let i = 0; i < 40 && !hits.some((h) => h.includes('Harbour Notes') && h.includes('Ada Quay')); i++) hits = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
+  check(hits.some((h) => h.includes('Harbour Notes') && h.includes('Ada Quay')), `folders-shell: a book in a folder is in Documents with its title and author (${hits.map((h) => h.split('\n')[0])})`);
+  await vis('docs-filter').click();
+  await page.getByTestId('action-facet-place').click();
+  await page.getByTestId('action-place-device').click();
+  await page.waitForTimeout(300);
+  const device = await vis('archive-hit').allInnerTexts();
+  check(device.length === 1 && device[0].includes('This device'), `folders-shell: a file in the Tessel folder is on This device (${device.map((h) => h.replace(/\n/g, ' · '))})`);
+  await vis('facet-place').click();
+  await page.getByTestId('action-place-any').click().catch(() => {});
 
   // AI reading in the app: the request is made by the app, not the WebView (no CORS, no "Failed to fetch").
   let direct = 0;
@@ -1489,10 +1511,10 @@ async function aiReading() {
   const content = call?.body.messages?.[0]?.content ?? [];
   check(content.some((c) => c.type === 'image' && c.source?.data?.length > 1000) && /1\.1\t/.test(content.at(-1)?.text ?? ''), 'ai: the page image and the device’s lines are sent');
   await page.goto(BASE);
-  await page.getByTestId('recent-row').first().waitFor();
-  const row = await page.getByTestId('recent-row').first().innerText();
-  check(row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'), `ai: the model names the file (${row.split('\n')[0]})`);
-  await page.getByTestId('recent-row').first().click();
+  await opened(page).first().waitFor();
+  const row = await opened(page).first().innerText();
+  check(row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'), `ai: the model names the file (${row.replace(/\n/g, ' · ')})`);
+  await opened(page).first().click();
   await switchView(page);
   await page.waitForFunction(() => /bez zum 30\.10\.2026/.test(document.body.innerText) && /ACME Instruments GmbH/.test(document.body.innerText), null, { timeout: 30000 }).then(
     () => check(true, 'ai: corrected and added text is in the PDF'),
@@ -1569,11 +1591,11 @@ async function details() {
     );
     await page.keyboard.press('Escape');
     await page.goto(BASE);
-    await page.getByTestId('recent-row').first().waitFor();
-    check((await page.getByTestId('recent-row').first().innerText()).includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind})`);
+    await opened(page).first().waitFor();
+    check((await opened(page).first().innerText()).includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind})`);
   }
   // A bad date is caught before anything is written.
-  await page.getByTestId('recent-row').first().click();
+  await opened(page).first().click();
   await page.getByTestId('reader').waitFor();
   await panel();
   await page.getByTestId('detail-date').fill('2.10.2026');
@@ -1684,7 +1706,7 @@ async function searchArchive() {
 
   // New details are searchable once saved.
   await page.goto(BASE);
-  await page.getByTestId('recent-row').filter({ hasText: 'Old title' }).first().click();
+  await opened(page).filter({ hasText: 'Old title' }).first().click();
   await page.getByTestId('reader').waitFor();
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-details').click();
@@ -2281,7 +2303,7 @@ async function places() {
   await page.goto(BASE);
   await vis('reading-list').waitFor();
   const rows = await page.getByTestId('recent-row').count();
-  check(rows === 1 && (await vis('reading-list').count()) === 1, `places: the library has it once, still on the reading list (${rows})`);
+  check(rows === 0 && (await vis('reading-list').count()) === 1, `places: the library has it once, still on the reading list (${rows} more under Recent)`);
   await page.waitForTimeout(500);
   check((await vis('inbox-badge').innerText().catch(() => '')) === '1', 'places: Documents shows the inbox count');
 
@@ -2298,6 +2320,22 @@ async function places() {
   await vis('facet-place').click();
   await page.getByTestId('action-place-device').click();
   check((await vis('archive-hit').count()) === 0, 'places: nothing left only on this device');
+  await vis('facet-place').click();
+  await page.getByTestId('action-place-any').click();
+
+  // A folder added inside the archive: adding it says so, and its files are still listed once, in the archive.
+  await page.evaluate(() => {
+    window.showDirectoryPicker = async () => (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive')).getDirectoryHandle('2026');
+  });
+  await openFolders(page);
+  await vis('add-folder').click();
+  const said = await page.getByText('“2026” is inside the archive. Its files count once, in the archive.').waitFor({ timeout: 10000 }).then(() => true, () => false);
+  check(said, 'places: adding a folder inside the archive says where its files count');
+  await page.goto(BASE);
+  await openDocs(page);
+  await page.waitForTimeout(4000);
+  const once = await vis('archive-hit').allInnerTexts();
+  check(once.length === 2 && once.every((h) => /Archive/.test(h)), `places: …and they are listed once, in the archive (${once.map((h) => h.replace(/\n/g, ' · '))})`);
   await ctx.close();
 }
 
@@ -2310,6 +2348,7 @@ async function lastRead() {
   await page.getByTestId('back').click();
   await page.getByTestId('last-read').waitFor({ timeout: 10000 });
   check(/Orderly Notes[\s\S]*Page \d of 2/.test(await page.getByTestId('last-read').innerText()), 'last read: Continue shows the document last read');
+  check((await page.getByTestId('recent-row').count()) === 0, 'last read: …and Recently opened doesn’t list it again');
   await page.getByTestId('continue-add').click();
   await page.getByTestId('reading-list').waitFor();
   check((await page.getByTestId('last-read').count()) === 0, 'last read: adding it puts it on the reading list');
@@ -2544,7 +2583,7 @@ async function appearance() {
   check(!/invert/.test(off) && /invert/.test(await filter()), `appearance: the switch itself toggles Invert colours (${off || 'none'})`);
   // Reopened from the library (the static test server has no fallback for deep links).
   await page.goto(BASE);
-  await page.getByTestId('recent-row').first().click();
+  await opened(page).first().click();
   await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
   check(/invert/.test(await filter()), 'appearance: the document stays inverted');
   await page.keyboard.press('v');
@@ -2646,8 +2685,15 @@ async function batch() {
   await vis('act-reading').click();
   await page.getByText('Added 2 documents to the reading list.').waitFor({ timeout: 10000 });
   await vis('tab-reading').click();
+  await vis('reading-list').waitFor();
+  check(/Reading list · 2/i.test(await vis('reading-list').innerText()) && (await vis('recent-row').count()) === 0, 'batch: picked documents go on the reading list together (not again under Recent)');
+  // The reading list is picked from as rows are; taken off it, they are under Recently opened.
+  await vis('continue').click({ button: 'right' });
+  await vis('select-all').click();
+  check(/Remove from reading list/i.test(await vis('act-reading').getAttribute('aria-label')), 'batch: all on the list: the action takes them off');
+  await vis('act-reading').click();
   await vis('recent-row').first().waitFor();
-  check((await vis('recent-row').count()) === 2 && (await vis('reading-list').isVisible()), 'batch: picked documents go on the reading list together');
+  check((await vis('recent-row').count()) === 2 && (await vis('reading-list').count()) === 0, 'batch: the reading list is picked from too; taken off, they are under Recent');
   // One layout for every list: switched here, the same in Documents; and back.
   const wide = async (id) => ((await vis(id).first().boundingBox())?.width ?? 0) > 400;
   const listed = (await wide('recent-row')) && (await vis('row-more').count()) === 2;
@@ -2659,9 +2705,10 @@ async function batch() {
   check(listed && tiled && tiledThere && (await wide('archive-hit')), 'layout: rows or tiles, chosen once for every list');
   await vis('tab-reading').click();
   await vis('recent-row').first().waitFor();
+  // Picked again right after its last long press, it would count as part of that one.
+  await page.waitForTimeout(900);
   await vis('recent-row').first().click({ button: 'right' });
   await vis('select-all').click();
-  check(/On the reading list|Remove from reading list/i.test(await vis('act-reading').getAttribute('aria-label')), 'batch: all on the list: the action takes them off');
   await vis('act-remove').click();
   await page.getByTestId('ask-confirm').click();
   await page.waitForTimeout(500);

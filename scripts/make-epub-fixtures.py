@@ -70,6 +70,7 @@ crates   7</pre>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="id">urn:uuid:tessel-fixture-1</dc:identifier>
     <dc:title>Harbour Notes</dc:title><dc:creator>Ada Quay</dc:creator><dc:language>en</dc:language>
+    <dc:date>2019-04-02T08:00:00Z</dc:date><dc:subject>Harbours</dc:subject><dc:subject> Travel </dc:subject><dc:subject>Harbours</dc:subject>
     <meta property="dcterms:modified">2026-10-12T00:00:00Z</meta>
   </metadata>
   <manifest>
@@ -101,7 +102,7 @@ def book2():
     opf = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
-    <dc:title>Two Chapters</dc:title><dc:creator opf:role="aut">B. Older</dc:creator><dc:identifier id="id">tessel-2</dc:identifier>
+    <dc:title>Two Chapters</dc:title><dc:creator opf:role="aut">B. Older</dc:creator><dc:date opf:event="publication">2003</dc:date><dc:identifier id="id">tessel-2</dc:identifier>
     <meta name="cover" content="img-cover"/>
   </metadata>
   <manifest>

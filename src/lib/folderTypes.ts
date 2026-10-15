@@ -1,4 +1,5 @@
 import type { FileHandle } from './fsa';
+import type { Nesting } from './nesting';
 
 /**
  * A place to browse: a folder the user picked, or (with all files access, Android app) internal storage
@@ -51,6 +52,8 @@ export type FoldersApi = {
   add(): Promise<FolderRoot | null>;
   /** Stops browsing a folder (the folder itself stays). */
   forget(id: string): Promise<void>;
+  /** Which of these folders lie inside others (so their files are listed once). */
+  nestings(roots: FolderRoot[]): Promise<Nesting[]>;
   /**
    * Android app: Documents/Tessel, where documents that would otherwise be hidden copies inside the app (scans,
    * files opened from other apps) are kept as real files. Null where there is no such folder (browsers).

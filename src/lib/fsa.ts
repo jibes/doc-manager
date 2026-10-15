@@ -51,6 +51,8 @@ export type DirHandle = {
   removeEntry(name: string, o?: { recursive?: boolean }): Promise<void>;
   queryPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
   requestPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
+  /** The names leading from this folder down to `other`, or null when it isn't inside. */
+  resolve(other: FileHandle | DirHandle): Promise<string[] | null>;
 };
 
 type DirPicker = (o: object) => Promise<DirHandle>;

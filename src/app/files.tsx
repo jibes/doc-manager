@@ -48,6 +48,22 @@ function unpack(s: string | undefined): string | undefined {
 }
 
 type Params = { r?: string; rn?: string; d?: string; dn?: string };
+/** What adding a folder has to say, for its screen to show when it opens. */
+let addedNote: string | null = null;
+
+/** A folder just added inside another added one, or holding one: where its files count (each file counts once). */
+export async function nestingNote(r: FolderRoot): Promise<string | null> {
+  const roots = await folders.roots(false).catch(() => []);
+  const nestings = await folders.nestings(roots).catch(() => []);
+  const { archive } = usePrefs.getState();
+  const name = (id: string) => roots.find((x) => x.id === id)?.name ?? '';
+  const notes = nestings.flatMap(({ outer, inner }) => {
+    if (inner === r.id) return [outer === archive ? t.nestedInArchive(r.name) : t.nestedIn(r.name, name(outer))];
+    return outer === r.id ? [t.nestedHolds(r.name, name(inner))] : [];
+  });
+  return notes.join(' ') || null;
+}
+
 const go = (root: string, rootName: string, dir?: string, name?: string) =>
   router.push({ pathname: '/files', params: { r: pack(root), rn: pack(rootName), ...(dir ? { d: pack(dir), dn: pack(name ?? '') } : {}) } });
 
@@ -81,6 +97,7 @@ const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', devic
 export async function addFolder(onError: (message: string) => void): Promise<boolean> {
   const r = await folders.add().catch((e) => void onError(opError(e)));
   if (!r) return false;
+  addedNote = await nestingNote(r);
   go(r.id, r.name);
   schedule(1000);
   return true;
@@ -251,6 +268,11 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const pasting = useClipboard((s) => !!s.clip);
   // What the last operation did, with Undo for a move to the trash.
   const { notice: message, id: messageId, say: setMessage, dismiss, action } = useNotice();
+  // Opened by adding the folder: what that had to say.
+  useEffect(() => {
+    if (addedNote) setMessage(addedNote);
+    addedNote = null;
+  }, [setMessage]);
   const { importFiles, followFiles, forgetFiles } = useLibrary();
   const version = useClipboard((s) => s.version);
   const setClip = useClipboard((s) => s.set);

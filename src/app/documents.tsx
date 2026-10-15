@@ -25,6 +25,7 @@ import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { folders } from '@/lib/folders';
+import { APP_ROOT_ID } from '@/lib/nesting';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
 import { addFolder, PasteBar, Roots } from './files';
 
@@ -553,7 +554,9 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
 
 const placeIcon: Record<Where, IconName> = { archive: 'folder', folders: 'folder', device: 'device' };
 const placeName = (pl: Where) => (pl === 'archive' ? t.placeArchive : pl === 'folders' ? t.placeFolders : t.placeDevice);
-const placeOf = (d: IndexedDoc, archive: string | null): Where => (d.place.kind === 'library' ? 'device' : d.place.root === archive ? 'archive' : 'folders');
+/** Archive (synced), other folders (the user's own), or this device (Tessel's own storage: its folder, or the browser). */
+const placeOf = (d: IndexedDoc, archive: string | null): Where =>
+  d.place.kind === 'library' || d.place.root === APP_ROOT_ID ? 'device' : d.place.root === archive ? 'archive' : 'folders';
 
 const styles = StyleSheet.create({
   segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },

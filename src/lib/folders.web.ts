@@ -3,6 +3,7 @@ import { createStore, del, entries, set } from 'idb-keyval';
 import { t } from '@/i18n';
 import { PartlyDone, type FolderEntry, type FolderRoot, type FoldersApi } from './folderTypes';
 import { canPickFolders, pickDirectory, type DirHandle, type FileHandle } from './fsa';
+import { APP_ROOT_ID, handleNestings, shellNestings } from './nesting';
 import { shell, shellDocUrl, shellRequest, stageForShell } from './shell';
 
 export type { FolderEntry, FolderRoot, Place } from './folderTypes';
@@ -10,7 +11,7 @@ export type { FolderEntry, FolderRoot, Place } from './folderTypes';
 const kindOf = (name: string): FolderEntry['kind'] | null => (/\.pdf$/i.test(name) ? 'pdf' : /\.epub$/i.test(name) ? 'epub' : null);
 
 const shellAccess = () => shellRequest<{ allFiles: boolean; app?: boolean }>('access').then((a) => ({ allFiles: a.allFiles, app: a.app ?? false }));
-const APP_ROOT: FolderRoot = { id: 'app', name: 'Tessel', kind: 'app' };
+const APP_ROOT: FolderRoot = { id: APP_ROOT_ID, name: 'Tessel', kind: 'app' };
 
 /**
  * Android app: folders granted through the system folder picker (and, with all files access, the whole
@@ -33,7 +34,8 @@ const shellFolders: FoldersApi = {
     return f && { id: f.uri, name: f.name, kind: 'folder' };
   },
   forget: (id) => shellRequest('forgetFolder', { uri: id }),
-  unlock: async (id) => (id === 'app' ? shellRequest<boolean>('requestAllFiles').then(async () => (await shellAccess()).app) : true),
+  nestings: async (roots) => shellNestings(roots),
+  unlock: async (id) => (id === APP_ROOT_ID ? shellRequest<boolean>('requestAllFiles').then(async () => (await shellAccess()).app) : true),
   list: (root, dir) => shellRequest<FolderEntry[]>('list', { root, dir: dir ?? '' }),
   async read(_root, e) {
     const res = await fetch(shellDocUrl(e.uri!));
@@ -159,6 +161,11 @@ const browserFolders: FoldersApi = {
     return { id, name: handle.name, kind: 'folder' };
   },
   forget: (id) => del(id, store),
+  async nestings(roots) {
+    const saved = new Map(await savedFolders());
+    const known = roots.filter((r) => saved.has(r.id)).map((r) => ({ id: r.id, handle: saved.get(r.id)!.handle }));
+    return handleNestings(known);
+  },
   async unlock(id, write = false) {
     const h = await folderHandle(id);
     return (await h.requestPermission({ mode: write ? 'readwrite' : 'read' })) === 'granted';
