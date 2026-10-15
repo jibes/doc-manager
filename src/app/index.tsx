@@ -7,11 +7,11 @@ import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useMainWidth, useTabBar } 
 import { Cover } from '@/components/Cover';
 import { DocItem, DocList, gridOf, LayoutToggle, useLayout, type Layout } from '@/components/DocItems';
 import { SelectChip } from '@/components/SortChip';
-import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { shareDocs } from '@/lib/fileActions';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
 import { Icon } from '@/components/Icon';
-import { Button, T } from '@/components/primitives';
+import { Button, IconButton, T } from '@/components/primitives';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
@@ -51,11 +51,12 @@ export default function Home() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const width = useMainWidth();
-  const { docs, covers, loaded, importing, error, load, importFiles, remove, toggleReading, clearError } = useLibrary();
+  const { docs, covers, loaded, importing, load, importFiles, remove, toggleReading } = useLibrary();
   const [hint, setHint] = useState<string | null>(null);
   const [showFinished, setShowFinished] = useState(false);
-  // Picked documents (by id), while picking.
+  // Picked documents (by id), while picking (Esc and Back end it).
   const [selected, setSelected] = useState<Set<string> | null>(null);
+  useEndPicking(!!selected, setSelected);
   const [notice, setNotice] = useState<string | null>(null);
   const { kind: installKind, install } = useInstall();
   const tabBar = useTabBar();
@@ -137,15 +138,13 @@ export default function Home() {
           ) : (
             <AppHeader tab="reading">
               <LayoutToggle />
-              {installKind && (
-                <Button
-                  testID="install"
-                  kind="quiet"
-                  icon="install"
-                  label={t.install}
-                  onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))}
-                />
-              )}
+              {/* On a narrow phone the header has room for its icon only. */}
+              {installKind &&
+                (width < 420 ? (
+                  <IconButton testID="install" icon="install" label={t.install} onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))} />
+                ) : (
+                  <Button testID="install" kind="quiet" icon="install" label={t.install} onPress={() => (installKind === 'prompt' ? install() : setHint(t.installHintIos))} />
+                ))}
             </AppHeader>
           )}
           {docs.length === 0 ? (
@@ -207,7 +206,7 @@ export default function Home() {
                   <T v="kicker" color={p.muted}>
                     {t.recentTitle}
                   </T>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' }}>
                     {recent.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
                     <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                   </View>
@@ -260,7 +259,7 @@ export default function Home() {
           <Action testID="act-remove" icon="trash" label={t.remove} disabled={!picked.length} onPress={() => void removeAll()} />
         </ActionBar>
       )}
-      <Toast message={error ?? hint ?? notice} onDismiss={() => (error ? clearError() : hint ? setHint(null) : setNotice(null))} above={tabBar ? TAB_BAR_H : 0} />
+      <Toast message={hint ?? notice} onDismiss={() => (hint ? setHint(null) : setNotice(null))} above={tabBar ? TAB_BAR_H : 0} />
     </View>
     </AppFrame>
   );
@@ -382,7 +381,8 @@ const styles = StyleSheet.create({
   continue: { flexDirection: 'row', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth },
   bar: { height: 3, borderRadius: 2, overflow: 'hidden' },
   finishedHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs, alignSelf: 'flex-start', paddingVertical: space.xs },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36, marginBottom: space.md },
+  // The heading and its actions side by side, the actions under it where both don't fit (German, phones).
+  sectionHead: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: space.md, rowGap: space.xs, minHeight: 36, marginBottom: space.md },
   search: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.pill, paddingHorizontal: space.md, height: 32 },
   searchInput: { fontFamily: fonts.sans, fontSize: 13, width: 140, height: 32, outlineStyle: 'none' } as object,
   colophon: { marginTop: space.xxxl, paddingVertical: space.sm },

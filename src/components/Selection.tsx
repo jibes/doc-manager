@@ -1,11 +1,13 @@
-import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { elevation, radius, space } from '@/design/tokens';
 import { t } from '@/i18n';
+import { onBack } from '@/lib/backGuard';
+import { useAsk } from '@/state/ask';
 import { usePalette } from '@/state/prefs';
 import { Icon, type IconName } from './Icon';
-import { IconButton, T } from './primitives';
+import { IconButton, spoken, T } from './primitives';
 
 /**
  * Picking several items to act on them at once, the same in the file browser, Documents and Reading: a long
@@ -49,6 +51,28 @@ export function usePicking() {
   };
 }
 
+/** Room an action bar (or the paste bar) takes at the bottom: toasts and the end of a list stay above it. */
+export const BAR_ROOM = 120;
+
+/** While picking, Esc and the back button end it (before they close or leave anything). `end`: stops picking. */
+export function useEndPicking(picking: boolean, end: (none: null) => void) {
+  useEffect(() => {
+    if (!picking) return;
+    const unBack = onBack(() => (end(null), true));
+    if (Platform.OS !== 'web') return unBack;
+    const onKey = (e: KeyboardEvent) => {
+      // A dialog or sheet open over the list answers Esc itself.
+      if (e.key !== 'Escape' || e.defaultPrevented || useAsk.getState().request) return;
+      end(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      unBack();
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [picking, end]);
+}
+
 /** Instead of the screen's header while selecting: Cancel, how many, Select all. */
 export function SelectBar({ count, onCancel, onAll }: { count: number; onCancel: () => void; onAll: () => void }) {
   return (
@@ -82,7 +106,7 @@ export function Action({ icon, label, disabled, onPress, testID }: { icon: IconN
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={spoken(label)}
       aria-disabled={!!disabled}
       disabled={disabled}
       onPress={onPress}
@@ -92,13 +116,16 @@ export function Action({ icon, label, disabled, onPress, testID }: { icon: IconN
       ]}
     >
       <Icon name={icon} size={22} color={p.ink} />
-      {/* Two lines where a word is too long for one (German): it breaks where it may. */}
-      <T v="caption" numberOfLines={2} style={{ fontSize: 11, lineHeight: 13, textAlign: 'center' }}>
+      {/* Two lines where a word is too long for one (German): it breaks at a syllable, not mid-letter. */}
+      <T v="caption" numberOfLines={2} style={[{ fontSize: 11, lineHeight: 13, textAlign: 'center' }, hyphenate]}>
         {label}
       </T>
     </Pressable>
   );
 }
+
+// Hyphenated at syllables (soft hyphens, or the page's language); mid-letter only where a word still doesn't fit.
+const hyphenate = (Platform.OS === 'web' ? { hyphens: 'auto', overflowWrap: 'anywhere' } : {}) as object;
 
 /** The round mark on a selectable item: empty, or ticked. */
 export function Check({ on, style }: { on: boolean; style?: object }) {

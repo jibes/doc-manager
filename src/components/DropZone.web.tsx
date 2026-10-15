@@ -70,8 +70,10 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
   return (
     <View style={{ flex: 1 }}>
       {children}
+      {/* Out of the accessibility tree until something is dragged over the window. */}
       <View
         pointerEvents="none"
+        aria-hidden={!over}
         style={[
           StyleSheet.absoluteFill,
           styles.overlay,

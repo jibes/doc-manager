@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, type View } from 'react-native';
 
 import { onBack } from '@/lib/backGuard';
@@ -12,6 +12,8 @@ const FOCUSABLE = 'button, [role=button], [role=menuitem], input, textarea, sele
  */
 export function useModal(close: () => void) {
   const ref = useRef<View>(null);
+  // What had the focus before: read while rendering, as a field's autoFocus takes it before any effect runs.
+  const [before] = useState(() => (Platform.OS === 'web' && typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null));
   const closeRef = useRef(close);
   useEffect(() => {
     closeRef.current = close;
@@ -21,7 +23,6 @@ export function useModal(close: () => void) {
     const unBack = onBack(() => (closeRef.current(), true));
     if (Platform.OS !== 'web') return unBack;
     const el = ref.current as unknown as HTMLElement | null;
-    const before = document.activeElement as HTMLElement | null;
     const field = el?.querySelector<HTMLElement>('input, textarea');
     if (!field) el?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
@@ -49,8 +50,8 @@ export function useModal(close: () => void) {
     return () => {
       unBack();
       window.removeEventListener('keydown', onKey, true);
-      if (before?.isConnected) before.focus({ preventScroll: true });
+      if (before?.isConnected && !el?.contains(before)) before.focus({ preventScroll: true });
     };
-  }, []);
+  }, [before]);
   return ref;
 }

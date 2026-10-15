@@ -61,8 +61,9 @@ export const useScanSaving = create<{ progress: SaveProgress | null; controller:
  * What the scanner has to say (a photo that couldn't be read, a page deleted with its Undo), shown by whichever
  * scanner screen is in front: the camera may close right after saying it.
  */
-export const useScanMessage = create<{ text: string | null; undo?: () => void }>(() => ({ text: null }));
-export const sayScan = (text: string | null, undo?: () => void) => useScanMessage.setState({ text, undo });
+export const useScanMessage = create<{ text: string | null; undo?: () => void; id: number }>(() => ({ text: null, id: 0 }));
+/** What the scanner says (each time its own, the same words again too), maybe with Undo. */
+export const sayScan = (text: string | null, undo?: () => void) => useScanMessage.setState((s) => ({ text, undo, id: s.id + 1 }));
 
 let pending = false;
 /** Bumped when the document is discarded, so an Undo offered for the old one does nothing in the new one. */

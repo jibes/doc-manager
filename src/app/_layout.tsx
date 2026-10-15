@@ -17,6 +17,7 @@ import { ActionSheet } from '@/components/ActionSheet';
 import { AskDialog } from '@/components/AskDialog';
 import { DropZone } from '@/components/DropZone';
 import { PasswordDialog } from '@/components/PasswordDialog';
+import { RootToast } from '@/components/RootToast';
 import { ShellOpen } from '@/components/ShellOpen';
 import { shell } from '@/lib/shell';
 import { useAmbientLight } from '@/state/ambient';
@@ -88,6 +89,7 @@ export default function RootLayout() {
         />
       </DropZone>
       <ShellOpen />
+      <RootToast />
       <PasswordDialog />
       <ActionSheet />
       <AskDialog />

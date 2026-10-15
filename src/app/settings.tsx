@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
+import { SubFrame, useColumnWidth } from '@/components/AppNav';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
@@ -19,11 +20,11 @@ import { hasLightSensor } from '@/state/ambient';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 
-const MAX_W = 720;
 
 /** Settings: the folders Tessel may browse and, in the Android app, optional access to all files. */
 export default function Settings() {
   const p = usePalette();
+  const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const allFiles = usePrefs((s) => s.allFiles);
   const archive = usePrefs((s) => s.archive);
@@ -79,12 +80,13 @@ export default function Settings() {
   };
 
   return (
+    <SubFrame sub="settings">
     <ScrollView
       ref={scroller}
       style={{ flex: 1, backgroundColor: p.canvas }}
       contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}
     >
-      <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
+      <View style={{ width: column }}>
         <ScreenHeader title={t.settings} />
 
         <View testID="settings-index" style={styles.index}>
@@ -220,8 +222,10 @@ export default function Settings() {
           </View>
         )}
       </View>
-      <Toast message={error} onDismiss={() => setError(null)} />
     </ScrollView>
+    {/* Over the screen, not the scrolled content. */}
+    <Toast message={error} onDismiss={() => setError(null)} />
+    </SubFrame>
   );
 }
 

@@ -7,13 +7,15 @@ import { itemsFromFiles } from '@/lib/pick';
 import { claimShellFiles, fetchShellFiles, launchContents, openedWithFiles, shell, SHELL_OPEN_EVENT } from '@/lib/shell';
 import { useLibrary } from '@/state/library';
 import { usePalette } from '@/state/prefs';
+import { t } from '@/i18n';
 import { goTab } from './AppNav';
+import { sayRoot } from './RootToast';
 
 /** Long enough for the reader to have drawn its first frame under the cover. */
 const SETTLE_MS = 250;
 
 /** What came of files from another app: one document to show, several added to the library, or nothing. */
-type Outcome = { show: string } | { added: true } | null;
+type Outcome = { show: string } | { added: number } | null;
 
 /** Opens one file at once (it is shown as soon as it is open); several are added to the library. */
 async function openFiles(files: Promise<File[]>): Promise<Outcome> {
@@ -23,7 +25,8 @@ async function openFiles(files: Promise<File[]>): Promise<Outcome> {
     const doc = await library.openIncoming(items[0]);
     return doc && { show: doc.id };
   }
-  return items.length && (await library.importFiles(items)).length ? { added: true } : null;
+  const added = items.length ? (await library.importFiles(items)).length : 0;
+  return added ? { added } : null;
 }
 
 /**
@@ -42,6 +45,11 @@ export function ShellOpen() {
   // Started on the bare screen for it: the document takes its place (back leads to the app that sent it).
   const path = usePathname();
   const startedBare = useRef(path === '/opening');
+  // Where the app is when files arrive: a document being read isn't closed for several others.
+  const where = useRef(path);
+  useEffect(() => {
+    where.current = path;
+  }, [path]);
 
   useEffect(() => {
     if (!shell) return;
@@ -55,7 +63,8 @@ export function ShellOpen() {
           const to = { pathname: '/read/[id]', params: { id: done.show } } as const;
           if (bare) router.replace(to);
           else router.push(to);
-        } else if (done || bare) goTab('reading');
+        } else if (done && !bare && where.current.startsWith('/read/')) sayRoot(t.filesAddedN(done.added));
+        else if (done || bare) goTab('reading');
       } catch {
         // Nothing opened: the screen under the cover is where the app is (or the app's first, from the bare one).
         if (startedBare.current) goTab('reading');

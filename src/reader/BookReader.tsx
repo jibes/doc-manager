@@ -293,7 +293,8 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
           palette={p}
           width={vp.w}
           padTop={insets.top + TOP_BAR}
-          padBottom={insets.bottom + BOTTOM_BAR}
+          // The end of the book clears the page and bookmark pills.
+          padBottom={insets.bottom + BOTTOM_BAR + space.lg}
           initial={initial}
           query={searchActive ? q : ''}
           onPosition={onPosition}

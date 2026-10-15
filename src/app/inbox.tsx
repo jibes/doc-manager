@@ -7,7 +7,7 @@ import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInbox
 import type { Details } from '@/archive/pdfInfo';
 import { openDoc } from '@/archive/Results';
 import { discard } from '@/archive/trash';
-import { goTab } from '@/components/AppNav';
+import { goTab, SubFrame, useColumnWidth } from '@/components/AppNav';
 import { Thumbnail } from '@/components/DocItems';
 import { Field } from '@/components/Field';
 import { Button, IconButton, T } from '@/components/primitives';
@@ -19,7 +19,6 @@ import { aiReady } from '@/scan/ai';
 import { useLibrary } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 
-const MAX_W = 820;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** How long the model may take to suggest details. */
 const AI_WAIT_MS = 120_000;
@@ -40,6 +39,7 @@ const detailsOf = (p: Proposal, e: Edits = {}): Details => ({
 /** The inbox: each new document with its proposed details and destination, to check and file. */
 export default function Inbox() {
   const p = usePalette();
+  const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const archive = usePrefs((s) => s.archive);
   const here = usePrefs((s) => s.inboxHere);
@@ -174,9 +174,9 @@ export default function Inbox() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: p.canvas }}>
+    <SubFrame sub="inbox">
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
-        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
+        <View style={{ width: column }}>
           <ScreenHeader title={t.inboxTitle} up={() => goTab('documents')}>
             {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push('/rules')} />}
             {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} disabled={filingAll || rulesUnreadable} onPress={() => void fileAll()} />}
@@ -229,7 +229,7 @@ export default function Inbox() {
         </View>
       </ScrollView>
       <Toast message={notice} onDismiss={() => setNotice(null)} />
-    </View>
+    </SubFrame>
   );
 }
 
@@ -268,7 +268,7 @@ function Card(props: {
   return (
     <View testID="inbox-item" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
       <View style={styles.cardHead}>
-        <Pressable testID="inbox-preview" accessibilityRole="button" accessibilityLabel={t.inboxOpen} onPress={props.onOpen}>
+        <Pressable testID="inbox-preview" accessibilityRole="button" accessibilityLabel={`${t.inboxOpen}: ${item.entry.name}`} onPress={props.onOpen}>
           <Thumbnail picture={{ kind: 'file', root: props.archive, entry: item.entry }} width={56} />
         </Pressable>
         <T numberOfLines={2} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
@@ -290,7 +290,7 @@ function Card(props: {
           <T v="caption" color={p.markRing} style={{ flex: 1 }} testID="inbox-duplicate">
             {t.inboxDuplicate(item.duplicateOf.name)}
           </T>
-          <Button testID="inbox-discard" kind="quiet" icon="trash" label={t.inboxDiscard} onPress={props.onDiscard} />
+          <Button testID="inbox-discard" kind="quiet" icon="trash" label={t.inboxDiscard} a11yLabel={`${t.inboxDiscard}: ${item.entry.name}`} onPress={props.onDiscard} />
         </View>
       )}
       {item.read && (
@@ -303,7 +303,7 @@ function Card(props: {
       </T>
       <View style={styles.actions}>
         {props.onSuggest && <Button testID="inbox-ai" kind="quiet" label={t.inboxSuggest} onPress={props.onSuggest} disabled={busy} />}
-        <Button testID="inbox-file" icon="check" label={t.inboxFile} onPress={props.onFile} disabled={busy || !valid} />
+        <Button testID="inbox-file" icon="check" label={t.inboxFile} a11yLabel={`${t.inboxFile}: ${item.entry.name}`} onPress={props.onFile} disabled={busy || !valid} />
       </View>
     </View>
   );

@@ -1,11 +1,12 @@
 import { router, useIsFocused } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Switch, TextInput, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { Knob } from '@/components/Toggle';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { scanError, t } from '@/i18n';
@@ -49,7 +50,7 @@ export default function ScanReview() {
   const progress = useScanSaving((s) => s.progress);
   const saving = useScanSaving((s) => s.controller);
   // The scanner's messages (the camera's too: it may have closed since), with Undo for what they report.
-  const { text: message, undo } = useScanMessage();
+  const { text: message, undo, id: messageId } = useScanMessage();
   // Select mode: the pages picked for a bulk action (null: not selecting).
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const grid = useRef<View>(null);
@@ -302,7 +303,7 @@ export default function ScanReview() {
                       {t.scanRecogniseNote}
                     </T>
                   </View>
-                  <Switch value={scan.ocr} onValueChange={(ocr) => setPrefs({ scan: { ...scan, ocr } })} trackColor={{ true: p.accent }} />
+                  <Knob on={scan.ocr} />
                 </Pressable>
                 {aiOffered && (
                   <>
@@ -314,7 +315,7 @@ export default function ScanReview() {
                           {t.scanAiNote(aiHost(ai))}
                         </T>
                       </View>
-                      <Switch value={aiRead} onValueChange={setAiRead} trackColor={{ true: p.accent }} />
+                      <Knob on={aiRead} />
                     </Pressable>
                   </>
                 )}
@@ -388,7 +389,7 @@ export default function ScanReview() {
           </Pressable>
         </Pressable>
       )}
-      {focused && <Toast message={message} onDismiss={dismiss} above={selected ? 110 : 64} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
+      {focused && <Toast message={message} id={messageId} onDismiss={dismiss} above={selected ? 110 : 64} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
     </View>
   );
 }

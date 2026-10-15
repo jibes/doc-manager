@@ -519,6 +519,11 @@ async function annotations() {
   const listed = (await rows.count()) === 2 && /Every PDF you open/.test(await rows.nth(0).innerText()) && /Try dragging a file in/.test(await rows.nth(1).innerText());
   check(listed, 'annotations: highlight and note listed with their text');
   await rows.nth(1).getByTestId('note-edit').click();
+  check((await page.getByRole('dialog', { name: 'Note' }).count()) === 1, 'annotations: the note is edited in a dialog');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check((await page.getByTestId('note-dialog').count()) === 0 && (await page.getByTestId('reader').count()) === 1, 'annotations: Esc closes the note, not the document');
+  await rows.nth(1).getByTestId('note-edit').click();
   await page.getByTestId('note-input').fill('Drop it anywhere');
   await page.getByTestId('note-save').click();
   await page.getByText('Drop it anywhere').waitFor({ timeout: 3000 });
@@ -2089,6 +2094,7 @@ async function syncSafety() {
   check(/synced/i.test(await vis('archive-mark').innerText()), 'sync: the archive is marked as synced, first in Folders');
   await vis('folders-trash').click();
   await vis('trash-item').first().waitFor();
+  check(/30 days left|29 days left/.test(await vis('trash-item').first().innerText()), 'sync: the trash says how long each item stays');
   const before = await vis('trash-item').count();
   await vis('trash-item').filter({ hasText: 'dup' }).getByTestId('trash-restore').click();
   await page.waitForTimeout(800);
@@ -2440,10 +2446,10 @@ async function tabs() {
     const vis = (id) => page.getByTestId(id).locator('visible=true');
     page.on('pageerror', (e) => errors.push(`tabs: ${e.message}`));
     await page.goto(BASE);
-    check((await vis('tab-reading').getAttribute('aria-selected')) === 'true', `tabs (${name}): Reading is the current place`);
+    check((await vis('tab-reading').getAttribute('aria-current')) === 'page', `tabs (${name}): Reading is the current place`);
     await openDocs(page);
     await vis('docs-search').waitFor();
-    check((await vis('tab-documents').getAttribute('aria-selected')) === 'true', `tabs (${name}): Documents opens from its tab, with search first`);
+    check((await vis('tab-documents').getAttribute('aria-current')) === 'page', `tabs (${name}): Documents opens from its tab, with search first`);
     if (name === 'wide') {
       // Going between Documents' parts in the sidebar keeps its search.
       await vis('docs-search').fill('columns');
@@ -2456,7 +2462,7 @@ async function tabs() {
     await vis('docs-folders').click();
     await vis('add-folder').first().waitFor();
     check((await vis('open-other').count()) === 1, `tabs (${name}): Folders offers adding folders and other locations`);
-    if (name === 'wide') check((await vis('side-folders').getAttribute('aria-selected').catch(() => null)) !== null || (await vis('side-folders').count()) === 1, 'tabs (wide): a sidebar has the places');
+    if (name === 'wide') check((await vis('side-folders').getAttribute('aria-current')) === 'page', 'tabs (wide): a sidebar has the places, Folders the current one');
     await vis('tab-reading').click();
     await page.getByText('Open sample').waitFor();
     // Switching back returns to Reading rather than stacking it over Documents (stacked screens stay mounted).
@@ -2481,6 +2487,20 @@ async function tabs() {
   }, pdf);
   await page.waitForURL(/\/read\//, { timeout: 15000 }).catch(() => {});
   check(/\/read\//.test(page.url()), 'tabs: a document dropped on Documents opens');
+  // Settings keeps the sidebar (its item lit), and a file that can't be added says so there too.
+  await page.goto(BASE);
+  await page.getByTestId('home-settings').locator('visible=true').click();
+  await page.waitForURL(/\/settings/);
+  check((await page.getByTestId('home-settings').locator('visible=true').getAttribute('aria-current')) === 'page' && (await page.getByTestId('tab-reading').locator('visible=true').count()) === 1, 'tabs: screens opened from the sidebar keep it beside them');
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new TextEncoder().encode('not a pdf at all')], 'broken.pdf', { type: 'application/pdf' }));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.getByRole('alert').filter({ hasText: /broken\.pdf/ }).waitFor({ timeout: 15000 }).then(
+    () => check(true, 'tabs: a file that can’t be added says so on any screen'),
+    () => check(false, 'tabs: a file that can’t be added says so on any screen'),
+  );
   await ctx.close();
 }
 
@@ -2510,9 +2530,10 @@ async function appearance() {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   check(/invert/.test(await filter()), 'appearance: Invert colours inverts the pages');
-  // The switch itself turns it back (the tap must not reach both the switch and its row).
+  // The switch turns it back, once per tap (the row is the switch: a tap doesn't reach two controls).
   await page.getByTestId('open-appearance').click();
-  const knob = page.getByTestId('invert-toggle').getByRole('switch');
+  const knob = page.getByTestId('invert-toggle');
+  check((await knob.getAttribute('role')) === 'switch' && (await knob.getAttribute('aria-checked')) === 'true', 'appearance: Invert colours is a switch, and says it is on');
   await knob.click();
   await page.waitForTimeout(300);
   const off = await filter();
@@ -2584,6 +2605,13 @@ async function batch() {
   await openDocs(page);
   for (let i = 0; i < 60 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
   const hit = (title) => vis('archive-hit').filter({ hasText: title });
+  // Esc ends picking (as Back does on Android).
+  await hit('Orderly Notes').click({ button: 'right' });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check((await page.getByText(/selected$/).locator('visible=true').count()) === 0 && (await hit('Orderly Notes').getAttribute('aria-checked')) === null, 'batch: Esc ends picking');
+  // A press on the same row right after a long press is taken as part of it: start again a moment later.
+  await page.waitForTimeout(900);
   // A right click starts picking; a tap adds one more.
   await hit('Orderly Notes').click({ button: 'right' });
   await hit('Old title').click();

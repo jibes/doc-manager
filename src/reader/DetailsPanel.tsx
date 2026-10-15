@@ -47,6 +47,7 @@ export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { p
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
+        accessibilityLabel={label}
         placeholderTextColor={p.muted}
         style={[styles.input, { color: p.ink, borderColor: p.hairline, backgroundColor: p.canvas }]}
       />
@@ -89,6 +90,7 @@ export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { p
               onSubmitEditing={() => addTag(tag)}
               blurOnSubmit={false}
               placeholder={t.detailAddTag}
+              accessibilityLabel={t.detailAddTag}
               placeholderTextColor={p.muted}
               style={[styles.tagInput, { color: p.ink }]}
             />

@@ -7,38 +7,39 @@ import { changeRules, loadRules, useRules } from '@/archive/inbox';
 import type { Rule } from '@/archive/rules';
 import { Field } from '@/components/Field';
 import { Button, IconButton, T } from '@/components/primitives';
+import { SubFrame, useColumnWidth } from '@/components/AppNav';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { opError, t } from '@/i18n';
 import { usePalette, usePrefs } from '@/state/prefs';
 
-const MAX_W = 820;
 const tagsOf = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
 /** The inbox's rules and file name template, on their own screen. */
 export default function Rules() {
   const p = usePalette();
+  const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const archive = usePrefs((s) => s.archive);
   const [notice, setNotice] = useState<string | null>(null);
   return (
-    <View style={{ flex: 1, backgroundColor: p.canvas }}>
+    <SubFrame sub="rules">
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
-        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4 }}>
+        <View style={{ width: column }}>
           <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} up={() => router.replace('/inbox')} />
           {archive ? (
             <RulesEditor archive={archive} onError={(e) => setNotice(opError(e))} />
           ) : (
             <View style={{ gap: space.md, alignItems: 'flex-start' }}>
-              <T color={p.muted}>{t.inboxNoArchive}</T>
+              <T color={p.muted}>{t.rulesNoArchive}</T>
               <Button kind="quiet" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />
             </View>
           )}
         </View>
       </ScrollView>
       <Toast message={notice} onDismiss={() => setNotice(null)} />
-    </View>
+    </SubFrame>
   );
 }
 

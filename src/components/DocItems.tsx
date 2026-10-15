@@ -173,7 +173,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
       </Pressable>
       {/* A sibling, not a child: buttons can't nest in the DOM. */}
       {!picking && actions?.length ? (
-        <IconButton testID="row-more" icon="more" label={t.moreFor(title)} size={36} color={p.muted} onPress={() => showActions(title, actions)} />
+        <IconButton testID="row-more" icon="more" label={t.moreFor(title)} size={36} color={p.muted} onPress={() => showActions(title, actions)} style={{ marginRight: space.xs }} />
       ) : null}
     </View>
   );
@@ -257,7 +257,8 @@ export function DocList({ layout, gap, children, testID }: { layout: Layout; gap
 const hyphenate = (Platform.OS === 'web' ? { hyphens: 'auto', overflowWrap: 'anywhere' } : {}) as object;
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', paddingRight: space.xs, borderTopWidth: StyleSheet.hairlineWidth, borderLeftWidth: StyleSheet.hairlineWidth, borderRightWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  // The row's own background (picked, hovered) reaches its right edge: the ⋯ button keeps its own margin.
+  row: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderLeftWidth: StyleSheet.hairlineWidth, borderRightWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md, paddingLeft: space.lg, paddingRight: space.sm, minHeight: 68 },
   rowPicture: { width: 36, alignItems: 'center', justifyContent: 'center' },
   rowDir: { width: 36, height: 36, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },

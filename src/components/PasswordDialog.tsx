@@ -8,6 +8,7 @@ import { usePasswordPrompt } from '@/state/password';
 import { usePalette } from '@/state/prefs';
 import { Icon } from './Icon';
 import { Button, T } from './primitives';
+import { useModal } from './useModal';
 
 /** Modal answering askPassword(); mounted once in the root layout. */
 export function PasswordDialog() {
@@ -35,6 +36,8 @@ function Card() {
   const [value, setValue] = useState('');
   const submit = () => value && request.resolve(value);
   const cancel = () => request.resolve(null);
+  // Esc and Back cancel, Tab stays in it, the focus goes back where it was.
+  const ref = useModal(cancel);
 
   return (
     <Animated.View
@@ -43,6 +46,7 @@ function Card() {
       testID="password-dialog"
       style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
     >
+      <View ref={ref} role="dialog" aria-modal aria-label={t.passwordTitle} tabIndex={-1} style={styles.inner}>
       <View style={[styles.badge, { backgroundColor: p.accentSoft }]}>
         <Icon name="lock" color={p.accent} size={22} />
       </View>
@@ -60,6 +64,7 @@ function Card() {
         onChangeText={setValue}
         onSubmitEditing={submit}
         placeholder={t.passwordPlaceholder}
+        accessibilityLabel={t.passwordPlaceholder}
         placeholderTextColor={p.muted}
         autoComplete="off"
         returnKeyType="go"
@@ -79,6 +84,7 @@ function Card() {
         <Button label={t.cancel} kind="quiet" onPress={cancel} />
         <Button testID="password-submit" label={t.add} onPress={submit} />
       </View>
+      </View>
     </Animated.View>
   );
 }
@@ -94,12 +100,11 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 380,
-    alignItems: 'center',
-    gap: space.md,
     padding: space.xl,
     borderRadius: radius.lg + 2,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  inner: { alignItems: 'center', gap: space.md, outlineStyle: 'none' } as object,
   badge: {
     width: 44,
     height: 44,
@@ -117,5 +122,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     outlineStyle: 'none',
   } as object,
-  actions: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.sm, marginTop: space.xs },
 });

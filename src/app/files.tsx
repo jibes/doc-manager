@@ -1,13 +1,13 @@
-import { Redirect, router, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { columnWidth, goTab } from '@/components/AppNav';
+import { goTab, SubFrame, useColumnWidth } from '@/components/AppNav';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { DocItem, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
 import { SelectChip, SortChip } from '@/components/SortChip';
 import { showActions } from '@/state/actions';
@@ -57,8 +57,7 @@ export default function Files() {
   const root = unpack(params.r);
   const p = usePalette();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const contentW = columnWidth(width);
+  const contentW = useColumnWidth();
   const load = useLibrary((s) => s.load);
   useEffect(() => {
     load();
@@ -66,21 +65,33 @@ export default function Files() {
 
   if (!root) return <Redirect href={{ pathname: '/documents', params: { view: 'folders' } }} />;
   return (
-    <View style={{ flex: 1, backgroundColor: p.canvas, alignItems: 'center', paddingTop: insets.top + space.lg }}>
-      <View style={{ width: contentW, flex: 1 }}>
-        <FolderView root={root} rootName={unpack(params.rn) ?? ''} dir={unpack(params.d)} name={unpack(params.dn)} width={contentW} bottom={insets.bottom} />
+    <SubFrame sub="folder">
+      <View style={{ flex: 1, backgroundColor: p.canvas, alignItems: 'center', paddingTop: insets.top + space.lg }}>
+        <View style={{ width: contentW, flex: 1 }}>
+          <FolderView root={root} rootName={unpack(params.rn) ?? ''} dir={unpack(params.d)} name={unpack(params.dn)} width={contentW} bottom={insets.bottom} />
+        </View>
       </View>
-    </View>
+    </SubFrame>
   );
 }
 
 const rootIcon: Record<FolderRoot['kind'], IconName> = { folder: 'folder', device: 'device', all: 'documents', app: 'pages' };
+
+/** Asks for a folder to add and opens it (what is in it is found and read); false when none was added. */
+export async function addFolder(onError: (message: string) => void): Promise<boolean> {
+  const r = await folders.add().catch((e) => void onError(opError(e)));
+  if (!r) return false;
+  go(r.id, r.name);
+  schedule(1000);
+  return true;
+}
 
 /** The places to browse (the archive first), for Documents → Folders; adding a folder opens it. */
 export function Roots({ bottom, onError: setError }: { bottom: number; onError: (message: string) => void }) {
   const p = usePalette();
   const showAll = usePrefs((s) => s.allFiles);
   const archive = usePrefs((s) => s.archive);
+  const pasting = useClipboard((s) => !!s.clip);
   const [roots, setRoots] = useState<FolderRoot[] | null>(null);
 
   const refresh = useCallback(() => {
@@ -90,14 +101,12 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
       .then((list) => setRoots([...list.filter((r) => r.id === archive), ...list.filter((r) => r.id !== archive)]))
       .catch((e) => setError(opError(e)));
   }, [showAll, archive, setError]);
-  useEffect(refresh, [refresh]);
+  // Read again whenever the screen comes back (a folder removed or unlocked in Settings meanwhile).
+  useFocusEffect(refresh);
 
   const add = async () => {
-    const r = await folders.add().catch((e) => void setError(opError(e)));
-    if (r) go(r.id, r.name);
+    await addFolder(setError);
     refresh();
-    // What is in it is found and read.
-    if (r) schedule(1000);
   };
   // A single file from anywhere the system picker reaches (cloud drives, mail attachments…).
   const importFiles = useLibrary((s) => s.importFiles);
@@ -139,7 +148,7 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
           <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />
         </View>
       ) : (
-        <View style={{ gap: space.lg, paddingBottom: bottom + space.xl }}>
+        <View style={{ gap: space.lg, paddingBottom: bottom + space.xl + (pasting ? BAR_ROOM : 0) }}>
           <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
             {roots.map((r, i) => (
               <View key={r.id}>
@@ -238,9 +247,11 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   const [query, setQuery] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string> | null>(null);
+  useEndPicking(!!selected, setSelected);
+  const pasting = useClipboard((s) => !!s.clip);
   // What the last operation did, with Undo for a move to the trash.
-  const { notice: message, say: setMessage, dismiss, action } = useNotice();
-  const { importFiles, error, clearError, followFiles, forgetFiles } = useLibrary();
+  const { notice: message, id: messageId, say: setMessage, dismiss, action } = useNotice();
+  const { importFiles, followFiles, forgetFiles } = useLibrary();
   const version = useClipboard((s) => s.version);
   const setClip = useClipboard((s) => s.set);
   const changed = useClipboard((s) => s.changed);
@@ -471,17 +482,14 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       ) : (
         <PasteBar here={editable ? here : null} bottom={bottom} onDone={() => {}} onError={setMessage} onMessage={setMessage} />
       )}
-      <Toast
-        message={message ?? error}
-        onDismiss={() => (message ? dismiss() : clearError())}
-        action={message ? action : undefined}
-      />
+      <Toast message={message} id={messageId} onDismiss={dismiss} action={action} above={selected || pasting ? BAR_ROOM : 0} />
     </>
   );
 }
 
 /** "Copy n items here" / "Move n items here" while items wait on the clipboard. */
-export function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: Place | null; bottom: number; onDone: () => void; onError: (msg: string) => void; onMessage?: (msg: string) => void }) {
+/** `side`: its distance from the screen's edges where it isn't inside the screen's own margins (as the action bar's). */
+export function PasteBar({ here, bottom, side = 0, onDone, onError, onMessage }: { here: Place | null; bottom: number; side?: number; onDone: () => void; onError: (msg: string) => void; onMessage?: (msg: string) => void }) {
   const p = usePalette();
   const clip = useClipboard((s) => s.clip);
   const setClip = useClipboard((s) => s.set);
@@ -533,7 +541,7 @@ export function PasteBar({ here, bottom, onDone, onError, onMessage }: { here: P
   };
 
   return (
-    <View testID="paste-bar" style={[styles.bar, styles.pasteBar, { bottom: bottom + space.lg, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
+    <View testID="paste-bar" style={[styles.bar, styles.pasteBar, { bottom: bottom + space.lg, left: side, right: side, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}>
       <T v="label" color={p.inkSoft} numberOfLines={2} style={{ paddingHorizontal: space.sm }}>
         {canPaste ? t.selectedCount(count) : t.pickTarget(clip.move)}
       </T>
@@ -571,6 +579,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  pasteBar: { flexDirection: 'column', alignItems: 'stretch', gap: space.sm, paddingLeft: space.sm },
+  // Centred on wide screens, as the action bar is.
+  pasteBar: { flexDirection: 'column', alignItems: 'stretch', gap: space.sm, paddingLeft: space.sm, maxWidth: 560, marginHorizontal: 'auto' } as object,
   pasteButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
 });

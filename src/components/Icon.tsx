@@ -50,6 +50,8 @@ const paths = {
   crop: 'M7 3.5V17h13.5M3.5 7H17v13.5',
   inbox: 'M4 13.5h4.5l1.5 2.5h4l1.5-2.5H20M4 13.5 6.5 5.5h11l2.5 8v5H4z',
   invert: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 3.5v17M12 7.5h3.5M12 12h5M12 16.5h3.5',
+  person: 'M12 11.5a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5ZM5 20a7 7 0 0 1 14 0',
+  calendar: 'M4.5 6.5h15v13h-15zM4.5 10.5h15M8.5 4v4M15.5 4v4',
 } as const;
 
 export type IconName = keyof typeof paths;

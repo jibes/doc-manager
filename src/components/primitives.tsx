@@ -6,6 +6,9 @@ import { radius, space, type } from '@/design/tokens';
 import { usePalette } from '@/state/prefs';
 import { Icon, type IconName } from './Icon';
 
+/** A label as read out: without the soft hyphens that let long (German) words break in narrow places. */
+export const spoken = (label: string) => label.replace(/\u00ad/g, '');
+
 export function tick() {
   if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
 }
@@ -26,16 +29,18 @@ type IconButtonProps = Omit<PressableProps, 'style'> & {
   style?: StyleProp<ViewStyle>;
 };
 
-export function IconButton({ icon, label, active, size = 40, color, style, onPress, ...rest }: IconButtonProps) {
+export function IconButton({ icon, label, active, size = 40, color, style, onPress, disabled, ...rest }: IconButtonProps) {
   const p = usePalette();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={spoken(label)}
+      disabled={disabled}
+      aria-disabled={!!disabled}
       // Toggles: aria-pressed on web (aria-selected isn't valid on buttons); "selected" on native.
       accessibilityState={Platform.OS === 'web' ? undefined : { selected: active }}
       // @ts-expect-error web-only tooltip and toggle state
-      title={Platform.OS === 'web' ? label : undefined}
+      title={Platform.OS === 'web' ? spoken(label) : undefined}
       aria-pressed={Platform.OS === 'web' && active !== undefined ? active : undefined}
       hitSlop={6}
       onPress={(e) => {
@@ -49,8 +54,8 @@ export function IconButton({ icon, label, active, size = 40, color, style, onPre
           borderRadius: radius.pill,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: active ? p.accentSoft : hovered ? p.hairline : 'transparent',
-          opacity: pressed ? 0.6 : 1,
+          backgroundColor: active ? p.accentSoft : hovered && !disabled ? p.hairline : 'transparent',
+          opacity: disabled ? 0.35 : pressed ? 0.6 : 1,
         },
         style,
       ]}
@@ -69,6 +74,7 @@ export function Button({
   style,
   testID,
   disabled,
+  a11yLabel,
 }: {
   label: string;
   icon?: IconName;
@@ -77,6 +83,8 @@ export function Button({
   style?: StyleProp<ViewStyle>;
   testID?: string;
   disabled?: boolean;
+  /** What it is read out as, where the label alone doesn't say what it acts on ("Restore letter.pdf"). */
+  a11yLabel?: string;
 }) {
   const p = usePalette();
   const fg = kind === 'primary' ? p.accentInk : p.ink;
@@ -84,6 +92,7 @@ export function Button({
     <Pressable
       testID={testID}
       accessibilityRole="button"
+      accessibilityLabel={spoken(a11yLabel ?? label)}
       disabled={disabled}
       aria-disabled={!!disabled}
       onPress={() => {
@@ -103,12 +112,14 @@ export function Button({
           borderColor: p.hairline,
           opacity: disabled ? 0.4 : pressed ? 0.75 : 1,
           transform: [{ scale: pressed ? 0.98 : 1 }],
+          // A long label (a folder's name, German) is cut short rather than running past the screen's edge.
+          maxWidth: '100%',
         },
         style,
       ]}
     >
       {icon && <Icon name={icon} color={kind === 'primary' ? p.canvas : fg} size={18} strokeWidth={1.9} />}
-      <T v="label" color={kind === 'primary' ? p.canvas : fg} style={{ fontFamily: type.headline.fontFamily }}>
+      <T v="label" numberOfLines={1} color={kind === 'primary' ? p.canvas : fg} style={{ fontFamily: type.headline.fontFamily, flexShrink: 1 }}>
         {label}
       </T>
     </Pressable>

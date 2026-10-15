@@ -2,6 +2,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
 
 import { t } from '@/i18n';
+import { shell } from '@/lib/shell';
 import { elevation, fonts, space } from '@/design/tokens';
 import { usePalette } from '@/state/prefs';
 import { Button, T } from './primitives';
@@ -38,7 +39,8 @@ export function EmptyLibrary({ onAdd, onSample }: { onAdd: () => void; onSample:
           {t.emptyTitle}
         </T>
         <T v="body" color={p.muted} style={{ textAlign: 'center' }}>
-          {Platform.OS === 'web' ? t.emptyBodyWeb : t.emptyBody}
+          {/* Dropping files is for browsers; the Android app has the share sheet and Open with. */}
+          {Platform.OS === 'web' && !shell ? t.emptyBodyWeb : t.emptyBody}
         </T>
       </Animated.View>
       <Animated.View entering={FadeInUp.delay(220).duration(500)} style={styles.actions}>

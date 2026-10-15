@@ -13,7 +13,7 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useDocsView, useMainWidth, useTabBar, useWide } from '@/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
 import { SelectChip, SortChip } from '@/components/SortChip';
-import { Action, ActionBar, heldNow, justSelected, SelectBar, toggled } from '@/components/Selection';
+import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, readingAddedText, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
 import { Toast } from '@/components/Toast';
@@ -26,7 +26,7 @@ import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { folders } from '@/lib/folders';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
-import { PasteBar, Roots } from './files';
+import { addFolder, PasteBar, Roots } from './files';
 
 /** Rows shown at first, and added by "Show more". */
 const PAGE = 100;
@@ -34,7 +34,7 @@ const PAGE = 100;
 const REFRESH_MS = 1500;
 
 const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
-const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'documents', type: 'pages', year: 'sort' };
+const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'person', type: 'pages', year: 'calendar' };
 
 const sortName: Record<Sort, string> = { date: t.sortDate, oldest: t.sortOldest, name: t.sortName, size: t.sortSize };
 
@@ -81,9 +81,11 @@ export default function Documents() {
   // Search results come best match first, until another order is chosen for them.
   const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);
-  const { notice, say, dismiss, action } = useNotice();
-  // Picked documents (by key), while picking.
+  const { notice, id: noticeId, say, dismiss, action } = useNotice();
+  // Picked documents (by key), while picking: Esc, Back and switching to Folders (here or in the sidebar) end it.
   const [selected, setSelected] = useState<Set<string> | null>(null);
+  useEndPicking(!!selected, setSelected);
+  useEffect(() => useDocsView.subscribe((s, was) => s.view !== was.view && setSelected(null)), []);
   const setClip = useClipboard((s) => s.set);
   const { done, running, total } = useIndex();
   // Read again as indexing adds, moves and drops documents (not with each one).
@@ -282,7 +284,9 @@ export default function Documents() {
   };
   const rename = async () => {
     const d = picked[0];
-    const name = (await ask({ title: t.rename, input: d.name.replace(/\.(pdf|epub)$/i, ''), placeholder: t.newName, confirm: t.rename }))?.trim();
+    // The list shows titles, the dialog the file's name: it says which one changes (a title is changed in Details).
+    const titled = !!d.title && d.title !== d.name.replace(/\.(pdf|epub)$/i, '');
+    const name = (await ask({ title: t.renameFile, body: titled ? t.renameFileBody(d.title) : undefined, input: d.name.replace(/\.(pdf|epub)$/i, ''), placeholder: t.newName, confirm: t.rename }))?.trim();
     if (!name) return;
     await batch(() => renameDoc(d, name));
   };
@@ -390,7 +394,7 @@ export default function Documents() {
           </View>
 
           {nothing ? (
-            <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.supported ? () => useDocsView.setState({ view: 'folders' }) : undefined} />
+            <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.supported ? () => void addFolder(say) : undefined} />
           ) : !ready && !searching ? (
             <ActivityIndicator color={p.muted} style={{ marginTop: space.xl }} />
           ) : (
@@ -503,8 +507,8 @@ export default function Documents() {
           <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root))} onPress={() => void remove()} />
         </ActionBar>
       )}
-      {view === 'folders' && <PasteBar here={null} bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} onDone={() => {}} onError={say} />}
-      <Toast message={notice} onDismiss={dismiss} action={action} above={(tabBar ? TAB_BAR_H : 0) + (pasting && view === 'folders' ? 64 : 0)} />
+      {view === 'folders' && <PasteBar here={null} bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4} onDone={() => {}} onError={say} />}
+      <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} above={(tabBar ? TAB_BAR_H : 0) + ((pasting && view === 'folders') || selected ? BAR_ROOM : 0)} />
     </AppFrame>
   );
 }

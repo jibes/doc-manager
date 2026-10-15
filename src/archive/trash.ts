@@ -6,7 +6,7 @@ import { sameOrRenamed } from '@/lib/names';
 import { readStored, writeStored } from '@/lib/stored';
 import { usePrefs } from '@/state/prefs';
 import { ensureDir } from './inbox';
-import { schedule } from './indexer';
+import { indexedTitle, schedule } from './indexer';
 import { readSettings } from './settingsFile';
 import { expired, KEEP_DAYS, parseTrash, serializeTrash, type Trashed } from './sync';
 
@@ -93,7 +93,11 @@ export async function moveToTrash(root: string, dir: string | undefined, entries
     const renamed = arrived.find((a) => sameOrRenamed(a.name, e.name));
     if (renamed) found.set(e, arrived.splice(arrived.indexOf(renamed), 1)[0]);
   }
-  const items = entries.filter((e) => !failed || found.has(e)).map((e) => ({ name: found.get(e)?.name ?? e.name, root, dir, ...(path ? { path } : {}), original: e.name, deletedAt: now }));
+  const items = entries.filter((e) => !failed || found.has(e)).map((e) => {
+    // Its title too, as the trash shows it (the index has nothing of files in the trash).
+    const title = indexedTitle(`${root}:${e.id}`);
+    return { name: found.get(e)?.name ?? e.name, root, dir, ...(path ? { path } : {}), original: e.name, deletedAt: now, ...(title ? { title } : {}) };
+  });
   // An entry left from an earlier file of the same name must not date this one.
   const names = new Set(items.map((i) => i.name));
   await changeManifest(root, (known) => [...known.filter((k) => !names.has(k.name)), ...items], new Set(there.map((e) => e.name)));

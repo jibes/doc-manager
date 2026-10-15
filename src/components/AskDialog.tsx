@@ -95,5 +95,6 @@ const styles = StyleSheet.create({
   card: { width: '100%', maxWidth: 400, padding: space.xl, borderRadius: radius.lg + 2, borderWidth: StyleSheet.hairlineWidth },
   inner: { gap: space.md, outlineStyle: 'none' } as object,
   input: { height: 44, borderRadius: radius.md, paddingHorizontal: space.md, fontFamily: fonts.sans, fontSize: 16, outlineStyle: 'none' } as object,
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.xs },
+  // A long confirm label (German, a phone) goes under Cancel rather than past the card's edge.
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: space.sm, marginTop: space.xs },
 });

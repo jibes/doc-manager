@@ -7,9 +7,9 @@ import { allDocs, forget, refreshSoon, useIndex, type Conflict } from '@/archive
 import { useThrottled } from '@/lib/useThrottled';
 import { openDoc, whereIs } from '@/archive/Results';
 import type { IndexedDoc } from '@/archive/search';
-import { duplicates } from '@/archive/sync';
+import { conflictTime, duplicates } from '@/archive/sync';
 import { discard, trashes } from '@/archive/trash';
-import { goTab } from '@/components/AppNav';
+import { goTab, SubFrame, useColumnWidth } from '@/components/AppNav';
 import { Icon } from '@/components/Icon';
 import { Button, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -21,7 +21,6 @@ import type { FolderEntry } from '@/lib/folderTypes';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 
-const MAX_W = 820;
 /** Groups shown at first, and added by "Show more". */
 const PAGE = 20;
 
@@ -39,6 +38,7 @@ const open = (root: string, rootName: string, entry: FolderEntry) =>
 /** Sync issues: documents changed on two devices at once (Syncthing's conflict copies), and documents filed twice. */
 export default function Sync() {
   const p = usePalette();
+  const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const conflicts = useIndex((s) => s.conflicts);
   // What the index changed, at most every 1.5 s (not once per document read).
@@ -122,9 +122,9 @@ export default function Sync() {
 
   const shownPairs = pairs ?? [];
   return (
-    <View style={{ flex: 1, backgroundColor: p.canvas }}>
+    <SubFrame sub="sync">
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
-        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: space.xl - 4, gap: space.lg }}>
+        <View style={{ width: column, gap: space.lg }}>
           <ScreenHeader title={t.syncTitle} up={() => goTab('documents')} />
           {pairs && !shownPairs.length && !groups.length && <T color={p.muted}>{t.syncNothing}</T>}
 
@@ -153,7 +153,7 @@ export default function Sync() {
                     </T>
                   )}
                   <Version
-                    label={t.syncOtherVersion(pair.conflict.name.device, pair.conflict.name.at)}
+                    label={t.syncOtherVersion(pair.conflict.name.device, Number.isFinite(conflictTime(pair.conflict.name.at)) ? t.dayTime(conflictTime(pair.conflict.name.at)) : pair.conflict.name.at)}
                     entry={pair.conflict.entry}
                     onOpen={() => void open(pair.conflict.root, pair.conflict.rootName, pair.conflict.entry).catch((e) => setNotice(opError(e)))}
                     onKeep={() => void keepCopy(pair)}
@@ -205,7 +205,7 @@ export default function Sync() {
         </View>
       </ScrollView>
       <Toast message={notice} onDismiss={() => setNotice(null)} />
-    </View>
+    </SubFrame>
   );
 }
 
@@ -231,8 +231,8 @@ function Version({ label, where, entry, onOpen, onKeep, testID }: { label: strin
         </View>
       </View>
       <View style={styles.actions}>
-        <Button kind="quiet" label={t.inboxOpen} onPress={onOpen} />
-        <Button testID={testID} label={t.syncKeep} onPress={onKeep} />
+        <Button kind="quiet" label={t.inboxOpen} a11yLabel={`${t.inboxOpen}: ${label}`} onPress={onOpen} />
+        <Button testID={testID} label={t.syncKeep} a11yLabel={`${t.syncKeep}: ${label}`} onPress={onKeep} />
       </View>
     </View>
   );
@@ -243,6 +243,6 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.sansMedium, fontSize: 15 },
   // Wide enough, the actions sit beside what they act on; on a phone, under it.
   version: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: space.md },
-  what: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md, flexGrow: 1, flexBasis: 280, minWidth: 0 },
+  what: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md, flexGrow: 1, flexShrink: 1, flexBasis: 240, minWidth: 0 },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: space.sm, flexGrow: 1 },
 });

@@ -10,13 +10,14 @@ export type Undo = { undo: () => void; settle?: () => void };
  * message, the toast closing, the screen closing); what was left for it then is settled.
  */
 export function useNotice() {
-  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; undo?: () => void; id: number } | null>(null);
   const pending = useRef<(() => void) | undefined>(undefined);
   const say = useCallback((text: string | null, undo?: Undo) => {
     const settle = pending.current;
     pending.current = undo?.settle;
     settle?.();
-    setNotice(text ? { text, undo: undo?.undo } : null);
+    // Each message its own (the same words again too: its Undo gets its own time).
+    setNotice((was) => (text ? { text, undo: undo?.undo, id: (was?.id ?? 0) + 1 } : null));
   }, []);
   const dismiss = useCallback(() => say(null), [say]);
   useEffect(() => {
@@ -33,5 +34,5 @@ export function useNotice() {
         },
       }
     : undefined;
-  return { notice: notice?.text ?? null, say, dismiss, action };
+  return { notice: notice?.text ?? null, id: notice?.id, say, dismiss, action };
 }

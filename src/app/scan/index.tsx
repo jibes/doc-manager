@@ -22,6 +22,7 @@ export default function ScanCamera() {
   const setPrefs = usePrefs((s) => s.set);
   const restore = useScan((s) => s.restore);
   const message = useScanMessage((s) => s.text);
+  const messageId = useScanMessage((s) => s.id);
   const focused = useIsFocused();
   useEffect(() => void restore(), [restore]);
   // While the camera is in front, page detection has the processor: the document's pages aren't prepared meanwhile.
@@ -57,7 +58,7 @@ export default function ScanCamera() {
         say={say}
       />
       {/* Above the shutter and Done, and above the status line (Hold still…): neither may be hidden by a message. */}
-      {focused && <Toast message={message} onDismiss={dismiss} above={CONTROLS_H + STATUS_H} />}
+      {focused && <Toast message={message} id={messageId} onDismiss={dismiss} above={CONTROLS_H + STATUS_H} />}
     </View>
   );
 }

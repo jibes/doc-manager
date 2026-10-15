@@ -49,8 +49,17 @@ export const useWide = () => useWindowDimensions().width >= WIDE;
 
 /** Widest column of content (lists, settings) on any screen. */
 const COLUMN_W = 780;
-/** A screen's column of content in `avail` (the window, or beside the sidebar): the same on every screen. */
-export const columnWidth = (avail: number) => Math.min(avail - 2 * (avail < 600 ? space.xl - 4 : space.xxxl), COLUMN_W);
+/**
+ * A screen's column of content in `avail` (the window, or beside the sidebar): the same on every screen. Its
+ * margins grow with the room (20 → 48), never so fast that a wider window gives a narrower column.
+ */
+export const columnWidth = (avail: number) => {
+  const margin = Math.min(space.xxxl, Math.max(space.xl - 4, space.xl - 4 + ((avail - 560) * 28) / 200));
+  return Math.min(avail - 2 * margin, COLUMN_W);
+};
+
+/** This screen's column of content (beside the sidebar on wide windows). */
+export const useColumnWidth = () => columnWidth(useMainWidth());
 
 /** The width beside the sidebar (wide windows) or the window's (phones). */
 export function useMainWidth(): number {
@@ -92,6 +101,25 @@ export function AppHeader({ tab, children }: { tab: Tab; children?: ReactNode })
   );
 }
 
+/** A screen opened from a place or the sidebar: which sidebar item it is (or belongs to). */
+export type Sub = 'inbox' | 'trash' | 'settings' | 'sync' | 'rules' | 'folder';
+
+/**
+ * A screen of its own (Inbox, Trash, Settings, a folder…): beside the sidebar on wide windows, as the places are,
+ * so the way to everything else stays in view; full screen with its Back button on phones.
+ */
+export function SubFrame({ sub, children }: { sub: Sub; children: ReactNode }) {
+  const p = usePalette();
+  const wide = useWide();
+  if (!wide) return <View style={{ flex: 1, backgroundColor: p.canvas }}>{children}</View>;
+  return (
+    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: p.canvas }}>
+      <Sidebar current={null} sub={sub} />
+      <View style={{ flex: 1 }}>{children}</View>
+    </View>
+  );
+}
+
 /** A place's screen: with the sidebar beside it on wide windows, the bottom bar under it on phones. */
 export function AppFrame({ tab, children }: { tab: Tab; children: ReactNode }) {
   const p = usePalette();
@@ -117,7 +145,7 @@ function TabBar({ current }: { current: Tab }) {
   const insets = useSafeAreaInsets();
   const badge = useInboxBadge();
   return (
-    <View role="tablist" style={[styles.bar, { paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
+    <View role="navigation" aria-label={t.places} style={[styles.bar, { paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
       <BarItem tab="reading" current={current} />
       {scanSupported && (
         <Pressable testID="scan" accessibilityRole="button" accessibilityLabel={t.scan} onPress={() => router.push('/scan')} style={styles.barItem}>
@@ -135,7 +163,14 @@ function BarItem({ tab, current, badge = 0 }: { tab: Tab; current: Tab; badge?: 
   const p = usePalette();
   const on = tab === current;
   return (
-    <Pressable testID={`tab-${tab}`} role="tab" aria-selected={on} aria-label={tabLabel(tab)} onPress={() => goTab(tab, tab === 'documents' && on ? 'all' : undefined, current)} style={styles.barItem}>
+    <Pressable
+      testID={`tab-${tab}`}
+      accessibilityRole="button"
+      aria-current={on ? 'page' : undefined}
+      aria-label={badge ? `${tabLabel(tab)}, ${t.inboxWaiting(badge)}` : tabLabel(tab)}
+      onPress={() => goTab(tab, tab === 'documents' && on ? 'all' : undefined, current)}
+      style={styles.barItem}
+    >
       <View>
         <Icon name={tabIcon[tab]} size={22} color={on ? p.accent : p.muted} strokeWidth={on ? 1.9 : 1.6} />
         {badge > 0 && <Badge n={badge} />}
@@ -158,8 +193,11 @@ function Badge({ n, inline }: { n: number; inline?: boolean }) {
   );
 }
 
-/** Wide windows: the places, Documents' parts under it, Scan and Settings. */
-function Sidebar({ current }: { current: Tab }) {
+/**
+ * Wide windows: the places, Documents' parts under it, Scan and Settings. `current`: the place shown; `sub`: the
+ * screen of its own shown instead (another one opened from here takes its place, not stacked over it).
+ */
+function Sidebar({ current, sub }: { current: Tab | null; sub?: Sub }) {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const archive = usePrefs((s) => s.archive);
@@ -167,38 +205,43 @@ function Sidebar({ current }: { current: Tab }) {
   const badge = useInboxBadge();
   const view = useDocsView((s) => s.view);
   const docs = current === 'documents';
+  const from = current ?? undefined;
+  const open = (href: '/inbox' | '/trash' | '/settings', of: Sub) => {
+    if (sub === of) return;
+    if (sub) router.replace(href);
+    else router.push(href);
+  };
   return (
-    <View style={[styles.sidebar, { paddingTop: insets.top + space.lg, borderColor: p.hairline, backgroundColor: p.surface }]}>
+    <View role="navigation" aria-label={t.places} style={[styles.sidebar, { paddingTop: insets.top + space.lg, borderColor: p.hairline, backgroundColor: p.surface }]}>
       <View style={[styles.brand, { paddingHorizontal: space.md, marginBottom: space.lg }]}>
         <Mark size={26} />
         <T style={{ fontFamily: fonts.sansSemi, fontSize: 21, letterSpacing: -0.5 }}>Tessel</T>
       </View>
-      <View role="tablist" style={{ gap: 2 }}>
-        <SideItem testID="tab-reading" role="tab" icon="pages" label={t.readingTab} on={current === 'reading'} onPress={() => goTab('reading', undefined, current)} />
-        <SideItem testID="tab-documents" role="tab" icon="documents" label={t.documentsTitle} on={docs && view === 'all'} onPress={() => goTab('documents', 'all', current)} />
-        {inboxShown && <SideItem testID="side-inbox" icon="inbox" label={t.inboxTitle} sub badge={badge} onPress={() => router.push('/inbox')} />}
-        {folders.supported && <SideItem testID="side-folders" icon="folder" label={t.foldersView} sub on={docs && view === 'folders'} onPress={() => goTab('documents', 'folders', current)} />}
-        {archive && <SideItem testID="side-trash" icon="trash" label={t.trashTitle} sub onPress={() => router.push('/trash')} />}
+      <View style={{ gap: 2 }}>
+        <SideItem testID="tab-reading" icon="pages" label={t.readingTab} on={current === 'reading'} onPress={() => goTab('reading', undefined, from)} />
+        <SideItem testID="tab-documents" icon="documents" label={t.documentsTitle} on={docs && view === 'all'} onPress={() => goTab('documents', 'all', from)} />
+        {inboxShown && <SideItem testID="side-inbox" icon="inbox" label={t.inboxTitle} sub badge={badge} on={sub === 'inbox'} onPress={() => open('/inbox', 'inbox')} />}
+        {folders.supported && <SideItem testID="side-folders" icon="folder" label={t.foldersView} sub on={(docs && view === 'folders') || sub === 'folder'} onPress={() => goTab('documents', 'folders', from)} />}
+        {archive && <SideItem testID="side-trash" icon="trash" label={t.trashTitle} sub on={sub === 'trash'} onPress={() => open('/trash', 'trash')} />}
       </View>
       <View style={{ flex: 1 }} />
       <View style={{ gap: 2, paddingBottom: insets.bottom + space.lg }}>
         {scanSupported && <SideItem testID="scan" icon="camera" label={t.scan} strong onPress={() => router.push('/scan')} />}
-        <SideItem testID="home-settings" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />
+        <SideItem testID="home-settings" icon="settings" label={t.settings} on={sub === 'settings'} onPress={() => open('/settings', 'settings')} />
       </View>
     </View>
   );
 }
 
-function SideItem(props: { testID: string; role?: 'tab'; icon: IconName; label: string; on?: boolean; sub?: boolean; strong?: boolean; badge?: number; onPress: () => void }) {
+function SideItem(props: { testID: string; icon: IconName; label: string; on?: boolean; sub?: boolean; strong?: boolean; badge?: number; onPress: () => void }) {
   const p = usePalette();
   const { on, sub, strong } = props;
   return (
     <Pressable
       testID={props.testID}
-      role={props.role}
-      aria-selected={props.role ? !!on : undefined}
-      accessibilityRole={props.role ? undefined : 'button'}
-      accessibilityLabel={props.label}
+      accessibilityRole="button"
+      aria-current={on ? 'page' : undefined}
+      accessibilityLabel={props.badge ? `${props.label}, ${t.inboxWaiting(props.badge)}` : props.label}
       onPress={props.onPress}
       style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.sideItem,

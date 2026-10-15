@@ -25,7 +25,9 @@ export default function ScanPage() {
   const { pages, loaded, restore, update, remove, applyToAll } = useScan();
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);
-  const { text: message, undo } = useScanMessage();
+  const { text: message, undo, id: messageId } = useScanMessage();
+  // Messages go above the filters and actions (Undo where Retake is would be a trap).
+  const [panelH, setPanelH] = useState(0);
   const focused = useIsFocused();
   const dismiss = useCallback(() => sayScan(null), []);
   useEffect(() => void restore(), [restore]);
@@ -107,12 +109,12 @@ export default function ScanPage() {
         )}
         <HoldButton testID="scan-compare" label={t.scanCompare} onHold={setComparing} style={styles.compare}>
           <T v="label" color="#fff">
-            {t.scanOriginal}
+            {t.scanCompareShort}
           </T>
         </HoldButton>
       </View>
 
-      <View style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
+      <View onLayout={(e) => setPanelH(e.nativeEvent.layout.height)} style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
         <FilterChips dark value={page.spec.filter} onChange={(filter) => update(page.id, { filter })} />
         {others > 0 && (
           <Pressable
@@ -132,7 +134,7 @@ export default function ScanPage() {
           <Action testID="scan-delete" icon="trash" label={t.delete} onPress={del} />
         </View>
       </View>
-      {focused && <Toast message={message} onDismiss={dismiss} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
+      {focused && <Toast message={message} id={messageId} onDismiss={dismiss} above={Math.max(0, panelH + space.sm - insets.bottom - space.xl)} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
     </View>
   );
 }

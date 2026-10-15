@@ -9,6 +9,12 @@ import type { IndexedDoc } from './search';
 /** "Rechnung.sync-conflict-20261013-213000-ABCDEF7.pdf" → the file it conflicts with, when and from which device. */
 export type ConflictName = { original: string; at: string; device: string };
 
+/** When the conflict copy was made: Syncthing writes the time of the device that made it (taken as this one's). */
+export function conflictTime(at: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(at);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : NaN;
+}
+
 export function parseConflict(name: string): ConflictName | null {
   const m = /^(.*)\.sync-conflict-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-([A-Z0-9]{7})(\.[^.]*)?$/.exec(name);
   if (!m) return null;
@@ -36,7 +42,7 @@ export function duplicates(docs: IndexedDoc[], archive: string | null): IndexedD
  * What the trash remembers of a file: its name there, the folder it came from (an ID on the device that trashed
  * it, and as names below the archive for the others), and when.
  */
-export type Trashed = { name: string; root: string; dir?: string; path?: string[]; original: string; deletedAt: number };
+export type Trashed = { name: string; root: string; dir?: string; path?: string[]; original: string; deletedAt: number; title?: string };
 
 /** Days a file stays in the trash. */
 export const KEEP_DAYS = 30;
@@ -53,6 +59,7 @@ export function parseTrash(json: string): Trashed[] {
       ...(Array.isArray(t.path) && t.path.every((x) => typeof x === 'string') ? { path: t.path } : {}),
       original: typeof t.original === 'string' ? t.original : t.name,
       deletedAt: t.deletedAt,
+      ...(typeof t.title === 'string' && t.title ? { title: t.title } : {}),
     }));
   } catch {
     return [];

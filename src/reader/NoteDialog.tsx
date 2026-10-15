@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View 
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Button, T } from '@/components/primitives';
+import { useModal } from '@/components/useModal';
 import { elevation, fonts, radius, space, type Palette } from '@/design/tokens';
 import { t } from '@/i18n';
 
@@ -23,6 +24,8 @@ export function NoteDialog({ request, palette: p }: { request: NoteRequest | nul
 
 function Card({ request, palette: p }: { request: NoteRequest; palette: Palette }) {
   const [value, setValue] = useState(request.initial);
+  // Esc and Back cancel (before the reader under it reacts), Tab stays in it, the focus goes back where it was.
+  const ref = useModal(() => request.resolve(null));
   return (
     <Animated.View
       entering={FadeInDown.duration(180)}
@@ -30,6 +33,7 @@ function Card({ request, palette: p }: { request: NoteRequest; palette: Palette 
       testID="note-dialog"
       style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
     >
+      <View ref={ref} role="dialog" aria-modal aria-label={t.noteTitle} tabIndex={-1} style={styles.inner}>
       <T v="headline" style={{ fontSize: 17 }}>
         {t.noteTitle}
       </T>
@@ -45,12 +49,14 @@ function Card({ request, palette: p }: { request: NoteRequest; palette: Palette 
         value={value}
         onChangeText={setValue}
         placeholder={t.notePlaceholder}
+        accessibilityLabel={t.noteTitle}
         placeholderTextColor={p.muted}
         style={[styles.input, { color: p.ink, backgroundColor: p.hairline }]}
       />
       <View style={styles.actions}>
         <Button label={t.cancel} kind="quiet" onPress={() => request.resolve(null)} />
         <Button testID="note-save" label={t.save} onPress={() => request.resolve(value.trim())} />
+      </View>
       </View>
     </Animated.View>
   );
@@ -62,7 +68,6 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 420,
-    gap: space.md,
     padding: space.xl,
     borderRadius: radius.lg + 2,
     borderWidth: StyleSheet.hairlineWidth,
@@ -77,5 +82,6 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     outlineStyle: 'none',
   } as object,
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
+  inner: { gap: space.md, outlineStyle: 'none' } as object,
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: space.sm },
 });

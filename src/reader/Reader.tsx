@@ -808,7 +808,8 @@ export function Reader({
           palette={pageP}
           width={vp.w}
           padTop={insets.top + TOP_BAR}
-          padBottom={insets.bottom + BOTTOM_BAR}
+          // The end of the text clears the page and bookmark pills.
+          padBottom={insets.bottom + BOTTOM_BAR + space.lg}
           initial={textStart}
           onPosition={onTextPosition}
           onScrollY={trackDirection}

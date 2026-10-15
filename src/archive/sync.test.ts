@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { IndexedDoc } from './search';
-import { duplicates, expired, parseConflict, parseTrash, serializeTrash, syncTemporary, type Trashed } from './sync';
+import { conflictTime, duplicates, expired, parseConflict, parseTrash, serializeTrash, syncTemporary, type Trashed } from './sync';
 
 const doc = (key: string, over: Partial<IndexedDoc>): IndexedDoc => ({
   key,
@@ -23,6 +23,11 @@ describe('sync conflicts', () => {
     expect(parseConflict('notes.sync-conflict-20260101-000000-ZZZZZZZ')).toEqual({ original: 'notes', at: '2026-01-01 00:00', device: 'ZZZZZZZ' });
     expect(parseConflict('Rechnung.pdf')).toBeNull();
     expect(parseConflict('x.sync-conflict-2026.pdf')).toBeNull();
+  });
+
+  it('say when they were made, as a time to show', () => {
+    expect(conflictTime('2026-10-13 21:30')).toBe(new Date(2026, 9, 13, 21, 30).getTime());
+    expect(conflictTime('soon')).toBeNaN();
   });
 
   it('temporaries are left alone', () => {
@@ -47,7 +52,7 @@ describe('trash', () => {
     const now = Date.UTC(2026, 9, 13);
     const items: Trashed[] = [
       { name: 'a.pdf', root: 'r', dir: '2026/Nordkorn', original: 'a.pdf', deletedAt: now - 31 * 86_400_000 },
-      { name: 'b (2).pdf', root: 'r', original: 'b.pdf', deletedAt: now - 86_400_000 },
+      { name: 'b (2).pdf', root: 'r', original: 'b.pdf', deletedAt: now - 86_400_000, title: 'Rechnung 40217' },
     ];
     expect(parseTrash(serializeTrash(items))).toEqual(items);
     expect(expired(items, now).map((t) => t.name)).toEqual(['a.pdf']);

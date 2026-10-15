@@ -10,6 +10,10 @@ import { usePalette } from '@/state/prefs';
 
 export const isWide = (w: number) => w >= 900;
 
+/** Room the reader's top bar and bottom pills (page, zoom, bookmark) take: a side panel stays between them. */
+const TOP_ROOM = 64;
+const BOTTOM_ROOM = 80;
+
 /** Side sheet on wide screens, bottom sheet on phones. One panel at a time. */
 export function Panel({ title, onClose, children, compact, testID }: { title: string; onClose: () => void; children: ReactNode; compact?: boolean; testID?: string }) {
   const p = usePalette();
@@ -32,8 +36,8 @@ export function Panel({ title, onClose, children, compact, testID }: { title: st
         exiting={SlideOutRight.duration(180)}
         style={[
           styles.side,
-          { top: insets.top + 64, bottom: insets.bottom + 56, backgroundColor: p.surface, borderColor: p.hairline },
-          compact && { bottom: undefined, maxHeight: height - insets.top - 120 },
+          { top: insets.top + TOP_ROOM, bottom: insets.bottom + BOTTOM_ROOM, backgroundColor: p.surface, borderColor: p.hairline },
+          compact && { bottom: undefined, maxHeight: height - insets.top - TOP_ROOM - insets.bottom - BOTTOM_ROOM },
           elevation(p.shadow, 3),
         ]}
       >

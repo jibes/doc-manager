@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
 import { t } from '@/i18n';
 import { IconButton, T, tick } from '@/components/primitives';
+import { Knob } from '@/components/Toggle';
 import { fonts, palettes, radius, space, type Palette, type ThemeName } from '@/design/tokens';
 import { usePalette, usePrefs, type Appearance, type FitMode, type TextFont, type TextLeading, type TextWidth } from '@/state/prefs';
 import { hasLightSensor } from '@/state/ambient';
@@ -215,19 +216,17 @@ export function AppearancePanel({
             </View>
 
             {onInvert && (
-              <View testID="invert-toggle" style={styles.switchRow}>
-                {/* Label and switch side by side, not nested: inside a pressable row, the row takes the switch's tap. */}
-                <Pressable accessibilityRole="button" onPress={onInvert} importantForAccessibility="no-hide-descendants" aria-hidden style={styles.switchLabel}>
-                  <Icon name="invert" size={20} color={p.inkSoft} />
-                  <View style={{ flex: 1 }}>
-                    <T>{t.invertColours}</T>
-                    <T v="caption" color={p.muted}>
-                      {t.invertNote}
-                    </T>
-                  </View>
-                </Pressable>
-                <Switch value={!!invert} onValueChange={onInvert} accessibilityLabel={t.invertColours} trackColor={{ true: p.accent }} />
-              </View>
+              // The whole row is the switch: one control, one tap.
+              <Pressable testID="invert-toggle" role="switch" aria-checked={!!invert} accessibilityLabel={t.invertColours} onPress={onInvert} style={styles.switchRow}>
+                <Icon name="invert" size={20} color={p.inkSoft} />
+                <View style={{ flex: 1 }}>
+                  <T>{t.invertColours}</T>
+                  <T v="caption" color={p.muted}>
+                    {t.invertNote}
+                  </T>
+                </View>
+                <Knob on={!!invert} />
+              </Pressable>
             )}
           </>
         )}
@@ -245,5 +244,4 @@ const styles = StyleSheet.create({
   zoom: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   zoomVal: { minWidth: 64, alignItems: 'center' },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  switchLabel: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.md },
 });

@@ -139,6 +139,9 @@ function rekey(from: IndexedDoc, to: Candidate) {
   changedNow();
 }
 
+/** A document's title as indexed (what is shown of it in the trash, once its file is there). */
+export const indexedTitle = (key: string): string | undefined => docs.get(key)?.title || undefined;
+
 /** Renamed by Tessel itself: its record (and text) under the file's new name now, as the next pass would find it. */
 export function renamed(from: IndexedDoc, entry: FolderEntry) {
   if (Platform.OS !== 'web' || from.place.kind !== 'folder' || !docs.has(from.key)) return;
