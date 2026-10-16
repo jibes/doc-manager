@@ -2,26 +2,28 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/Icon';
-import { Button, IconButton, T } from '@/components/primitives';
-import { SubFrame, useColumnWidth } from '@/components/AppNav';
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { Toast } from '@/components/Toast';
-import { fonts, radius, space } from '@/design/tokens';
-import { aiMessage, t } from '@/i18n';
-import { folders, type FolderRoot } from '@/lib/folders';
-import { nestingNote } from '@/archive/sources';
-import { forget, viewedCount } from '@/state/viewed';
-import { useLibrary } from '@/state/library';
-import { downloadDoc } from '@/lib/fileActions';
-import { schedule } from '@/archive/indexer';
-import { setArchive } from '@/archive/views';
-import { AppearancePicker } from '@/reader/AppearancePanel';
-import { aiInsecure, aiReady, aiUrl, testAi, type AiApi } from '@/scan/ai';
-import { anySignal } from '@/lib/signals';
-import { hasLightSensor } from '@/state/ambient';
-import { ask } from '@/state/ask';
-import { usePalette, usePrefs } from '@/state/prefs';
+import { Icon } from '@/paper/components/Icon';
+import { Button, IconButton, T } from '@/paper/components/primitives';
+import { SubFrame, useColumnWidth } from '@/paper/components/AppNav';
+import { ScreenHeader } from '@/paper/components/ScreenHeader';
+import { Toast } from '@/paper/components/Toast';
+import { fonts, radius, space } from '@/core/design/tokens';
+import { aiMessage, opError, t } from '@/core/i18n';
+import { flatten, hasFolders } from '@/paper/archive/flatten';
+import { APP_ROOT_ID } from '@/core/lib/nesting';
+import { folders, type FolderRoot } from '@/core/lib/folders';
+import { nestingNote } from '@/paper/archive/sources';
+import { forget, viewedCount } from '@/paper/state/viewed';
+import { useLibrary } from '@/paper/state/library';
+import { downloadDoc } from '@/core/lib/fileActions';
+import { schedule } from '@/paper/archive/indexer';
+import { setArchive } from '@/paper/archive/views';
+import { AppearancePicker } from '@/paper/reader/AppearancePanel';
+import { aiInsecure, aiReady, aiUrl, testAi, type AiApi } from '@/paper/scan/ai';
+import { anySignal } from '@/core/lib/signals';
+import { hasLightSensor } from '@/paper/state/ambient';
+import { ask } from '@/paper/state/ask';
+import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 
 /** Settings: appearance, the Tessel folder and the sources Tessel reads, syncing, and AI reading. */
@@ -55,6 +57,28 @@ export default function Settings() {
   const removeBooks = async () => {
     if ((await ask({ title: t.booksRemoveAsk(books.length), body: t.booksRemoveBody, confirm: t.remove, destructive: true })) === null) return;
     await useLibrary.getState().forgetBooks();
+  };
+
+  // Folders left in the Tessel folder from before it was flat: moved out once, from here.
+  const [nested, setNested] = useState(false);
+  const tesselRoot = archive ?? APP_ROOT_ID;
+  useEffect(() => {
+    let alive = true;
+    if (folders.supported) void hasFolders(tesselRoot).then((x) => alive && setNested(x));
+    return () => {
+      alive = false;
+    };
+  }, [tesselRoot]);
+  const flattenNow = async () => {
+    if ((await ask({ title: t.flattenAsk, body: t.flattenNote, confirm: t.flattenGo })) === null) return;
+    try {
+      const done = await flatten(tesselRoot);
+      setError(t.flattenDone(done.moved, done.renamed, done.kept));
+      setNested(await hasFolders(tesselRoot));
+      schedule(300);
+    } catch (e) {
+      setError(opError(e));
+    }
   };
 
   const refresh = useCallback(() => {
@@ -174,6 +198,19 @@ export default function Settings() {
             <T v="caption" color={p.muted} style={styles.note}>
               {t.foldersNote} {picked?.length ? t.archiveFolderNote : ''}
             </T>
+            {nested && (
+              <>
+                <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+                  {t.flattenTitle}
+                </T>
+                <T v="caption" color={p.muted} style={[styles.note, { marginTop: 0 }]}>
+                  {t.flattenNote}
+                </T>
+                <View style={{ flexDirection: 'row', marginTop: space.md }}>
+                  <Button testID="flatten" kind="quiet" icon="up" label={t.flattenGo} onPress={() => void flattenNow()} />
+                </View>
+              </>
+            )}
           </>
         )}
 

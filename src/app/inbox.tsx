@@ -3,21 +3,21 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, useRulesUnreadable, withRules, type Proposal } from '@/archive/inbox';
-import type { Details } from '@/archive/pdfInfo';
-import { openDoc } from '@/archive/Results';
-import { discard } from '@/archive/trash';
-import { goTab, SubFrame, useColumnWidth } from '@/components/AppNav';
-import { Thumbnail } from '@/components/DocItems';
-import { Field } from '@/components/Field';
-import { Button, IconButton, T } from '@/components/primitives';
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { Toast } from '@/components/Toast';
-import { fonts, radius, space } from '@/design/tokens';
-import { aiMessage, t } from '@/i18n';
-import { aiReady } from '@/scan/ai';
-import { libraryActions } from '@/state/library';
-import { usePalette, usePrefs } from '@/state/prefs';
+import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, useRulesUnreadable, withRules, type Proposal } from '@/paper/archive/inbox';
+import type { Details } from '@/paper/archive/pdfInfo';
+import { openDoc } from '@/paper/archive/Results';
+import { discard } from '@/paper/archive/trash';
+import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
+import { Thumbnail } from '@/paper/components/DocItems';
+import { Field } from '@/paper/components/Field';
+import { Button, IconButton, T } from '@/paper/components/primitives';
+import { ScreenHeader } from '@/paper/components/ScreenHeader';
+import { Toast } from '@/paper/components/Toast';
+import { fonts, radius, space } from '@/core/design/tokens';
+import { aiMessage, t } from '@/core/i18n';
+import { aiReady } from '@/paper/scan/ai';
+import { libraryActions } from '@/paper/state/library';
+import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** How long the model may take to suggest details. */

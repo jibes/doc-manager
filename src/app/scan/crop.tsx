@@ -3,16 +3,16 @@ import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/Icon';
-import { T } from '@/components/primitives';
-import { goBack } from '@/components/ScreenHeader';
-import { radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
-import type { Quad } from '@/scan/engine/imaging/image';
-import { fullQuad, isConvex } from '@/scan/engine/imaging/quad';
-import { useScan } from '@/scan/session';
-import { CropEditor } from '@/scan/ui/CropEditor';
-import { Unsupported } from '@/scan/ui/Unsupported';
+import { Icon } from '@/paper/components/Icon';
+import { T } from '@/paper/components/primitives';
+import { goBack } from '@/paper/components/ScreenHeader';
+import { radius, space } from '@/core/design/tokens';
+import { t } from '@/core/i18n';
+import type { Quad } from '@/paper/scan/engine/imaging/image';
+import { fullQuad, isConvex } from '@/paper/scan/engine/imaging/quad';
+import { useScan } from '@/paper/scan/session';
+import { CropEditor } from '@/paper/scan/ui/CropEditor';
+import { Unsupported } from '@/paper/scan/ui/Unsupported';
 
 /** Drag the page's corners into place. */
 export default function ScanCrop() {

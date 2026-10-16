@@ -3,18 +3,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Icon, type IconName } from '@/components/Icon';
-import { IconButton, T } from '@/components/primitives';
-import { goBack } from '@/components/ScreenHeader';
-import { Toast } from '@/components/Toast';
-import { radius, space } from '@/design/tokens';
-import { t } from '@/i18n';
-import { isBlurred } from '@/scan/engine/imaging/sharpness';
-import { sayScan, useScan, useScanMessage } from '@/scan/session';
-import { FilterChips } from '@/scan/ui/FilterChips';
-import { HoldButton } from '@/scan/ui/HoldButton';
-import { PageImage } from '@/scan/ui/PageImage';
-import { Unsupported } from '@/scan/ui/Unsupported';
+import { Icon, type IconName } from '@/paper/components/Icon';
+import { IconButton, T } from '@/paper/components/primitives';
+import { goBack } from '@/paper/components/ScreenHeader';
+import { Toast } from '@/paper/components/Toast';
+import { radius, space } from '@/core/design/tokens';
+import { t } from '@/core/i18n';
+import { isBlurred } from '@/paper/scan/engine/imaging/sharpness';
+import { sayScan, useScan, useScanMessage } from '@/paper/scan/session';
+import { FilterChips } from '@/paper/scan/ui/FilterChips';
+import { HoldButton } from '@/paper/scan/ui/HoldButton';
+import { PageImage } from '@/paper/scan/ui/PageImage';
+import { Unsupported } from '@/paper/scan/ui/Unsupported';
 
 const PREVIEW_EDGE = 1600;
 

@@ -13,18 +13,18 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { ActionSheet } from '@/components/ActionSheet';
-import { AskDialog } from '@/components/AskDialog';
-import { DropZone } from '@/components/DropZone';
-import { PasswordDialog } from '@/components/PasswordDialog';
-import { RootToast } from '@/components/RootToast';
-import { ShellOpen } from '@/components/ShellOpen';
-import { shell } from '@/lib/shell';
-import { useAmbientLight } from '@/state/ambient';
-import { usePalette, usePrefs } from '@/state/prefs';
-import { schedule, startIndexing } from '@/archive/indexer';
-import { refreshInboxCount } from '@/archive/inbox';
-import { useLibrary, type ImportItem } from '@/state/library';
+import { ActionSheet } from '@/paper/components/ActionSheet';
+import { AskDialog } from '@/paper/components/AskDialog';
+import { DropZone } from '@/paper/components/DropZone';
+import { PasswordDialog } from '@/paper/components/PasswordDialog';
+import { RootToast } from '@/paper/components/RootToast';
+import { ShellOpen } from '@/paper/components/ShellOpen';
+import { shell } from '@/core/lib/shell';
+import { useAmbientLight } from '@/paper/state/ambient';
+import { usePalette, usePrefs } from '@/paper/state/prefs';
+import { schedule, startIndexing } from '@/paper/archive/indexer';
+import { refreshInboxCount } from '@/paper/archive/inbox';
+import { useLibrary, type ImportItem } from '@/paper/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 

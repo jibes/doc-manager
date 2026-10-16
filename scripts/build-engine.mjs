@@ -10,7 +10,7 @@ const out = 'public/engine';
 mkdirSync(out, { recursive: true });
 
 await build({
-  entryPoints: ['src/engine/pdfium/worker.ts'],
+  entryPoints: ['src/core/engine/pdfium/worker.ts'],
   outfile: join(out, 'pdfium-worker.js'),
   bundle: true,
   format: 'esm',
@@ -22,7 +22,7 @@ await build({
 
 // Search: the index of every document's text, built and searched away from the screen.
 await build({
-  entryPoints: ['src/archive/searchWorker.ts'],
+  entryPoints: ['src/paper/archive/searchWorker.ts'],
   outfile: join(out, 'search-worker.js'),
   bundle: true,
   format: 'esm',
@@ -37,7 +37,7 @@ copyFileSync(wasm, join(out, 'pdfium.wasm'));
 
 // Scanner: image processing, page detection and OCR (PaddleOCR) workers, with ONNX Runtime's wasm. The models are in public/models.
 await build({
-  entryPoints: ['processor', 'detector', 'ocr'].map((name) => ({ in: `src/scan/engine/worker/${name}.worker.ts`, out: `scan-${name}` })),
+  entryPoints: ['processor', 'detector', 'ocr'].map((name) => ({ in: `src/paper/scan/engine/worker/${name}.worker.ts`, out: `scan-${name}` })),
   outdir: out,
   bundle: true,
   format: 'esm',

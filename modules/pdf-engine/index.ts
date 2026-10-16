@@ -1,6 +1,6 @@
 import { requireNativeModule } from 'expo-modules-core';
 
-import type { OutlineItem, SearchHit, Size } from '@/engine/types';
+import type { OutlineItem, SearchHit, Size } from '@/core/engine/types';
 
 type OpenResult = { handle: string; pageCount: number; pageSizes: Size[]; title?: string; author?: string };
 

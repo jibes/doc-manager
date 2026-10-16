@@ -28,15 +28,15 @@ import {
   bagRecall,
 } from './metrics';
 import { CASES, photograph } from './scene';
-import type { FilterId } from '../../src/scan/engine/imaging/filters';
-import type { Quad, RGBAImage } from '../../src/scan/engine/imaging/image';
-import { applyHomography, fallbackQuad, homography } from '../../src/scan/engine/imaging/quad';
-import { isBlurred } from '../../src/scan/engine/imaging/sharpness';
-import { exportPdf, pagePaperSize } from '../../src/scan/export';
-import { defaultSpec } from '../../src/scan/engine/pipeline';
-import { detector, processor } from '../../src/scan/services';
-import { DEFAULT_SCAN_SETTINGS, RESOLUTION_LONG_EDGE, type Page } from '../../src/scan/types';
-import { OcrClient } from '../../src/scan/engine/worker/clients';
+import type { FilterId } from '../../src/paper/scan/engine/imaging/filters';
+import type { Quad, RGBAImage } from '../../src/paper/scan/engine/imaging/image';
+import { applyHomography, fallbackQuad, homography } from '../../src/paper/scan/engine/imaging/quad';
+import { isBlurred } from '../../src/paper/scan/engine/imaging/sharpness';
+import { exportPdf, pagePaperSize } from '../../src/paper/scan/export';
+import { defaultSpec } from '../../src/paper/scan/engine/pipeline';
+import { detector, processor } from '../../src/paper/scan/services';
+import { DEFAULT_SCAN_SETTINGS, RESOLUTION_LONG_EDGE, type Page } from '../../src/paper/scan/types';
+import { OcrClient } from '../../src/paper/scan/engine/worker/clients';
 
 const FILTERS: FilterId[] = ['document', 'bw', 'gray', 'color', 'original'];
 const LONG_EDGE = RESOLUTION_LONG_EDGE[DEFAULT_SCAN_SETTINGS.resolution];

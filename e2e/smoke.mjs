@@ -766,6 +766,94 @@ async function shellBridge() {
   await ctx.close();
 }
 
+// Tidying the Tessel folder: its old folders flattened once (nothing overwritten), and documents there twice found.
+async function tidy() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    delete window.showOpenFilePicker;
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`tidy: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
+  const edited = Buffer.concat([readFileSync(new URL('./fixtures/xrefstream.pdf', import.meta.url)), Buffer.from('\n% edited\n%%EOF\n')]).toString('base64');
+  await page.evaluate(
+    async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive', { create: true });
+      for (const [path, b64] of files) {
+        const parts = path.split('/');
+        let dir = root;
+        for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d, { create: true });
+        const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+        await w.write(b64 === null ? 'notes' : Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    },
+    [
+      ['columns.pdf', fixture('columns.pdf')],
+      ['2026/columns.pdf', fixture('columns.pdf')],
+      ['2026/notes.txt', null],
+      ['Old/Arzt/letter.pdf', fixture('xrefstream.pdf')],
+      ['letter edited.pdf', edited],
+    ],
+  );
+  const names = (path) =>
+    page.evaluate(async (path) => {
+      let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+      try {
+        for (const d of path.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(d);
+      } catch {
+        return null;
+      }
+      const out = [];
+      for await (const name of dir.keys()) out.push(name);
+      return out.sort();
+    }, path);
+  await addSource(page);
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('flatten').waitFor({ timeout: 10000 }).catch(() => {});
+  check((await vis('flatten').count()) === 1, 'tidy: Settings offers to flatten a Tessel folder with folders in it');
+  await vis('flatten').click();
+  await page.getByTestId('ask-confirm').click();
+  const said = await page.getByText(/moved up/).innerText({ timeout: 15000 }).catch(() => '');
+  check(/2 documents moved up, 1 renamed .*1 folder kept/.test(said), `tidy: flattening says what it did (${said})`);
+  const top = await names('');
+  check(
+    ['columns.pdf', 'columns (2).pdf', 'letter.pdf', 'letter edited.pdf'].every((n) => top.includes(n)) && (await names('2026')).join() === 'notes.txt' && (await names('Old')) === null,
+    `tidy: PDFs moved up, nothing overwritten, emptied folders gone, others kept (${top} | ${await names('2026')} | ${await names('Old')})`,
+  );
+  check((await vis('flatten').count()) === 0, 'tidy: …and the offer goes');
+
+  // Duplicates: the same file twice, and an older version.
+  await vis('screen-back').click();
+  let menu = '';
+  for (let i = 0; i < 60 && !/duplicate/.test(menu); i++) {
+    await page.waitForTimeout(500);
+    await vis('docs-more').click();
+    menu = await page.getByTestId('action-sheet').innerText().catch(() => '');
+    await page.keyboard.press('Escape');
+  }
+  check(/2 duplicates/.test(menu), `tidy: ⋯ says how many documents are there twice (${menu.replace(/\n/g, ' / ')})`);
+  await vis('docs-more').click();
+  await page.getByTestId('action-more-duplicates').click();
+  await vis('duplicate-group').first().waitFor();
+  const groups = await vis('duplicate-group').allInnerTexts();
+  const versions = groups.find((g) => /Older versions/.test(g)) ?? '';
+  check(groups.length === 2 && groups.some((g) => /Identical files · frees \d+ KB/.test(g)) && /Stays/.test(versions), `tidy: identical files and older versions, each with what removing frees (${groups.map((g) => g.split('\n')[0])})`);
+  const stays = await vis('duplicate-group').filter({ hasText: 'Older versions' }).getByTestId('duplicate-keep').innerText();
+  check(/Old title/.test(stays) && (await vis('duplicate-group').filter({ hasText: 'Older versions' }).getByTestId('duplicate-other').count()) === 1, 'tidy: of versions, the newest stays');
+  await vis('duplicate-group').filter({ hasText: 'Identical files' }).getByTestId('duplicate-resolve').click();
+  await page.getByText(/^Removed: /).waitFor({ timeout: 10000 }).catch(() => {});
+  const left = (await names('')).filter((n) => n.startsWith('columns'));
+  check(left.length === 1 && (await names('.tessel/trash')).some((n) => n.startsWith('columns')), `tidy: the others go to the trash (${left})`);
+  await ctx.close();
+}
+
 // Open in place (Chromium): the library links to the user's file. Handles come from the origin-private
 // file system, standing in for the picker; they behave like real ones (read, write, vanish).
 async function linked() {
@@ -1722,13 +1810,12 @@ async function inbox() {
   check((await card('scan-1.pdf').getByTestId('inbox-file').getAttribute('aria-disabled')) === 'true', 'inbox: a date that is not YYYY-MM-DD blocks filing');
   await card('scan-1.pdf').getByTestId('inbox-date').fill('2026-09-28');
   const dest = await card('scan-1.pdf').getByTestId('inbox-dest').innerText();
-  check(dest === '→ 2026 / Stream Co / 2026-09-28 Old title.pdf', `inbox: the template places it (${dest})`);
+  check(dest === '→ 2026-09-28 Stream Co Old title.pdf', `inbox: the template names it, in the Tessel folder itself (${dest})`);
   await card('scan-1.pdf').getByTestId('inbox-file').click();
-  await page.getByText('Filed: 2026/Stream Co/2026-09-28 Old title.pdf').waitFor({ timeout: 15000 });
+  await page.getByText('Filed: 2026-09-28 Stream Co Old title.pdf').waitFor({ timeout: 15000 });
   const filed = await page.evaluate(async () => {
     const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
-    const dir = await (await root.getDirectoryHandle('2026')).getDirectoryHandle('Stream Co');
-    const bytes = new Uint8Array(await (await (await dir.getFileHandle('2026-09-28 Old title.pdf')).getFile()).arrayBuffer());
+    const bytes = new Uint8Array(await (await (await root.getFileHandle('2026-09-28 Stream Co Old title.pdf')).getFile()).arrayBuffer());
     const inbox = [];
     for await (const name of (await root.getDirectoryHandle('Inbox')).keys()) inbox.push(name);
     return { tail: new TextDecoder('latin1').decode(bytes.slice(-1500)), inbox };
@@ -2758,6 +2845,7 @@ await step('page-notes', pageNotes);
 await step('upgrade', upgrade);
 await step('linked', linked);
 await step('sources', sources);
+await step('tidy', tidy);
 await step('folders-shell', foldersShell);
 await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
 await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));

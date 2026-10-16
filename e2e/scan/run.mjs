@@ -234,7 +234,7 @@ async function main() {
   }
   const meta = {
     commit: run('git', ['-C', root, 'rev-parse', '--short', 'HEAD']).stdout.trim(),
-    dirty: run('git', ['-C', root, 'status', '--porcelain', '--', 'src/scan']).stdout.trim() !== '',
+    dirty: run('git', ['-C', root, 'status', '--porcelain', '--', 'src/paper/scan']).stdout.trim() !== '',
     date: new Date().toISOString(),
   };
   if (flag('--merge') && existsSync(join(OUT, 'results.json'))) {

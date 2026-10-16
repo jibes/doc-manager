@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 
-import { usePalette } from '@/state/prefs';
+import { usePalette } from '@/paper/state/prefs';
 
 /**
  * Where the Android app starts when opened with a file (public/index.html sends it here): nothing to draw

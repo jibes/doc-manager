@@ -5,8 +5,8 @@
  * consistent, then lit, shadowed, creased, blurred, made noisy and JPEG
  * encoded. Generalises tests/browser/synth.ts.
  */
-import type { Quad } from '../../src/scan/engine/imaging/image';
-import { applyHomography, homography } from '../../src/scan/engine/imaging/quad';
+import type { Quad } from '../../src/paper/scan/engine/imaging/image';
+import { applyHomography, homography } from '../../src/paper/scan/engine/imaging/quad';
 import { renderDoc, rng, type DocSpec } from './corpus';
 
 export interface Scene {

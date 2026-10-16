@@ -2,8 +2,8 @@
  * Image and text metrics for the end-to-end harness. Pure functions over
  * typed arrays, except the canvas helpers at the bottom.
  */
-import type { Point, Quad, RGBAImage } from '../../src/scan/engine/imaging/image';
-import type { PdfImage } from '../../src/scan/engine/pdf/writer';
+import type { Point, Quad, RGBAImage } from '../../src/paper/scan/engine/imaging/image';
+import type { PdfImage } from '../../src/paper/scan/engine/pdf/writer';
 import type { DocSpec, Rect } from './corpus';
 
 /* ------------------------------------------------------------- geometry ---- */

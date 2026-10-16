@@ -2,13 +2,13 @@ import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect } from 'react';
 import { Platform, View } from 'react-native';
 
-import { goBack } from '@/components/ScreenHeader';
-import { Toast } from '@/components/Toast';
-import { pausePrefetch, resumePrefetch } from '@/scan/exportCache';
-import { sayScan, useScan, useScanMessage } from '@/scan/session';
-import { Camera } from '@/scan/ui/Camera';
-import { usePrefs } from '@/state/prefs';
-import { Unsupported } from '@/scan/ui/Unsupported';
+import { goBack } from '@/paper/components/ScreenHeader';
+import { Toast } from '@/paper/components/Toast';
+import { pausePrefetch, resumePrefetch } from '@/paper/scan/exportCache';
+import { sayScan, useScan, useScanMessage } from '@/paper/scan/session';
+import { Camera } from '@/paper/scan/ui/Camera';
+import { usePrefs } from '@/paper/state/prefs';
+import { Unsupported } from '@/paper/scan/ui/Unsupported';
 
 /** Height of the camera's controls (shutter, import, Done) over the bottom edge, which messages stay clear of. */
 const CONTROLS_H = 100;

@@ -3,16 +3,16 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { changeRules, loadRules, useRules } from '@/archive/inbox';
-import type { Rule } from '@/archive/rules';
-import { Field } from '@/components/Field';
-import { Button, IconButton, T } from '@/components/primitives';
-import { SubFrame, useColumnWidth } from '@/components/AppNav';
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { Toast } from '@/components/Toast';
-import { fonts, radius, space } from '@/design/tokens';
-import { opError, t } from '@/i18n';
-import { usePalette, usePrefs } from '@/state/prefs';
+import { changeRules, loadRules, useRules } from '@/paper/archive/inbox';
+import type { Rule } from '@/paper/archive/rules';
+import { Field } from '@/paper/components/Field';
+import { Button, IconButton, T } from '@/paper/components/primitives';
+import { SubFrame, useColumnWidth } from '@/paper/components/AppNav';
+import { ScreenHeader } from '@/paper/components/ScreenHeader';
+import { Toast } from '@/paper/components/Toast';
+import { fonts, radius, space } from '@/core/design/tokens';
+import { opError, t } from '@/core/i18n';
+import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 const tagsOf = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 

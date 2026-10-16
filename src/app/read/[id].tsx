@@ -2,16 +2,16 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { errorText, t } from '@/i18n';
-import { Button, T } from '@/components/primitives';
-import { fonts, space } from '@/design/tokens';
-import { canOpenInPlace, pickHandles } from '@/lib/fsa';
-import { goBack } from '@/lib/nav';
-import { Reader } from '@/reader/Reader';
-import { useDocument } from '@/reader/useDocument';
-import { useLibrary } from '@/state/library';
-import { usePalette } from '@/state/prefs';
-import { FILE_ACCESS, FILE_MOVED, repo } from '@/storage';
+import { errorText, t } from '@/core/i18n';
+import { Button, T } from '@/paper/components/primitives';
+import { fonts, space } from '@/core/design/tokens';
+import { canOpenInPlace, pickHandles } from '@/core/lib/fsa';
+import { goBack } from '@/core/lib/nav';
+import { Reader } from '@/paper/reader/Reader';
+import { useDocument } from '@/paper/reader/useDocument';
+import { useLibrary } from '@/paper/state/library';
+import { usePalette } from '@/paper/state/prefs';
+import { FILE_ACCESS, FILE_MOVED, repo } from '@/core/storage';
 
 export default function ReadScreen() {
   // `page` and `q`: opened from a search across documents, at the match, highlighted.

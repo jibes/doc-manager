@@ -3,37 +3,37 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ascending, FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
-import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/archive/indexer';
-import { HitRow, importFromFolder } from '@/archive/Results';
-import type { Hit, IndexedDoc } from '@/archive/search';
-import { loadViews, removeView, saveView, useViews } from '@/archive/views';
-import { Icon, type IconName } from '@/components/Icon';
-import { Button, IconButton, T } from '@/components/primitives';
-import { AppFrame, AppHeader, columnWidth, scanSupported, useMainWidth } from '@/components/AppNav';
-import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
-import { SortChip } from '@/components/SortChip';
-import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
-import { deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
-import { readAdded, useIntake } from '@/archive/intake';
-import { aiReady } from '@/scan/ai';
-import { Toast } from '@/components/Toast';
-import { useNotice } from '@/components/useNotice';
-import { fonts, radius, space } from '@/design/tokens';
-import { opError, t } from '@/i18n';
-import { useThrottled } from '@/lib/useThrottled';
-import { showActions } from '@/state/actions';
-import { ask } from '@/state/ask';
-import { usePalette, usePrefs } from '@/state/prefs';
-import { folders } from '@/lib/folders';
-import { useLibrary, type ImportItem } from '@/state/library';
-import { EmptyLibrary } from '@/components/EmptyLibrary';
-import { pickPdfs, sampleItem } from '@/lib/pick';
-import { useInstall } from '@/lib/install';
-import { repo, type DocRecord } from '@/storage';
-import { useCache } from '@/state/cache';
-import { APP_ROOT_ID } from '@/lib/nesting';
-import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
+import { ascending, FACETS, facetCounts, matches, placeOf, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/paper/archive/facets';
+import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/paper/archive/indexer';
+import { HitRow, importFromFolder } from '@/paper/archive/Results';
+import { duplicateGroups } from '@/paper/archive/duplicates';
+import type { Hit, IndexedDoc } from '@/paper/archive/search';
+import { loadViews, removeView, saveView, useViews } from '@/paper/archive/views';
+import { Icon, type IconName } from '@/paper/components/Icon';
+import { Button, IconButton, T } from '@/paper/components/primitives';
+import { AppFrame, AppHeader, columnWidth, scanSupported, useMainWidth } from '@/paper/components/AppNav';
+import { DocList, gridOf, LayoutToggle, useLayout } from '@/paper/components/DocItems';
+import { SortChip } from '@/paper/components/SortChip';
+import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/paper/components/Selection';
+import { deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/paper/archive/batch';
+import { readAdded, useIntake } from '@/paper/archive/intake';
+import { aiReady } from '@/paper/scan/ai';
+import { Toast } from '@/paper/components/Toast';
+import { useNotice } from '@/paper/components/useNotice';
+import { fonts, radius, space } from '@/core/design/tokens';
+import { opError, t } from '@/core/i18n';
+import { useThrottled } from '@/core/lib/useThrottled';
+import { showActions } from '@/paper/state/actions';
+import { ask } from '@/paper/state/ask';
+import { usePalette, usePrefs } from '@/paper/state/prefs';
+import { folders } from '@/core/lib/folders';
+import { useLibrary, type ImportItem } from '@/paper/state/library';
+import { EmptyLibrary } from '@/paper/components/EmptyLibrary';
+import { pickPdfs, sampleItem } from '@/paper/state/pick';
+import { useInstall } from '@/core/lib/install';
+import { repo, type DocRecord } from '@/core/storage';
+import { useCache } from '@/paper/state/cache';
+import { refreshInboxCount, useInboxCount } from '@/paper/archive/inbox';
 
 const newViewId = () => `v-${Date.now().toString(36)}`;
 
@@ -108,15 +108,6 @@ export default function Documents() {
     if (added.length === 1) openRecord(added[0]);
     else if (added.length) say(t.filesAddedN(added.length));
   };
-  // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
-  const moreMenu = () =>
-    showActions(t.more, [
-      ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
-      ...(archive ? [{ key: 'more-trash', icon: 'trash' as IconName, label: t.trashTitle, onPress: () => router.push('/trash') }] : []),
-      ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'copy' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
-      ...(archive ? [{ key: 'more-rules', icon: 'tag' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
-      ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
-    ]);
   // The model reading the text is asked for on each add (from the default in Settings), where one is set up.
   const addMenu = (ai = improveAdded) =>
     showActions(t.addTitle, [
@@ -221,7 +212,21 @@ export default function Documents() {
   }, [searching, found, all, sort, reverse, bestFirst, place, archive, openedAt]);
   // A search says what the other side has (the scope isn't a place to forget).
   const elsewhere = useMemo(() => (searching && found ? found.hits.filter((h) => placeOf(h.doc, archive) !== place && matches(h.doc, filter)).length : 0), [searching, found, place, archive, filter]);
+  const doubled = useMemo(() => {
+    const inTessel = (d: IndexedDoc) => placeOf(d, archive) === 'tessel';
+    return duplicateGroups(all, inTessel).length;
+  }, [all, archive]);
   const hasSources = useMemo(() => place === 'sources' || all.some((d) => placeOf(d, archive) === 'sources'), [all, place, archive]);
+  // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
+  const moreMenu = () =>
+    showActions(t.more, [
+      ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
+      ...(archive ? [{ key: 'more-trash', icon: 'trash' as IconName, label: t.trashTitle, onPress: () => router.push('/trash') }] : []),
+      ...(doubled > 0 ? [{ key: 'more-duplicates', icon: 'copy' as IconName, label: t.duplicatesN(doubled), onPress: () => router.push('/duplicates') }] : []),
+      ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'copy' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
+      ...(archive ? [{ key: 'more-rules', icon: 'tag' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
+      ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
+    ]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -666,12 +671,6 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
 }
 
 const placeName = (pl: Where) => (pl === 'tessel' ? t.placeTessel : t.placeSources);
-/**
- * The Tessel folder is everything Tessel keeps: the folder chosen for it (synced, often), Documents/Tessel on
- * Android, the browser's own storage. Sources are the folders it reads (added in Settings).
- */
-const placeOf = (d: IndexedDoc, tessel: string | null): Where =>
-  d.place.kind === 'library' || d.place.root === APP_ROOT_ID || d.place.root === tessel ? 'tessel' : 'sources';
 
 const styles = StyleSheet.create({
   fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },

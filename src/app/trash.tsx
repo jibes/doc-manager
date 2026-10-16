@@ -2,17 +2,17 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { KEEP_DAYS } from '@/archive/sync';
-import { deleteForever, purge, restore, useTrash, type TrashItem } from '@/archive/trash';
-import { goTab, SubFrame, useColumnWidth } from '@/components/AppNav';
-import { Icon } from '@/components/Icon';
-import { Button, IconButton, T } from '@/components/primitives';
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { Toast } from '@/components/Toast';
-import { fonts, radius, space } from '@/design/tokens';
-import { opError, t } from '@/i18n';
-import { ask } from '@/state/ask';
-import { usePalette, usePrefs } from '@/state/prefs';
+import { KEEP_DAYS } from '@/paper/archive/sync';
+import { deleteForever, purge, restore, useTrash, type TrashItem } from '@/paper/archive/trash';
+import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
+import { Icon } from '@/paper/components/Icon';
+import { Button, IconButton, T } from '@/paper/components/primitives';
+import { ScreenHeader } from '@/paper/components/ScreenHeader';
+import { Toast } from '@/paper/components/Toast';
+import { fonts, radius, space } from '@/core/design/tokens';
+import { opError, t } from '@/core/i18n';
+import { ask } from '@/paper/state/ask';
+import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 
 /** The archive's trash: restore what was deleted, or delete it for good (it goes by itself after 30 days). */
