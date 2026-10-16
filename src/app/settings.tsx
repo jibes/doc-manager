@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -264,6 +265,9 @@ export default function Settings() {
             </View>
           </>
         )}
+        <T testID="app-version" v="caption" color={p.muted} style={{ marginTop: space.xxl }}>
+          {t.appVersion(Constants.expoConfig?.version ?? '')}
+        </T>
       </View>
     </ScrollView>
     {/* Over the screen, not the scrolled content. */}

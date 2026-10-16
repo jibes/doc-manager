@@ -78,7 +78,8 @@ export function HitRow({
   const { place } = h.doc;
   const cover = useLibrary((s) => (place.kind === 'library' ? s.covers[place.id] : undefined));
   const aspect = useLibrary((s) => (place.kind === 'library' ? s.docs.find((d) => d.id === place.id)?.coverAspect : undefined));
-  const where = place.kind === 'folder' ? whereIs(place) : t.placeTessel;
+  // One folder: only where a document still waits to be filed is worth saying.
+  const where = place.kind === 'folder' && place.inbox ? t.inboxTitle : '';
   const bytes = size && h.doc.size ? t.fileSize(h.doc.size) : '';
   return (
     <DocItem

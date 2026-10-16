@@ -274,7 +274,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const src = await repo.source(d.id).catch(() => null);
       if (src?.kind === 'bytes') {
         const key = await docKey(src.bytes);
-        patch(d.id, (x) => ({ ...x, shareKey: key }));
+        // Added counts as opened: the cache keeps that too, once the record no longer does.
+        patch(d.id, (x) => ({ ...x, shareKey: key, openedAt: x.openedAt ?? x.addedAt }));
       }
     }
   };
@@ -441,6 +442,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
           await repo.saveFile(id, fileData(item));
           await repo.saveCover(id, cover);
           await repo.put(rec);
+          // Added counts as opened, on this device, wherever the file goes later.
+          if (share) cache(share, { openedAt: rec.addedAt });
           const coverUri = await repo.coverUri(id);
           set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: coverUri } }));
           added.push(rec);
@@ -529,6 +532,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         await repo.put(forRepo(kept));
         repo.release(id);
         set((s) => ({ docs: s.docs.map((d) => (d.id === id ? kept : d)) }));
+        // What the viewed history knew goes to the cache, by content (the record no longer holds it).
+        cache(rec.shareKey!, { openedAt: kept.addedAt, position: rec.position, view: rec.view, invert: rec.invert ? true : undefined });
         void forget(viewedKey(rec.shareKey!, rec.bytes));
         if (file) void makeCover(id, file);
         return true;

@@ -568,7 +568,7 @@ export default function Documents() {
             onPress={() => Linking.openURL(SOURCE_URL)}
             style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.colophon, { opacity: hovered ? 1 : 0.7 }]}
           >
-            <T v="caption" color={p.muted}>
+            <T v="caption" color={p.muted} style={{ textAlign: 'center' }}>
               {t.colophon}
             </T>
           </Pressable>
@@ -645,7 +645,8 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
 
 const styles = StyleSheet.create({
   fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  colophon: { alignSelf: 'center', marginTop: space.xxl, paddingVertical: space.sm },
+  // Clear of + on either side, wherever the list ends.
+  colophon: { alignSelf: 'center', marginTop: space.xxl, marginHorizontal: 56 + space.lg, paddingVertical: space.sm },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingLeft: space.md, minHeight: 44 },
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 16, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },

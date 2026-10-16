@@ -13,10 +13,13 @@ import { makeSearchable, pagesWithoutText } from './searchable';
  * One way in: whatever is added (files, a document kept from a source or from the viewer) gets the text of its
  * pages without any, read on the device, or by the model when that is asked for. Pages with text stay as they are.
  */
-export const useIntake = create<{ reading: { name: string; done: number; total: number } | null; said: string | null }>(() => ({ reading: null, said: null }));
+export const useIntake = create<{ reading: { name: string; done: number; total: number } | null; said: string | null; waiting: string[] }>(() => ({ reading: null, said: null, waiting: [] }));
 
 const queue: { rec: DocRecord; ai: boolean }[] = [];
 let running = false;
+let current: string | null = null;
+/** The documents waiting or being read (the reader doesn't offer to read them again meanwhile). */
+const waiting = () => useIntake.setState({ waiting: queue.map((q) => q.rec.id).concat(current ? [current] : []) });
 
 /** Whether the model reads added documents: the switch on this add, else the default in Settings. */
 export const improveOnAdd = (asked?: boolean) => {
@@ -27,6 +30,7 @@ export const improveOnAdd = (asked?: boolean) => {
 /** Reads the added documents' pages without text, one after another, in the background. */
 export function readAdded(recs: DocRecord[], ai = improveOnAdd()) {
   for (const rec of recs) if (!rec.viewed && !queue.some((q) => q.rec.id === rec.id)) queue.push({ rec, ai });
+  waiting();
   if (!running) void work();
 }
 
@@ -36,11 +40,14 @@ async function work() {
   let failed = 0;
   while (queue.length) {
     const { rec, ai } = queue.shift()!;
+    current = rec.id;
+    waiting();
     const r = await readOne(rec, ai).catch(() => 'failed' as const);
     if (r === 'read') read++;
     else if (r === 'failed') failed++;
   }
-  useIntake.setState({ reading: null, said: read || failed ? (failed ? t.intakeFailed(failed) : t.intakeRead(read)) : null });
+  current = null;
+  useIntake.setState({ waiting: [], reading: null, said: read || failed ? (failed ? t.intakeFailed(failed) : t.intakeRead(read)) : null });
   running = false;
 }
 

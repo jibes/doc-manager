@@ -31,7 +31,7 @@ import { libraryActions } from '@/paper/state/library';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { repo, type DocRecord } from '@/core/storage';
 import { detailsOf, saveDetails } from '@/paper/archive/details';
-import { readAdded } from '@/paper/archive/intake';
+import { readAdded, useIntake } from '@/paper/archive/intake';
 import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/paper/archive/indexer';
 import type { IndexedDoc } from '@/paper/archive/search';
 import { useThrottled } from '@/core/lib/useThrottled';
@@ -248,6 +248,8 @@ export function Reader({
   const [reading, setReading] = useState<{ done: number; total: number; ai?: boolean } | null>(null);
   const ai = usePrefs((s) => s.ai);
   const canImprove = Platform.OS === 'web' && aiReady(ai);
+  // Being read as it was added: not offered again meanwhile.
+  const intakeBusy = useIntake((s) => s.waiting.includes(doc.id));
   // Leaving the document stops a reading by the model.
   const stopImproving = useRef<AbortController | null>(null);
   useEffect(() => () => stopImproving.current?.abort(), []);
@@ -863,8 +865,8 @@ export function Reader({
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
     ...(outside && !doc.viewed && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
-    ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
-    ...(canImprove && !edits.dirty ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
+    ...(textless && !edits.dirty && !intakeBusy ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
+    ...(canImprove && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
@@ -1047,7 +1049,7 @@ export function Reader({
                 <IconButton icon="zoomIn" label={withShortcut(t.larger, '+')} size={34} onPress={() => setPrefs({ textScale: clampText(textScale + 0.1) })} />
               </>
             )}
-            <IconButton icon="bookmark" label={withShortcut(t.pageNote, 'B')} size={34} onPress={() => void onPageNote(page)} testID="page-note" />
+            <IconButton icon="note" label={withShortcut(t.pageNote, 'B')} size={34} onPress={() => void onPageNote(page)} testID="page-note" />
           </View>
         </Animated.View>
         <View style={{ paddingHorizontal: wide ? space.xxl : space.lg }}>
@@ -1138,7 +1140,7 @@ export function Reader({
           </T>
         </View>
       )}
-      <Toast message={edits.notice ?? reloaded} onDismiss={() => (edits.clearNotice(), setReloaded(null))} />
+      <Toast message={panel && !wide ? null : (edits.notice ?? reloaded)} onDismiss={() => (edits.clearNotice(), setReloaded(null))} />
     </View>
   );
 }

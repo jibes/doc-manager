@@ -991,6 +991,7 @@ async function tesselFolder() {
     }, dir);
   // No sources: the one Tessel folder, shown in Settings.
   await vis('home-settings').click();
+  check(/^Tessel \d+\.\d+\.\d+$/.test(await vis('app-version').innerText()), `settings: says which version this is (${await vis('app-version').innerText()})`);
   check(/This browser/.test(await vis('tessel-folder').innerText()) && (await vis('settings-add-folder').count()) === 0 && (await vis('remove-folder').count()) === 0, 'tessel folder: Settings shows the one Tessel folder, no sources to add');
   // Import a folder: its PDFs (in its folders too) are copied in, once; the folder stays as it was.
   await vis('import-folder').click();
@@ -1000,6 +1001,8 @@ async function tesselFolder() {
   await page.goBack();
   for (let i = 0; i < 40 && (await docRows(page).count()) < 2; i++) await page.waitForTimeout(250);
   check((await docRows(page).count()) === 2 && (await vis('scope-sources').count()) === 0, `tessel folder: Documents lists them, with no Sources to switch to (${await docRows(page).count()})`);
+  const firstLines = (rows) => rows.map((r) => r.split('\n')[0]).join();
+  const before = firstLines(await docRows(page).allInnerTexts());
   // Another folder: the documents go along when asked to.
   await page.evaluate(() => (window.__pick = 'Archive'));
   await chooseTessel(page, { stay: true, answer: 'move' });
@@ -1008,8 +1011,9 @@ async function tesselFolder() {
   check((await names('Archive'))?.join() === 'columns.pdf,form.pdf' && (await names('Tessel'))?.length === 0, `tessel folder: …and the documents moved there (${await names('Archive')} | ${await names('Tessel')})`);
   await page.goBack();
   let rows = [];
-  for (let i = 0; i < 60 && !(rows.length === 2 && rows.every((r) => /Archive/.test(r))); i++) rows = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts());
-  check(rows.length === 2 && rows.every((r) => /Archive/.test(r)), `tessel folder: …listed from there (${rows.map((r) => r.replace(/\n/g, ' · '))})`);
+  for (let i = 0; i < 60 && rows.length !== 2; i++) rows = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts());
+  check(rows.length === 2 && rows.every((r) => !/Archive|Tessel folder/.test(r)), `tessel folder: …listed from there, rows not saying where (one folder) (${rows.map((r) => r.replace(/\n/g, ' · '))})`);
+  check(firstLines(rows) === before, `tessel folder: …still last added first (this device remembers them by content) (${firstLines(rows)} | ${before})`);
   await docRows(page).filter({ hasText: 'Orderly Notes' }).click();
   await page.getByTestId('reader').waitFor();
   check((await page.getByTestId('open-error').count()) === 0, 'tessel folder: a moved document opens from its new place');
@@ -1552,7 +1556,7 @@ async function searchArchive() {
   // Indexing may still be going: wait for the folder's document to be found.
   let found = [];
   for (let i = 0; i < 30 && !found.length; i++) found = await hits('Orderly');
-  check(found.length === 1 && /Archive/.test(found[0]), `search: a document in a folder's subfolder is found by its text (${found.map((x) => x.split('\n')[0])})`);
+  check(found.length === 1 && /Orderly/.test(found[0]), `search: a document in a folder's subfolder is found by its text (${found.map((x) => x.split('\n')[0])})`);
   check((await hits('Old title')).length === 1, 'search: a library document is found by its title, once');
   // "Cross references" in the folder's document matches too.
   let inLibrary = [];
