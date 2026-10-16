@@ -51,7 +51,9 @@ export default function Home() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const width = useMainWidth();
-  const { docs, covers, loaded, importing, load, importFiles, remove, toggleReading } = useLibrary();
+  const { docs: all, covers, loaded, importing, load, importFiles, view, remove, toggleReading } = useLibrary();
+  // Viewed documents (not kept) aren't the library's: they aren't listed.
+  const docs = useMemo(() => all.filter((d) => !d.viewed), [all]);
   const [hint, setHint] = useState<string | null>(null);
   const [showFinished, setShowFinished] = useState(false);
   // Picked documents (by id), while picking (Esc and Back end it).
@@ -73,8 +75,11 @@ export default function Home() {
     load();
   }, [load]);
 
+  // One file is opened to look at (kept when something about it is saved); several, and the guide, are kept.
   const add = async (items: ImportItem[]) => {
-    const added = await importFiles(items);
+    const one = items.length === 1 && !items[0].bundled ? await view(items[0]) : null;
+    if (one) return open(one);
+    const added = items.length === 1 && !items[0].bundled ? [] : await importFiles(items);
     if (added.length === 1) open(added[0]);
   };
 

@@ -125,10 +125,11 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
     await addFolder(setError);
     refresh();
   };
-  // A single file from anywhere the system picker reaches (cloud drives, mail attachments…).
-  const importFiles = useLibrary((s) => s.importFiles);
+  // A single file from anywhere the system picker reaches (cloud drives, mail attachments…), to look at.
+  const view = useLibrary((s) => s.view);
   const openOther = async () => {
-    const [doc] = await importFiles(await pickPdfs());
+    const [item] = await pickPdfs();
+    const doc = item && (await view(item));
     if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id } });
   };
   // The archive is chosen once, from the folders added (not a button beside each one: names need the room).

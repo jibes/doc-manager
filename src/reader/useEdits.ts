@@ -44,6 +44,8 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
 
   const save = useCallback(async () => {
     commitField();
+    // A document only viewed is kept first (the answer is a gesture too, for the write access below).
+    if (!(await libraryActions().ensureKept(doc.id))) return;
     // Ask for write access first, while the click or key press still counts as a user gesture.
     if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return setNotice(t.saveFailed);
     const bytes = await handle.save().catch(() => null);

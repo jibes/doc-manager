@@ -82,4 +82,8 @@ export const repo: LibraryRepo = {
   // No on-device OCR on native yet (see src/ocr), so nothing is ever stored.
   loadOcr: async (_id, pageCount) => new Array(pageCount).fill(undefined),
   saveOcr: async () => {},
+  // The native app opens documents from the library only.
+  hold: () => {},
+  held: () => undefined,
+  release: () => {},
 };

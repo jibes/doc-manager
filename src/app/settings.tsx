@@ -11,6 +11,7 @@ import { fonts, radius, space } from '@/design/tokens';
 import { aiMessage, t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
 import { nestingNote } from './files';
+import { forget, viewedCount } from '@/state/viewed';
 import { shareNow, useSharing } from '@/archive/sharing';
 import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
@@ -40,6 +41,9 @@ export default function Settings() {
   const [picked, setPicked] = useState<FolderRoot[] | null>(null);
   const [granted, setGranted] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Documents viewed and not kept, whose place this device remembers.
+  const [viewed, setViewed] = useState(0);
+  useEffect(() => void viewedCount().then(setViewed), []);
 
   const refresh = useCallback(() => {
     folders
@@ -223,6 +227,20 @@ export default function Settings() {
           <View {...mark('ai')}>
             <AiSection />
           </View>
+        )}
+
+        {viewed > 0 && (
+          <>
+            <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+              {t.viewedHistory}
+            </T>
+            <T v="caption" color={p.muted} style={styles.note}>
+              {t.viewedHistoryNote(viewed)}
+            </T>
+            <View style={{ flexDirection: 'row', marginTop: space.md }}>
+              <Button testID="viewed-forget" kind="quiet" label={t.viewedClear} onPress={() => void forget().then(() => (setViewed(0), setError(t.viewedCleared)))} />
+            </View>
+          </>
         )}
       </View>
     </ScrollView>

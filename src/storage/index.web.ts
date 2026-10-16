@@ -1,9 +1,9 @@
 import { createStore, del, delMany, entries, get, getMany, keys, set, values } from 'idb-keyval';
 
 import type { TextLine } from '@/engine/types';
-import { ensurePermission, isFileHandle } from '@/lib/fsa';
+import { ensurePermission, isFileHandle, type FileHandle } from '@/lib/fsa';
 import { shellDocUrl, writeToShell } from '@/lib/shell';
-import { FILE_ACCESS, FILE_MOVED, isShellLink, type DocRecord, type LibraryRepo } from './types';
+import { FILE_ACCESS, FILE_MOVED, isShellLink, NOT_KEPT, type DocRecord, type LibraryRepo } from './types';
 
 export * from './types';
 
@@ -13,6 +13,9 @@ const files = createStore('quire-files', 'files');
 const covers = createStore('quire-covers', 'covers');
 const ocr = createStore('tessel-ocr', 'pages');
 const coverUrls = new Map<string, string>();
+// Viewed documents (not kept): their files and recognised text, in memory only.
+const viewed = new Map<string, Blob | FileHandle>();
+const viewedOcr = new Map<string, TextLine[]>();
 const ocrKey = (id: string, page: number) => `${id}#${page}`;
 
 // Ask the browser not to evict the library under storage pressure.
@@ -32,7 +35,7 @@ export const repo: LibraryRepo = {
     await set(id, data, files);
   },
   async source(id) {
-    const stored = await get<unknown>(id, files);
+    const stored = viewed.get(id) ?? (await get<unknown>(id, files));
     if (isShellLink(stored)) {
       const res = await fetch(shellDocUrl(stored.uri)).catch(() => null);
       if (!res?.ok) throw new Error(FILE_MOVED);
@@ -49,10 +52,11 @@ export const repo: LibraryRepo = {
     return { kind: 'bytes', bytes: await stored.arrayBuffer() };
   },
   async requestAccess(id, write = false) {
-    const stored = await get<unknown>(id, files);
+    const stored = viewed.get(id) ?? (await get<unknown>(id, files));
     return isFileHandle(stored) ? ensurePermission(stored, write) : true;
   },
   async writeFile(id, bytes) {
+    if (viewed.has(id)) throw new Error(NOT_KEPT);
     const stored = await get<unknown>(id, files);
     if (isShellLink(stored)) return writeToShell(bytes, stored.uri);
     if (!isFileHandle(stored)) return set(id, new Blob([bytes], { type: 'application/pdf' }), files);
@@ -84,7 +88,7 @@ export const repo: LibraryRepo = {
     return isShellLink(stored) ? stored.uri : undefined;
   },
   async handleOf(id) {
-    const stored = await get<unknown>(id, files);
+    const stored = viewed.get(id) ?? (await get<unknown>(id, files));
     return isFileHandle(stored) ? stored : undefined;
   },
   async saveCover(id, cover) {
@@ -99,8 +103,18 @@ export const repo: LibraryRepo = {
     coverUrls.set(id, url);
     return url;
   },
-  loadOcr: (id, pageCount) => getMany<TextLine[] | undefined>(Array.from({ length: pageCount }, (_, i) => ocrKey(id, i)), ocr),
+  async loadOcr(id, pageCount) {
+    if (viewed.has(id)) return Array.from({ length: pageCount }, (_, i) => viewedOcr.get(ocrKey(id, i)));
+    return getMany<TextLine[] | undefined>(Array.from({ length: pageCount }, (_, i) => ocrKey(id, i)), ocr);
+  },
   async saveOcr(id, page, lines) {
+    if (viewed.has(id)) return void viewedOcr.set(ocrKey(id, page), lines);
     await set(ocrKey(id, page), lines, ocr);
+  },
+  hold: (id, data) => void viewed.set(id, data),
+  held: (id) => viewed.get(id),
+  release(id) {
+    viewed.delete(id);
+    for (const k of [...viewedOcr.keys()]) if (k.startsWith(`${id}#`)) viewedOcr.delete(k);
   },
 };

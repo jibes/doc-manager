@@ -47,13 +47,13 @@ async function readStates(archive: string): Promise<DeviceState[]> {
 async function withKeys() {
   const lib = useLibrary.getState();
   for (const d of lib.docs) {
-    if (d.shareKey) continue;
+    if (d.shareKey || d.viewed) continue;
     const src = await repo.source(d.id).catch(() => null);
     if (src?.kind === 'bytes') lib.patchDoc(d.id, { shareKey: await docKey(src.bytes) });
   }
   return useLibrary
     .getState()
-    .docs.filter((d) => d.shareKey)
+    .docs.filter((d) => d.shareKey && !d.viewed)
     .map((doc) => ({ key: doc.shareKey!, doc }));
 }
 

@@ -40,6 +40,8 @@ export default function ReadScreen() {
     const t = setTimeout(() => setSlow(true), 400);
     return () => clearTimeout(t);
   }, [load]);
+  // A document only viewed leaves memory when its reader closes (where it was left stays in the history).
+  useEffect(() => () => useLibrary.getState().closeViewed(id), [id]);
 
   const missing = loaded && !doc;
   const failure = state.status === 'error' ? state.message : null;

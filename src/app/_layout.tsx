@@ -29,9 +29,12 @@ import { useLibrary, type ImportItem } from '@/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-/** Files dropped on the window (or opened with the app): into the library, and one of them opened. */
+/** Files dropped on the window: one is opened to look at; several are kept (there is nothing to show them in). */
 async function dropped(items: ImportItem[]) {
-  const added = await useLibrary.getState().importFiles(items);
+  const library = useLibrary.getState();
+  const doc = items.length === 1 ? await library.view(items[0]) : null;
+  if (doc) return void router.push({ pathname: '/read/[id]', params: { id: doc.id } });
+  const added = items.length > 1 ? await library.importFiles(items) : [];
   if (added.length === 1) router.push({ pathname: '/read/[id]', params: { id: added[0].id } });
 }
 

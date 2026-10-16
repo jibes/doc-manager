@@ -473,6 +473,17 @@ export const en = {
   foldersView: 'Folders',
   allView: 'All',
   recentAll: 'All recently opened',
+  keepAsk: 'Keep in Tessel?',
+  keepAskBody: (title: string, inPlace: boolean) =>
+    `“${title}” is only being viewed. To save this, Tessel keeps it: ${inPlace ? 'the file stays where it is, and Tessel remembers it' : 'a copy goes to the Tessel folder'}, and the change is saved there.`,
+  keepConfirm: 'Keep',
+  keepInTessel: 'Keep in Tessel',
+  keptInTessel: 'Kept in Tessel.',
+  viewedHistory: 'Viewed documents',
+  viewedHistoryNote: (n: number) =>
+    `Documents opened from elsewhere and not kept: Tessel remembers where you left the last ${n === 1 ? 'one' : n} on this device. Nothing of the files is kept.`,
+  viewedClear: 'Forget',
+  viewedCleared: 'Forgotten.',
   recentTitle: 'Recent',
   openFile: 'Open file',
   placeFacet: 'Place',

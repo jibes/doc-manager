@@ -7,7 +7,9 @@ import { asPasswordError, engine } from '@/engine';
 import { preopen } from '@/reader/preopened';
 import { askPassword, passwordFor, rememberPassword } from '@/state/password';
 import { usePrefs } from '@/state/prefs';
-import type { FileHandle } from '@/lib/fsa';
+import { isFileHandle, type FileHandle } from '@/lib/fsa';
+import { ask } from '@/state/ask';
+import { forget, recall, remember, viewedKey } from '@/state/viewed';
 import type { FolderEntry } from '@/lib/folderTypes';
 import { folders } from '@/lib/folders';
 import { sameOrRenamed } from '@/lib/names';
@@ -51,10 +53,16 @@ type LibraryState = {
   load(): Promise<void>;
   importFiles(items: ImportItem[]): Promise<DocRecord[]>;
   /**
-   * A file from another app, to read now: opened from its bytes and recorded at once (its reader takes the
-   * open document); copied into the Tessel folder and given its cover afterwards. Null when not opened.
+   * A file from elsewhere (another app, a share, Open file), to look at: opened without being kept, where it was
+   * left the last time it was viewed (or the library's own document, if it has this one). Null when not opened.
    */
-  openIncoming(item: ImportItem): Promise<DocRecord | null>;
+  view(item: ImportItem): Promise<DocRecord | null>;
+  /** A viewed document becomes the library's (a file in place stays there; bytes go to the Tessel folder). */
+  keep(id: string): Promise<boolean>;
+  /** Before saving anything about a document: a viewed one is kept first, if the user agrees. */
+  ensureKept(id: string): Promise<boolean>;
+  /** A viewed document is closed: it leaves memory (its place stays in the viewed history). */
+  closeViewed(id: string): void;
   remove(id: string): Promise<void>;
   /**
    * `atEnd`: the reader reached the end (page view: scrolled to the bottom); defaults to being on the last page.
@@ -91,8 +99,6 @@ type LibraryState = {
 const nameOfUri = (uri: string) => decodeURIComponent(uri).split(/[/:]/).pop() ?? uri;
 
 const COVER_WIDTH = 360;
-/** A file from another app is copied and its cover made this long after it opened (its first pages come first). */
-const SETTLE_MS = 2500;
 /** The bundled guide: it stays a copy (it is part of the app, not the user's document). */
 export const SAMPLE_FILE = 'welcome-to-tessel.pdf';
 
@@ -196,6 +202,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
     set({ docs });
     const rec = docs.find((d) => d.id === id);
     if (!rec) return;
+    // Viewed: where it was left and how it looked go to the viewed history, nothing to the library.
+    if (rec.viewed) return void remember(viewedKey(rec.shareKey!, rec.bytes), rec.fileName, { position: rec.position, view: rec.view, invert: rec.invert, openedAt: rec.openedAt });
     if (!debounce) return void repo.put(rec);
     dirty.add(id);
     clearTimeout(persistTimer);
@@ -217,7 +225,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
     // One that can't be moved doesn't keep the others where they are.
     let failed = false;
     for (const d of get().docs) {
-      if (d.linked || d.fileName === SAMPLE_FILE) continue;
+      if (d.linked || d.viewed || d.fileName === SAMPLE_FILE) continue;
       let src;
       try {
         src = await repo.source(d.id);
@@ -298,19 +306,20 @@ export const useLibrary = create<LibraryState>((set, get) => {
     return undefined;
   };
 
-  /** After the reader is up: the file into the Tessel folder (as importing does), and the cover. */
-  const settle = async (id: string, item: ImportItem) => {
+  /** A kept document's cover, made from its file once it is the library's. */
+  const makeCover = async (id: string, file: Blob, book: boolean) => {
     try {
-      const moved = await intoAppFolder(item);
-      if (moved !== item) await get().linkTo(id, moved);
-    } catch {
-      // Stays a copy; moved on the next start.
-    }
-    try {
-      const bytes = await item.file!.arrayBuffer();
-      const { cover, handle } = await engine.renderCover({ kind: 'bytes', bytes }, COVER_WIDTH, passwordFor(id));
-      handle.close();
-      await repo.saveCover(id, cover);
+      const bytes = await file.arrayBuffer();
+      if (book) {
+        const b = openBook(new Uint8Array(bytes));
+        const c = b.cover ? b.images[b.cover] : undefined;
+        if (!c) return;
+        await repo.saveCover(id, coverData(c.bytes, c.type));
+      } else {
+        const { cover, handle } = await engine.renderCover({ kind: 'bytes', bytes }, COVER_WIDTH, passwordFor(id));
+        handle.close();
+        await repo.saveCover(id, cover);
+      }
       const uri = await repo.coverUri(id);
       set((s) => ({ covers: { ...s.covers, [id]: uri } }));
     } catch {
@@ -391,13 +400,14 @@ export const useLibrary = create<LibraryState>((set, get) => {
       return added;
     },
 
-    async openIncoming(item) {
-      const file = item.file;
-      if (!file) return (await get().importFiles([item]))[0] ?? null;
+    async view(item) {
+      const file = item.file ?? (item.handle ? await item.handle.getFile().catch(() => undefined) : undefined);
+      // Nothing to hold (a file only the native app can reach): it is kept, as before.
+      if (!file || item.bundled) return (await get().importFiles([item]))[0] ?? null;
       const bytes = await file.arrayBuffer();
-      if (isEpub(item.name, { kind: 'bytes', bytes })) return (await get().importFiles([item]))[0] ?? null;
-      // Opened while the library loads.
-      const opening = openWithPassword(item.name, (pw) => engine.open({ kind: 'bytes', bytes }, pw));
+      const book = isEpub(item.name, { kind: 'bytes', bytes });
+      // Opened while the library loads (a file from another app is shown as soon as it can be).
+      const opening = book ? null : openWithPassword(item.name, (pw) => engine.open({ kind: 'bytes', bytes }, pw));
       await get().load();
       const existing = await findExisting(item).catch(() => undefined);
       let opened;
@@ -407,46 +417,106 @@ export const useLibrary = create<LibraryState>((set, get) => {
         set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
         return null;
       }
-      if (!opened) return null;
-      const handle = opened.value;
+      if (opening && !opened) return null;
       if (existing) {
-        // The reader opens it from what was opened (no second read); not when the library's has more in it.
-        if (existing.exact) preopen(existing.doc.id, handle);
-        else handle.close();
+        // The library's own: that one opens (from what was opened, unless the library's has more in it).
+        if (opened && existing.exact) preopen(existing.doc.id, opened.value);
+        else opened?.value.close();
         return existing.doc;
       }
-      const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
+      const share = await docKey(bytes);
+      const key = viewedKey(share, file.size);
+      const was = await recall(key).catch(() => undefined);
       const id = newId();
-      const rec: DocRecord = {
-        id,
-        title: cleanTitle(handle.metadata.title, item.name),
-        author: handle.metadata.author,
-        fileName: item.name,
-        bytes: item.size,
-        pageCount: handle.pageCount,
-        coverAspect: first.height / first.width,
-        addedAt: Date.now(),
-        bookmarks: [],
-      };
-      if (opened.password) rememberPassword(id, opened.password);
-      set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: null } }));
-      preopen(id, handle);
-      // Stored while it opens: a copy for now, the file in the Tessel folder follows.
-      void (async () => {
+      let facts: Pick<DocRecord, 'title' | 'author' | 'pageCount' | 'coverAspect' | 'format'>;
+      if (book) {
+        let b;
         try {
-          await repo.saveFile(id, file);
-          await repo.put(rec);
+          b = openBook(new Uint8Array(bytes));
         } catch (e) {
           set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
-          return;
+          return null;
         }
-        setTimeout(() => void settle(id, item), SETTLE_MS);
-      })();
+        const cover = b.cover ? b.images[b.cover] : undefined;
+        const size = cover ? imageSize(cover.bytes) : null;
+        facts = { title: b.title?.trim() || cleanTitle(undefined, item.name.replace(/\.epub$/i, '')), author: b.author, pageCount: b.pageCount, coverAspect: size ? size.h / size.w : 1.5, format: 'epub' };
+      } else {
+        const handle = opened!.value;
+        const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
+        facts = { title: cleanTitle(handle.metadata.title, item.name), author: handle.metadata.author, pageCount: handle.pageCount, coverAspect: first.height / first.width };
+        if (opened!.password) rememberPassword(id, opened!.password);
+        preopen(id, handle);
+      }
+      const now = Date.now();
+      const rec: DocRecord = {
+        id,
+        ...facts,
+        fileName: item.name,
+        bytes: file.size,
+        addedAt: now,
+        openedAt: now,
+        bookmarks: [],
+        shareKey: share,
+        linked: item.handle ? true : undefined,
+        viewed: true,
+        // Where it was left the last time it was viewed, and how it looked.
+        ...(was?.position ? { position: was.position } : {}),
+        ...(was?.view ? { view: was.view } : {}),
+        ...(was?.invert ? { invert: true } : {}),
+      };
+      repo.hold(id, item.handle ?? file);
+      set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: null } }));
+      void remember(key, item.name, { openedAt: now });
       return rec;
+    },
+
+    async keep(id) {
+      const rec = get().docs.find((d) => d.id === id);
+      if (!rec?.viewed) return !!rec;
+      const data = repo.held(id);
+      if (!data) return false;
+      const handle = isFileHandle(data) ? data : undefined;
+      const file = handle ? await handle.getFile().catch(() => undefined) : (data as Blob);
+      // A file in place stays where it is; bytes from elsewhere go to the Tessel folder (or stay a copy).
+      let item: ImportItem = { name: rec.fileName, size: rec.bytes, file, handle };
+      if (!handle) item = await intoAppFolder(item).catch(() => item);
+      try {
+        await repo.saveFile(id, fileData(item));
+        const { viewed: _viewed, ...rest } = rec;
+        // Books are for reading: kept, they go onto the reading list (as books imported always have).
+        const kept: DocRecord = { ...rest, fileName: item.name, linked: isLinked(item), addedAt: Date.now(), ...(rec.format === 'epub' && !rec.reading ? { reading: { since: Date.now() } } : {}) };
+        await repo.put(kept);
+        repo.release(id);
+        set((s) => ({ docs: s.docs.map((d) => (d.id === id ? kept : d)) }));
+        void forget(viewedKey(rec.shareKey!, rec.bytes));
+        if (file) void makeCover(id, file, rec.format === 'epub');
+        return true;
+      } catch (e) {
+        set({ error: `${t.importFailed(rec.fileName)} ${errorText(e)}` });
+        return false;
+      }
+    },
+
+    async ensureKept(id) {
+      const rec = get().docs.find((d) => d.id === id);
+      if (!rec?.viewed) return true;
+      const yes = await ask({ title: t.keepAsk, body: t.keepAskBody(rec.title, !!rec.linked), confirm: t.keepConfirm });
+      return yes !== null && get().keep(id);
+    },
+
+    closeViewed(id) {
+      const rec = get().docs.find((d) => d.id === id);
+      if (!rec?.viewed) return;
+      repo.release(id);
+      set((s) => {
+        const { [id]: _gone, ...covers } = s.covers;
+        return { docs: s.docs.filter((d) => d.id !== id), covers };
+      });
     },
 
     async remove(id) {
       const gone = get().docs.find((d) => d.id === id);
+      if (gone?.viewed) return get().closeViewed(id);
       set((s) => ({ docs: s.docs.filter((d) => d.id !== id) }));
       // Off the reading list shared with the other devices too (else it would come back from there).
       const { archive, shareReading, unshared, set: setPrefs } = usePrefs.getState();
@@ -485,15 +555,23 @@ export const useLibrary = create<LibraryState>((set, get) => {
     toggleInvert: (id) => patch(id, (d) => ({ ...d, invert: d.invert ? undefined : true })),
     setDetails: (id, { title, author }) => patch(id, (d) => ({ ...d, title: title.trim() || d.title, author: author || undefined })),
 
-    toggleReading: (id) => patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } })),
+    // Saved about the document: a viewed one is kept first.
+    toggleReading: (id) =>
+      void get()
+        .ensureKept(id)
+        .then((ok) => ok && patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } }))),
 
     toggleBookmark: (id, page) =>
-      patch(id, (d) => ({
-        ...d,
-        bookmarks: d.bookmarks.includes(page)
-          ? d.bookmarks.filter((p) => p !== page)
-          : [...d.bookmarks, page].sort((a, b) => a - b),
-      })),
+      void get()
+        .ensureKept(id)
+        .then(
+          (ok) =>
+            ok &&
+            patch(id, (d) => ({
+              ...d,
+              bookmarks: d.bookmarks.includes(page) ? d.bookmarks.filter((p) => p !== page) : [...d.bookmarks, page].sort((a, b) => a - b),
+            })),
+        ),
 
     async linkTo(id, item) {
       await repo.saveFile(id, fileData(item));

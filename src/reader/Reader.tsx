@@ -178,6 +178,8 @@ export function Reader({
   // Indexing shares the PDF engine: it waits while a document is open.
   useEffect(() => pauseIndexing(), []);
   const writeDetails = async (details: Details) => {
+    // Saved into the file: a document only viewed is kept first.
+    if (!(await libraryActions().ensureKept(doc.id))) return;
     setSavingDetails(true);
     const failed = await detailsWritten(doc.id, handle, details);
     setSavingDetails(false);
@@ -217,6 +219,10 @@ export function Reader({
       clearTimeout(timer);
     };
   }, [archive, doc.shareKey, doc.linked, doc.id, doc.fileName, handle, indexed]);
+  // A document only viewed becomes the library's, from where it is (a file in place stays there).
+  const keepViewed = async () => {
+    if (await libraryActions().keep(doc.id)) setReloaded(t.keptInTessel);
+  };
   const keepInArchive = async () => {
     if (!archive) return;
     const kept = await keptInArchive(doc, handle, archive).then(
@@ -252,7 +258,7 @@ export function Reader({
     };
   }, [handle, doc.format]);
   const improveText = async () => {
-    if (reading) return;
+    if (reading || !(await libraryActions().ensureKept(doc.id))) return;
     const yes = await ask({ title: t.improveAsk, body: t.improveAskBody(handle.pageCount, aiHost(ai)), confirm: t.improveGo });
     if (yes === null) return;
     const stop = new AbortController();
@@ -270,7 +276,7 @@ export function Reader({
     } else setReloaded(result.message);
   };
   const addText = async () => {
-    if (reading) return;
+    if (reading || !(await libraryActions().ensureKept(doc.id))) return;
     setReading({ done: 0, total: 0 });
     const result = await textAdded(doc.id, handle, (done, total) => setReading({ done, total }));
     setReading(null);
@@ -859,9 +865,10 @@ export function Reader({
   const menuItems: MenuItem[] = [
     // Most used first.
     readingItem,
+    ...(doc.viewed ? [{ key: 'keep', icon: 'inbox' as const, label: t.keepInTessel, onPress: () => void keepViewed() }] : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
-    ...(outside && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
+    ...(outside && !doc.viewed && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
     ...(canImprove && !edits.dirty ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),

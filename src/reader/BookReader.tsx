@@ -276,6 +276,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
 
   const menuItems: MenuItem[] = [
     { key: 'reading', icon: readingMode ? 'readingOn' : 'readingAdd', label: readingMode ? t.removeFromReadingList : t.addToReadingList, onPress: () => toggleReading(doc.id) },
+    ...(doc.viewed ? [{ key: 'keep', icon: 'inbox' as const, label: t.keepInTessel, onPress: () => void libraryActions().keep(doc.id) }] : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc).catch(() => {}) },
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc).catch(() => {}) }] : []),
   ];

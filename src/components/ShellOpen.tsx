@@ -22,7 +22,8 @@ async function openFiles(files: Promise<File[]>): Promise<Outcome> {
   const items = itemsFromFiles(await files);
   const library = useLibrary.getState();
   if (items.length === 1) {
-    const doc = await library.openIncoming(items[0]);
+    // To look at: kept only when something about it is saved.
+    const doc = await library.view(items[0]);
     return doc && { show: doc.id };
   }
   const added = items.length ? (await library.importFiles(items)).length : 0;

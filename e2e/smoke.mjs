@@ -346,6 +346,7 @@ async function locked() {
   await page.getByTestId('password-input').fill('tessel');
   await page.getByTestId('password-submit').click();
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   const opened = await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.width > 300), null, { timeout: 10000 }).then(() => true, () => false);
   // Reload on the home screen (static servers without SPA fallback can't reload deep links), then reopen.
   await page.getByTestId('back').click();
@@ -367,6 +368,7 @@ async function tagged() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   await switchView(page);
   await page.getByTestId('text-view').waitFor({ timeout: 15000 });
   await page.waitForTimeout(600);
@@ -385,12 +387,24 @@ async function tagged() {
   await ctx.close();
 }
 
-async function openFixture(page, file) {
+/** Opened from elsewhere, a document is only viewed: ⋯ → Keep in Tessel makes it the library's. */
+async function keepOpen(page) {
+  await page.getByTestId('open-more').locator('visible=true').click();
+  await page.getByTestId('menu-keep').click();
+  await page.getByText('Kept in Tessel.').waitFor({ timeout: 10000 }).catch(() => {});
+  // The menu has closed and the reader shows the kept document before anything else is pressed.
+  await page.waitForTimeout(500);
+}
+
+/** A fixture through Open file, kept (as most suites read it again later); `view: true` leaves it viewed. */
+async function openFixture(page, file, { view = false } = {}) {
   await page.goto(BASE);
-  await page.getByText('Every document').waitFor();
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const add = page.getByTestId('add').locator('visible=true').first();
+  await add.waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), add.click()]);
   await fc.setFiles(new URL(`./fixtures/${file}`, import.meta.url).pathname);
-  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('reader').or(page.getByTestId('text-view')).first().waitFor();
+  if (!view) await keepOpen(page);
 }
 
 // Text view v2: two columns read in order, figures and tables inline, figure tap opens its page.
@@ -769,6 +783,7 @@ async function books() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/book2.epub', import.meta.url).pathname);
   await view.waitFor({ timeout: 10000 });
+  await keepOpen(page);
   await page.waitForTimeout(500);
   await page.getByTestId('open-find').click();
   await page.getByTestId('find-panel').getByText('Departure').waitFor({ timeout: 5000 }).then(
@@ -841,10 +856,10 @@ async function shellBridge() {
   check(shared && log.bytes === pdf.length, `shell: share hands the exact file to the app (${log.bytes} of ${pdf.length} bytes)`);
   check(log.calls.some((c) => c[0] === 'theme' && /^#/.test(c[1])), 'shell: system bars follow the theme');
   check((await page.getByTestId('install').count()) === 0, 'shell: no install button inside the app');
-  // Shown before it was stored: it is in the library after a restart all the same.
+  // Only viewed: after a restart it isn't in the library (nothing was saved about it).
   await page.goto(BASE);
-  const kept = await opened(page).filter({ hasText: 'Orderly Notes' }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
-  check(kept, 'shell: the opened file is kept in the library');
+  await page.getByText('Every document').waitFor({ timeout: 10000 }).catch(() => {});
+  check((await opened(page).count()) === 0, 'shell: a file from another app is only viewed, not added to the library');
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
   await page.getByTestId('home-settings').locator('visible=true').click();
@@ -904,6 +919,7 @@ async function linked() {
   await page.getByTestId('back').click();
   await page.getByTestId('add').click();
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'linked: opens the picked file in place');
   await page.getByTestId('back').click();
   // The one opened last is to continue; opening the sample again puts it under Recent.
@@ -939,7 +955,11 @@ async function linked() {
   await page.getByTestId('field-name').click();
   await page.keyboard.type('Grace Hopper');
   await page.keyboard.press('Enter');
+  // Picked, it is only viewed: saving asks to keep it first (in place: the file stays where it is).
   await page.getByTestId('save').click();
+  const keepAsked = await page.getByText('Keep in Tessel?').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  check(keepAsked && /stays where it is/.test(await page.getByTestId('ask-dialog').innerText()), 'linked: saving a viewed file asks to keep it, in place');
+  await page.getByTestId('ask-confirm').click();
   await page.getByText('Saved to “form.pdf”').waitFor({ timeout: 5000 });
   const written = await page.evaluate(async () => {
     const f = await (await (await navigator.storage.getDirectory()).getFileHandle('form.pdf')).getFile();
@@ -1399,12 +1419,17 @@ async function foldersShell() {
   await opened(page).first().waitFor();
   check((await opened(page).first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
 
-  // A file opened from elsewhere (system picker) becomes a real file in Documents/Tessel, not a hidden copy.
+  // A file opened from elsewhere (system picker) is only viewed; kept, it becomes a real file in Documents/Tessel.
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await chooser.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
   await page.waitForURL(/\/read\//, { timeout: 30000 });
-  const kept = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'tagged.pdf'));
-  check(kept?.parent === 'app', 'folders-shell: a file opened from elsewhere is kept in the Tessel folder');
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(1000);
+  const copied = () => page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'tagged.pdf'));
+  check(!(await copied()), 'folders-shell: a file opened from elsewhere is only viewed (no copy made)');
+  await keepOpen(page);
+  await page.waitForTimeout(500);
+  check((await copied())?.parent === 'app', 'folders-shell: kept, it is a file in the Tessel folder');
   await page.goto(BASE);
   await toReading(page);
   await openFolders(page);
@@ -1559,6 +1584,7 @@ async function details() {
     const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
     await fc.setFiles(new URL(`./fixtures/${fixture}`, import.meta.url).pathname);
     await page.getByTestId('reader').waitFor();
+    await keepOpen(page);
   };
   const panel = async () => {
     await page.getByTestId('open-more').click();
@@ -1620,6 +1646,7 @@ async function details() {
   await page.getByTestId('password-input').fill('tessel');
   await page.getByTestId('password-submit').click();
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   await panel();
   await page.getByTestId('detail-title').fill('Changed');
   await page.getByTestId('details-save').click();
@@ -1664,6 +1691,7 @@ async function searchArchive() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   await page.goto(BASE);
   // One search, in Documents: library documents and folder files alike.
   await openDocs(page);
@@ -1751,6 +1779,7 @@ async function documentsScreen() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-details').click();
   await page.getByTestId('detail-sender').fill('Nordkorn');
@@ -1964,6 +1993,7 @@ async function searchable() {
   const [mixed] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await mixed.setFiles(new URL('./fixtures/mixed.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   await page.waitForTimeout(3500);
   await page.getByTestId('open-more').click();
   const offered = (await page.getByTestId('menu-searchable').count()) === 1;
@@ -2208,6 +2238,7 @@ async function sharedReading() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/scan.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-reading').click();
   await vis('bookmark').click();
@@ -2306,10 +2337,13 @@ async function places() {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
+  await keepOpen(page);
   // Whether it is in the archive is checked after its first pages.
   await page.waitForTimeout(3000);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-reading').click();
+  // The menu closes before it opens again.
+  await page.waitForTimeout(500);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-keep-archive').click();
   await page.getByText('Kept in the archive’s Inbox: it syncs to your other devices.').waitFor({ timeout: 15000 });
@@ -2823,6 +2857,57 @@ async function improve() {
   await ctx.close();
 }
 
+// Viewing without keeping: a file opened from elsewhere isn't listed, its page is remembered on this device, and
+// the first save asks to keep it (Cancel leaves it viewed, Keep makes it the library's).
+async function viewed() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`viewed: ${e.message}`));
+  await openFixture(page, 'columns.pdf', { view: true });
+  await page.waitForTimeout(600);
+  await page.keyboard.press('End');
+  await page.waitForTimeout(1500);
+  const left = (await page.getByTestId('page-label').innerText()).replace(/\s+/g, ' ').trim();
+  await page.getByTestId('back').click();
+  await page.getByText('Every document').waitFor({ timeout: 10000 }).then(
+    () => check(true, 'viewed: closed, it isn’t in the library (Reading stays empty)'),
+    () => check(false, 'viewed: closed, it isn’t in the library (Reading stays empty)'),
+  );
+  // The same file again: where it was left.
+  await openFixture(page, 'columns.pdf', { view: true });
+  await page.waitForTimeout(1200);
+  const again = (await page.getByTestId('page-label').innerText()).replace(/\s+/g, ' ').trim();
+  check(left.startsWith('2') && again === left, `viewed: opened again, it is where it was left (${left} → ${again})`);
+  // A bookmark is saved about it: asked first; Cancel leaves it viewed.
+  await vis('bookmark').click();
+  await page.getByText('Keep in Tessel?').waitFor({ timeout: 5000 });
+  check(/copy goes to the Tessel folder|stays where it is/.test(await page.getByTestId('ask-dialog').innerText()), 'viewed: a bookmark asks to keep it first, saying where it goes');
+  await page.getByTestId('ask-cancel').click();
+  await page.waitForTimeout(300);
+  check((await vis('bookmark').getAttribute('aria-pressed')) !== 'true', 'viewed: Cancel leaves it viewed, without the bookmark');
+  await vis('bookmark').click();
+  await page.getByTestId('ask-confirm').click();
+  await page.waitForTimeout(500);
+  check((await vis('bookmark').getAttribute('aria-pressed')) === 'true', 'viewed: Keep keeps it, and the bookmark is saved');
+  await page.getByTestId('back').click();
+  await page.getByTestId('last-read').waitFor({ timeout: 10000 }).then(
+    () => check(true, 'viewed: kept, it is the library’s'),
+    () => check(false, 'viewed: kept, it is the library’s'),
+  );
+  // The history can be forgotten.
+  await openFixture(page, 'tagged.pdf', { view: true });
+  await page.getByTestId('back').click();
+  await openFolders(page);
+  await vis('home-settings').click();
+  await vis('viewed-forget').click();
+  await page.getByText('Forgotten.').waitFor({ timeout: 5000 }).then(
+    () => check(true, 'viewed: Settings forgets the viewed documents'),
+    () => check(false, 'viewed: Settings forgets the viewed documents'),
+  );
+  await ctx.close();
+}
+
 const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
 await step('german', german);
 await step('locked', locked);
@@ -2843,6 +2928,7 @@ await step('shared', sharedReading);
 await step('places', places);
 await step('tabs', tabs);
 await step('lastread', lastRead);
+await step('viewed', viewed);
 await step('appearance', appearance);
 await step('regressions', regressions);
 await step('books', books);

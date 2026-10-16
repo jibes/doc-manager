@@ -92,6 +92,7 @@ export default function Documents() {
   const openedAt = useMemo(() => {
     const byKey = new Map<string, number>();
     for (const d of library) {
+      if (d.viewed) continue;
       // Added (a scan just saved, a file just opened from elsewhere) counts as opened.
       const at = d.openedAt ?? d.addedAt;
       byKey.set(`lib:${d.id}`, at);

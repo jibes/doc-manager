@@ -33,6 +33,11 @@ export type DocRecord = {
   format?: 'epub';
   /** The same document on every device (archive/shared.ts docKey), for sharing reading between them. */
   shareKey?: string;
+  /**
+   * Opened from elsewhere to look at, not kept: the record lives in memory only (its place in the viewed history
+   * is remembered), its file is held by the repo for as long as it is open. Saving anything keeps it first.
+   */
+  viewed?: true;
 };
 
 /** A document in one of the user's folders, reached through the Android app (content:// or file:// URI). */
@@ -71,4 +76,13 @@ export interface LibraryRepo {
   /** Text recognized on-device for scanned PDFs, per page; undefined = not recognized yet. */
   loadOcr(id: string, pageCount: number): Promise<(TextLine[] | undefined)[]>;
   saveOcr(id: string, page: number, lines: TextLine[]): Promise<void>;
+  /** A viewed document's file, held in memory while it is open: read like any other, never written. */
+  hold(id: string, data: Blob | FileHandle): void;
+  /** What `hold` keeps (to keep the document: it is saved then). */
+  held(id: string): Blob | FileHandle | undefined;
+  /** The viewed document is closed (or kept): its file and recognised text leave memory. */
+  release(id: string): void;
 }
+
+/** Writing to a document that is only viewed: it must be kept first. */
+export const NOT_KEPT = 'not-kept';
