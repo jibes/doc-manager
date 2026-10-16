@@ -20,10 +20,11 @@ import type { DocSource } from '@/core/engine/types';
 import { FILE_MOVED, repo, type DocRecord, type ReadingPosition } from '@/core/storage';
 
 /**
- * `handle` (Chromium) or `link` (a document in a folder, through the Android app): the file in place;
- * the library then links to it instead of keeping a copy.
+ * `handle` (Chromium) or `link` (through the Android app): where the file is. `inPlace`: it is in the Tessel folder
+ * already, and the library links to it there; anything else is copied in (only a file the app can't read stays
+ * linked where it is).
  */
-export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle; link?: string; bundled?: boolean };
+export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle; link?: string; bundled?: boolean; inPlace?: true };
 
 /**
  * A document kept from elsewhere (bytes only: a file from mail or another app) becomes a real file in the Tessel
@@ -31,7 +32,7 @@ export type ImportItem = { name: string; size: number; file?: Blob; uri?: string
  * there), else in Documents/Tessel (Android) or the browser's own Tessel folder. The bundled guide stays a copy.
  */
 async function intoAppFolder(item: ImportItem): Promise<ImportItem> {
-  if (item.handle || item.link || !item.file || item.bundled) return item;
+  if (item.inPlace || !item.file || item.bundled) return item;
   const tessel = usePrefs.getState().archive;
   if (tessel) {
     const made = await folders.create({ root: tessel, dir: await inboxDir(tessel) }, item.name, item.file);
@@ -518,9 +519,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!data) return false;
       const handle = isFileHandle(data) ? data : undefined;
       const file = handle ? await handle.getFile().catch(() => undefined) : (data as Blob);
-      // A file in place stays where it is; bytes from elsewhere go to the Tessel folder (or stay a copy).
+      // Into the Tessel folder, as anything added (it stays a copy only where there is none).
       let item: ImportItem = { name: rec.fileName, size: rec.bytes, file, handle };
-      if (!handle) item = await intoAppFolder(item).catch(() => item);
+      item = await intoAppFolder(item).catch(() => item);
       try {
         await repo.saveFile(id, fileData(item));
         const { viewed: _viewed, ...rest } = rec;
@@ -540,7 +541,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
     async ensureKept(id) {
       const rec = get().docs.find((d) => d.id === id);
       if (!rec?.viewed) return true;
-      const yes = await ask({ title: t.keepAsk, body: t.keepAskBody(rec.title, !!rec.linked), confirm: t.keepConfirm });
+      const yes = await ask({ title: t.keepAsk, body: t.keepAskBody(rec.title), confirm: t.keepConfirm });
       return yes !== null && get().keep(id);
     },
 

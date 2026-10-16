@@ -7,6 +7,7 @@ import { BASE } from '@/core/lib/base';
 import { folders, type FolderRoot } from '@/core/lib/folders';
 import type { FolderEntry } from '@/core/lib/folderTypes';
 import { usePrefs } from '@/paper/state/prefs';
+import { APP_ROOT_ID } from '@/core/lib/nesting';
 import { repo } from '@/core/storage';
 import { parseTags, real, realTitle } from './pdfInfo';
 import { docKey } from './docKey';
@@ -218,27 +219,17 @@ export function invalidate(docId: string) {
 type Candidate = { key: string; place: Place; name: string; size: number; modified: number };
 
 /**
- * The places to index: the archive first, the picked folders and Tessel's own; then, with all files access granted
- * and switched on in Settings, every other document on the device (those already found in a folder above are left out of it). Locked ones
- * (the browser wants the user's OK again) can't be read now: their records stay. Null: the places are unknown.
- *
- * `skip`: in each place, the folders inside it to leave alone. Where folders were added inside one another a file
- * is still listed once: the archive keeps everything below it (a folder added inside it isn't read on its own);
- * elsewhere the inner folder lists its own files (the Tessel folder inside "Documents" as This device, say).
+ * The place to index: the Tessel folder. Locked (the browser or Android wants the user's OK again), it can't be
+ * read now: its records stay. Null: the places are unknown. (`skip` is from when several places were read.)
  */
 async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[]; skip: Map<string, Set<string>> } | null> {
   if (!folders.supported) return { roots: [], locked: [], skip: new Map() };
   const all = await folders.roots(false).catch(() => null);
   if (!all) return null;
-  const archive = usePrefs.getState().archive;
-  const rank = (r: FolderRoot) => (r.id === archive ? 0 : r.kind === 'all' ? 2 : 1);
-  const nest = await folders.nestings(all).catch(() => []);
-  const inArchive = new Set(nest.filter((n) => n.outer === archive).map((n) => n.inner));
-  const roots = all.filter((r) => !r.locked && r.kind !== 'device' && !inArchive.has(r.id)).sort((a, b) => rank(a) - rank(b));
-  const read = new Set(all.filter((r) => r.kind !== 'device' && !inArchive.has(r.id)).map((r) => r.id));
-  const skip = new Map<string, Set<string>>();
-  for (const n of nest) if (n.outer !== archive && read.has(n.inner)) skip.set(n.outer, (skip.get(n.outer) ?? new Set()).add(n.dir));
-  return { roots, locked: all.filter((r) => r.locked).map((r) => r.id), skip };
+  // Only the Tessel folder: the one chosen, else this device's own.
+  const tessel = usePrefs.getState().archive ?? APP_ROOT_ID;
+  const here = all.filter((r) => r.id === tessel);
+  return { roots: here.filter((r) => !r.locked), locked: here.filter((r) => r.locked).map((r) => r.id), skip: new Map() };
 }
 
 /** A folder whose listing failed: what is known in it (and below it) is kept until it can be listed again. */

@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/paper/components/Icon';
-import { Button, IconButton, T } from '@/paper/components/primitives';
+import { Button, T } from '@/paper/components/primitives';
 import { SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { ScreenHeader } from '@/paper/components/ScreenHeader';
 import { Toast } from '@/paper/components/Toast';
@@ -11,13 +11,14 @@ import { fonts, radius, space } from '@/core/design/tokens';
 import { aiMessage, opError, t } from '@/core/i18n';
 import { flatten, hasFolders } from '@/paper/archive/flatten';
 import { APP_ROOT_ID } from '@/core/lib/nesting';
-import { folders, type FolderRoot } from '@/core/lib/folders';
-import { nestingNote } from '@/paper/archive/sources';
+import { folders } from '@/core/lib/folders';
+import { changeTessel, documentsHere, importFolder } from '@/paper/archive/tessel';
+import { shell } from '@/core/lib/shell';
+import { showActions } from '@/paper/state/actions';
 import { forget, viewedCount } from '@/paper/state/viewed';
 import { useLibrary } from '@/paper/state/library';
 import { downloadDoc } from '@/core/lib/fileActions';
 import { schedule } from '@/paper/archive/indexer';
-import { setArchive } from '@/paper/archive/views';
 import { AppearancePicker } from '@/paper/reader/AppearancePanel';
 import { aiInsecure, aiReady, aiUrl, testAi, type AiApi } from '@/paper/scan/ai';
 import { anySignal } from '@/core/lib/signals';
@@ -39,7 +40,6 @@ export default function Settings() {
     const y = e.nativeEvent.layout.y;
     setAt((all) => (all[key] === y ? all : { ...all, [key]: y }));
   } });
-  const [picked, setPicked] = useState<FolderRoot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Documents viewed and not kept, whose place this device remembers.
   const [viewed, setViewed] = useState(0);
@@ -81,36 +81,53 @@ export default function Settings() {
     }
   };
 
+  // The Tessel folder: which it is, and whether Android or the browser wants an OK for it again.
+  const [where, setWhere] = useState<{ name: string | null; locked: boolean } | null>(null);
   const refresh = useCallback(() => {
     folders
       .roots(false)
-      // The folders added (Tessel's own folder isn't one: it is where things go without a chosen one).
-      .then((rs) => setPicked(rs.filter((r) => r.kind === 'folder')))
+      .then((rs) => {
+        const r = rs.find((x) => x.id === tesselRoot);
+        setWhere({ name: r?.kind === 'folder' ? r.name : null, locked: !!r?.locked });
+      })
       .catch(() => setError(t.opFailed));
-  }, []);
+  }, [tesselRoot]);
   useEffect(refresh, [refresh]);
 
-  const add = async () => {
+  // Another folder (null: this device's own): with documents here, asked whether they go along.
+  const changeTo = async (to: string | null) => {
+    const go = async (move: boolean) => {
+      try {
+        const moved = await changeTessel(to, move);
+        setError(move ? t.tesselMoved(moved) : t.tesselChanged);
+      } catch (e) {
+        setError(e instanceof Error && e.message === 'denied' ? t.writeDenied : opError(e));
+      }
+      // The row follows by itself (it reads the folder again when the Tessel folder changes).
+    };
+    const here = await documentsHere().catch(() => 0);
+    if (!here) return go(false);
+    showActions(t.tesselChangeTitle, [
+      { key: 'tessel-move', icon: 'move', label: t.tesselMove(here), onPress: () => void go(true) },
+      { key: 'tessel-leave', icon: 'close', label: t.tesselLeave(here), onPress: () => void go(false) },
+    ]);
+  };
+  const choose = async () => {
     const r = await folders.add().catch(() => void setError(t.opFailed));
-    const note = r && (await nestingNote(r));
-    if (note) setError(note);
-    refresh();
-    schedule(1000);
+    if (r && r.id !== archive) await changeTo(r.id);
   };
-  // The archive folder: asked first, and it stops being the archive.
-  const remove = async (f: FolderRoot) => {
-    if (f.id === archive) {
-      if ((await ask({ title: t.removeArchiveAsk(f.name), body: t.removeArchiveBody, confirm: t.remove, destructive: true })) === null) return;
-      await setArchive(null).catch(() => {});
-    }
-    await folders.forget(f.id).catch(() => setError(t.opFailed));
+  const unlock = async () => {
+    await folders.unlock(tesselRoot, true).catch(() => false);
     refresh();
-    schedule(1000);
+    schedule(300);
   };
-  const chooseArchive = (id: string | null) => setArchive(id).catch(() => setError(t.viewFailed));
+  const importNow = async () => {
+    const n = await importFolder((done, total) => setError(t.importingFolder(done, total))).catch((e: unknown) => (setError(opError(e)), null));
+    if (n !== null) setError(t.importedFolder(n));
+  };
   const sections: [string, string][] = [
     ['appearance', t.appearanceTitle],
-    ...(folders.supported ? ([['folders', t.foldersTitle]] as [string, string][]) : []),
+    ...(folders.supported ? ([['folders', t.tesselFolderTitle]] as [string, string][]) : []),
     ...(folders.supported && archive ? ([['sync', t.syncTitle]] as [string, string][]) : []),
     ...(Platform.OS === 'web' ? ([['ai', t.aiTitle]] as [string, string][]) : []),
   ];
@@ -153,51 +170,44 @@ export default function Settings() {
         <View style={{ height: space.xxl }} />
 
         <T v="kicker" color={p.muted} style={styles.kicker} {...mark('folders')}>
-          {t.foldersTitle}
+          {t.tesselFolderTitle}
         </T>
         {!folders.supported ? (
           <T color={p.muted}>{t.foldersUnsupported}</T>
         ) : (
           <>
-            {picked && picked.length > 0 && (
-              <View testID="settings-folders" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                {picked.map((f, i) => {
-                  const isArchive = f.id === archive;
-                  return (
-                    <View key={f.id} style={[styles.row, { borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0 }]}>
-                      <Icon name="folder" color={p.accent} />
-                      <T v="label" numberOfLines={1} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
-                        {f.name}
-                      </T>
-                      {(f.kind === 'folder' || f.kind === 'app') && (
-                        // The archive is a mark on one of the folders: a tap sets it, another takes it off.
-                        <Pressable
-                          testID="archive-root"
-                          accessibilityRole="switch"
-                          accessibilityLabel={t.archiveUse(f.name)}
-                          aria-checked={isArchive}
-                          onPress={() => chooseArchive(isArchive ? null : f.id)}
-                          hitSlop={6}
-                          style={[styles.archiveMark, { borderColor: isArchive ? p.markRing : p.hairline, backgroundColor: isArchive ? p.mark : 'transparent' }]}
-                        >
-                          <Icon name={isArchive ? 'check' : 'inbox'} size={14} color={isArchive ? p.ink : p.muted} />
-                          <T v="label" color={isArchive ? p.ink : p.muted}>
-                            {t.archiveMark}
-                          </T>
-                        </Pressable>
-                      )}
-                      <IconButton testID="remove-folder" icon="close" size={36} label={t.removeFolder(f.name)} onPress={() => void remove(f)} />
-                    </View>
-                  );
-                })}
+            <View testID="tessel-folder" style={[styles.card, styles.row, { backgroundColor: p.surface, borderColor: p.hairline, paddingRight: space.lg }]}>
+              <Icon name="folder" color={p.accent} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <T v="label" numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
+                  {where?.name ?? (shell ? t.tesselAppFolder : t.tesselBrowser)}
+                </T>
+                <T v="caption" color={p.muted} numberOfLines={2}>
+                  {where?.name ? t.tesselChosenNote : shell ? t.tesselAppFolderNote : t.tesselBrowserNote}
+                </T>
               </View>
-            )}
-            <View style={{ flexDirection: 'row', marginTop: space.md }}>
-              {folders.canAdd && <Button testID="settings-add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />}
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+              {where?.locked && <Button testID="tessel-unlock" kind="quiet" label={t.allowAccess} onPress={() => void unlock()} />}
+              {folders.canAdd && <Button testID="tessel-choose" kind="quiet" icon="folderAdd" label={archive ? t.tesselChange : t.tesselChoose} onPress={() => void choose()} />}
+              {!!archive && <Button testID="tessel-device" kind="quiet" label={shell ? t.tesselUseAppFolder : t.tesselUseBrowser} onPress={() => void changeTo(null)} />}
             </View>
             <T v="caption" color={p.muted} style={styles.note}>
-              {t.foldersNote} {picked?.length ? t.archiveFolderNote : ''}
+              {t.tesselNote}
             </T>
+            {folders.canAdd && (
+              <>
+                <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+                  {t.importFolderTitle}
+                </T>
+                <View style={{ flexDirection: 'row' }}>
+                  <Button testID="import-folder" kind="quiet" icon="plus" label={t.importFolder} onPress={() => void importNow()} />
+                </View>
+                <T v="caption" color={p.muted} style={styles.note}>
+                  {t.importFolderNote}
+                </T>
+              </>
+            )}
             {nested && (
               <>
                 <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>

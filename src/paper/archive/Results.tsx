@@ -15,7 +15,7 @@ import type { Hit, IndexedDoc, Place } from './search';
 export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>, copy = false) {
   const file = await folders.read(place.root, place.entry);
   const size = place.entry.size || file.size;
-  const [added] = await useLibrary.getState().importFiles([copy ? { name: place.entry.name, size, file } : { name: place.entry.name, size, file, handle: place.entry.handle, link: place.entry.uri }]);
+  const [added] = await useLibrary.getState().importFiles([copy ? { name: place.entry.name, size, file } : { name: place.entry.name, size, file, handle: place.entry.handle, link: place.entry.uri, inPlace: true }]);
   return added;
 }
 

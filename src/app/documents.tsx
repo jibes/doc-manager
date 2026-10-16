@@ -3,11 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ascending, FACETS, facetCounts, matches, placeOf, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/paper/archive/facets';
+import { ascending, FACETS, facetCounts, matches, placeOf, SORTS, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/paper/archive/facets';
 import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/paper/archive/indexer';
-import { HitRow, importFromFolder } from '@/paper/archive/Results';
+import { HitRow } from '@/paper/archive/Results';
 import { duplicateGroups } from '@/paper/archive/duplicates';
 import { dropOldState } from '@/paper/archive/dirs';
+import { dropSources } from '@/paper/archive/tessel';
 import type { Hit, IndexedDoc } from '@/paper/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/paper/archive/views';
 import { Icon, type IconName } from '@/paper/components/Icon';
@@ -61,13 +62,12 @@ const AHEAD = 1500;
 
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
-/** What the screen shows: the search, filters and place, and the order. */
-type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; place: Where; relevance: boolean };
+/** What the screen shows: the search, filters and the order. */
+type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; relevance: boolean };
 /** Views from before the order was kept: a search by date was best matches first. */
 const byRelevanceIn = (v: SavedView) => !!v.query && (v.relevance ?? v.sort === 'date');
 const sameView = (v: SavedView, s: Showing) =>
   v.query === s.query &&
-  (v.place ?? 'tessel') === s.place &&
   FACETS.every((k) => (v.filter[k] ?? '') === (s.filter[k] ?? '')) &&
   byRelevanceIn(v) === s.relevance &&
   (s.relevance || (v.sort === s.sort && !!v.reverse === s.reverse));
@@ -85,9 +85,11 @@ export default function Documents() {
   const inboxCount = useInboxCount((s) => s.count);
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
   const mainWidth = useMainWidth();
-  // Tessel's own documents, or the sources it reads (one at a time: a scope, not a filter).
-  const [place, setPlace] = useState<Where>('tessel');
-  useEffect(() => void refreshInboxCount(), []);
+  // Folders read as sources before 3.2: let go of, once.
+  useEffect(() => {
+    void refreshInboxCount();
+    void dropSources().catch(() => {});
+  }, []);
   const aiSet = usePrefs((s) => aiReady(s.ai));
   const improveAdded = usePrefs((s) => s.improveAdded);
   const intake = useIntake((s) => s.reading);
@@ -212,15 +214,13 @@ export default function Documents() {
   const base = useMemo(() => {
     const answer = found?.hits ?? [];
     const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc, openedAt, reverse)) : sortDocs(all, sort, undefined, openedAt, reverse).map(asHit);
-    return hits.filter((h) => placeOf(h.doc, archive) === place);
-  }, [searching, found, all, sort, reverse, bestFirst, place, archive, openedAt]);
-  // A search says what the other side has (the scope isn't a place to forget).
-  const elsewhere = useMemo(() => (searching && found ? found.hits.filter((h) => placeOf(h.doc, archive) !== place && matches(h.doc, filter)).length : 0), [searching, found, place, archive, filter]);
+    // The Tessel folder's (what an earlier version read elsewhere leaves with the next indexing).
+    return hits.filter((h) => placeOf(h.doc, archive) === 'tessel');
+  }, [searching, found, all, sort, reverse, bestFirst, archive, openedAt]);
   const doubled = useMemo(() => {
     const inTessel = (d: IndexedDoc) => placeOf(d, archive) === 'tessel';
     return duplicateGroups(all, inTessel).length;
   }, [all, archive]);
-  const hasSources = useMemo(() => place === 'sources' || all.some((d) => placeOf(d, archive) === 'sources'), [all, place, archive]);
   // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
   const moreItems = [
       ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
@@ -296,20 +296,19 @@ export default function Documents() {
     setFilter(v.filter);
     setSort(v.sort);
     setReverse(!!v.reverse);
-    setPlace(v.place ?? 'tessel');
     setBestFirst(byRelevanceIn(v));
     setLimit(PAGE);
   };
-  const current = views.find((v) => sameView(v, { query: q, filter, sort, reverse, place, relevance: byRelevance }));
-  const canSave = !current && (!!q || !isEmpty(filter) || place !== 'tessel');
+  const current = views.find((v) => sameView(v, { query: q, filter, sort, reverse, relevance: byRelevance }));
+  const canSave = !current && (!!q || !isEmpty(filter));
   // Settings that couldn't be read say so; anything else, that it wasn't saved.
   const viewFailed = (e: unknown) => say(e instanceof Error && e.message === t.settingsUnreadable ? e.message : t.viewFailed);
 
   const save = async () => {
-    const suggested = [place !== 'tessel' ? placeName(place) : '', ...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
+    const suggested = [...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
     const name = (await ask({ title: t.saveView, input: suggested, placeholder: t.viewName, confirm: t.saveView }))?.trim();
     if (!name) return;
-    const view: SavedView = { id: newViewId(), name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(place !== 'tessel' ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
+    const view: SavedView = { id: newViewId(), name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(q ? { relevance: byRelevance } : {}) };
     saveView(view).then(() => say(t.viewSaved(name)), viewFailed);
   };
   const viewActions = (v: SavedView) =>
@@ -330,11 +329,6 @@ export default function Documents() {
       })),
       ...(active ? [{ key: 'facet-clear', icon: 'close' as IconName, label: t.clearFilters, onPress: () => setFilter({}) }] : []),
     ]);
-  const scopeTo = (pl: Where) => {
-    setPlace(pl);
-    setSelected(null);
-    setLimit(PAGE);
-  };
   // Room for the action bar while picking.
   // Nothing indexed yet (and not searching): what to do instead of an empty list with its filters.
   const nothing = ready && all.length === 0 && !searching;
@@ -366,15 +360,6 @@ export default function Documents() {
     setAll((a) => a.filter((d) => !keys.has(d.key)));
     setFound((f) => f && { ...f, hits: f.hits.filter((h) => !keys.has(h.doc.key)) });
   };
-  // A source's documents kept: copied into the Tessel folder, as anything added is.
-  const keep = () =>
-    batch(async () => {
-      const added = [];
-      for (const d of picked) if (d.place.kind === 'folder') added.push(await importFromFolder(d.place, true));
-      const kept = added.filter((x) => !!x);
-      readAdded(kept);
-      return t.keptN(kept.length);
-    });
   const rename = async () => {
     const d = picked[0];
     // The list shows titles, the dialog the file's name: it says which one changes (a title is changed in Details).
@@ -444,17 +429,6 @@ export default function Documents() {
             </AppHeader>
           )}
 
-          {hasSources && (
-            <View accessibilityRole="radiogroup" style={[styles.segments, { backgroundColor: p.hairline }]}>
-              {WHERES.map((pl) => (
-                <Pressable key={pl} testID={`scope-${pl}`} role="radio" aria-checked={place === pl} onPress={() => scopeTo(pl)} style={[styles.segment, place === pl && { backgroundColor: p.raised }]}>
-                  <T v="label" color={place === pl ? p.ink : p.muted}>
-                    {placeName(pl)}
-                  </T>
-                </Pressable>
-              ))}
-            </View>
-          )}
 
           <View style={[styles.search, { backgroundColor: p.hairline }]}>
             <Icon name="search" size={16} color={p.muted} />
@@ -499,7 +473,7 @@ export default function Documents() {
           ) : (
           <>
           {/* What waits for a look: the inbox, and documents being read. */}
-          {archive && inboxHere && inboxCount > 0 && place === 'tessel' && (
+          {archive && inboxHere && inboxCount > 0 && (
             <Pressable testID="inbox-review" accessibilityRole="link" onPress={() => router.push('/inbox')} style={[styles.waiting, { backgroundColor: p.mark, borderColor: p.markRing }]}>
               <Icon name="inbox" size={16} color={p.ink} />
               <T v="label" style={{ flex: 1 }}>
@@ -557,13 +531,6 @@ export default function Documents() {
             <T v="kicker" color={p.muted} testID="docs-count" numberOfLines={1}>
               {pending && !shown.length ? '' : t.documentsCount(shown.length)}
             </T>
-            {elsewhere > 0 && (
-              <Pressable testID="scope-other" accessibilityRole="button" onPress={() => scopeTo(place === 'tessel' ? 'sources' : 'tessel')} hitSlop={6}>
-                <T v="caption" color={p.accent}>
-                  {t.otherSide(elsewhere, placeName(place === 'tessel' ? 'sources' : 'tessel'))}
-                </T>
-              </Pressable>
-            )}
             <View style={styles.countTools}>
               <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} up={byRelevance ? undefined : ascending(sort, reverse)} onPress={chooseSort} onTurn={() => setReverse((r) => !r)} />
             </View>
@@ -609,18 +576,14 @@ export default function Documents() {
       </ScrollView>
       {selected && (
         <ActionBar bottom={insets.bottom} side={space.xl - 4}>
-          {/* A source's documents are opened, kept, shared or deleted; Tessel's are its own to rename. */}
-          {place === 'sources' && <Action testID="act-keep" icon="inbox" label={t.keep} disabled={!picked.length} onPress={() => void keep()} />}
           {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void batch(() => shareAll(picked))} />}
-          {place === 'tessel' && (
-            <Action
-              testID="act-rename"
-              icon="pencil"
-              label={t.rename}
-              disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
-              onPress={() => void rename()}
-            />
-          )}
+          <Action
+            testID="act-rename"
+            icon="pencil"
+            label={t.rename}
+            disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
+            onPress={() => void rename()}
+          />
           <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => void remove()} />
         </ActionBar>
       )}
@@ -679,13 +642,10 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
   );
 }
 
-const placeName = (pl: Where) => (pl === 'tessel' ? t.placeTessel : t.placeSources);
 
 const styles = StyleSheet.create({
   fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   colophon: { alignSelf: 'center', marginTop: space.xxl, paddingVertical: space.sm },
-  segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },
-  segment: { height: 34, justifyContent: 'center', paddingHorizontal: space.lg, borderRadius: radius.pill },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingLeft: space.md, minHeight: 44 },
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 16, paddingVertical: space.sm, outlineStyle: 'none' } as object,
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
