@@ -433,6 +433,28 @@ function AiSection() {
       <T v="caption" color={p.muted} style={styles.note}>
         {t.aiNote}
       </T>
+      <Pressable
+        testID="ai-thinking"
+        accessibilityRole="switch"
+        accessibilityLabel={t.aiThinking}
+        aria-checked={!!ai.thinking}
+        onPress={() => set({ thinking: !ai.thinking })}
+        style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+          styles.card,
+          styles.row,
+          { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg, marginTop: space.lg },
+        ]}
+      >
+        <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+          {t.aiThinking}
+        </T>
+        <View style={[styles.track, { backgroundColor: ai.thinking ? p.accent : p.hairline }]}>
+          <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: ai.thinking ? 18 : 0 }] }]} />
+        </View>
+      </Pressable>
+      <T v="caption" color={p.muted} style={styles.note}>
+        {t.aiThinkingNote}
+      </T>
       {aiReady(ai) && (
         <>
           <Pressable

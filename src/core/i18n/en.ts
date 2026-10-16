@@ -479,6 +479,8 @@ export const en = {
   detailsFailed: 'The details couldn’t be saved.',
   detailsBadDate: 'Write the date as YYYY-MM-DD.',
   aiTitle: 'AI reading',
+  aiThinking: 'Let the model think',
+  aiThinkingNote: 'Off, the model is asked to answer at once: much faster, and reading pages rarely needs more. On, it thinks as it would by itself (slower, sometimes better with hard handwriting).',
   aiNote: 'Scans and added documents can be read by an AI model at an address you give: it fixes the text, reads handwriting, and names the file. Pages are sent there only when it is on for a scan or an add. The key stays on this device.',
   aiApi: 'API',
   aiApiAnthropic: 'Anthropic',

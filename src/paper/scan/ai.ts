@@ -1,4 +1,5 @@
 import { shell, shellRequest } from '@/core/lib/shell';
+import { readStored, writeStored } from '@/core/lib/stored';
 import type { PdfWord } from './engine/pdf/writer';
 
 /**
@@ -16,6 +17,8 @@ export type AiSettings = {
   url: string;
   key: string;
   model: string;
+  /** Let the model think before it answers (slower; reading pages rarely needs it). Off unless switched on. */
+  thinking?: boolean;
 };
 
 export const DEFAULT_AI: AiSettings = { api: 'anthropic', url: '', key: '', model: '' };
@@ -269,8 +272,71 @@ const FORMAT_REJECTED = /output_config|response_format|json[ _]schema|json[ _]ob
 const formatRejected = (e: unknown) => e instanceof Error && FORMAT_REJECTED.test(e.message);
 
 /** The output format each address and model took last time (index into the formats tried): later requests start there. */
-const formatTaken = new Map<string, number>();
+const formatsTaken = new Map<string, number>();
+const formatTaken = {
+  // Kept on this device too: a model that rejects the schema only once its reply has started costs a request each time otherwise.
+  get: (key: string) => {
+    if (formatsTaken.has(key)) return formatsTaken.get(key);
+    const n = Number(readStored(`ai-format:${key}`) ?? NaN);
+    return Number.isInteger(n) ? n : undefined;
+  },
+  set: (key: string, n: number) => {
+    formatsTaken.set(key, n);
+    writeStored(`ai-format:${key}`, String(n));
+  },
+};
 const modelKey = (s: AiSettings) => `${s.api}|${trimSlash(s.url)}|${s.model.trim()}`;
+/**
+ * Thinking, asked for by each API's own word for it (there is no common one). Off: every way servers know of to
+ * turn it off (OpenAI's reasoning_effort, DeepSeek's, GLM's and Kimi's thinking, vLLM's and Qwen's switches); on:
+ * the model's own default, or Anthropic's adaptive thinking. A server that rejects one (by its name) is asked
+ * again without it, or with its next value; what each model took is kept on this device.
+ */
+type Hint = { key: string; values: unknown[] };
+const OFF_HINTS: Hint[] = [
+  { key: 'reasoning_effort', values: ['none', 'minimal'] },
+  { key: 'thinking', values: [{ type: 'disabled' }] },
+  { key: 'chat_template_kwargs', values: [{ enable_thinking: false, thinking: false }] },
+  { key: 'enable_thinking', values: [false] },
+];
+const thinkingHints = (s: AiSettings): Hint[] =>
+  s.api === 'anthropic' ? [{ key: 'thinking', values: [s.thinking ? { type: 'adaptive' } : { type: 'disabled' }] }] : s.thinking ? [] : OFF_HINTS;
+
+const hintsTaken = new Map<string, Record<string, number>>();
+/** Which value of each hint a model takes (past the last: none), for this address, model and choice. */
+class Hints {
+  private readonly hints: Hint[];
+  private readonly stored: string;
+  private taken: Record<string, number>;
+  constructor(s: AiSettings) {
+    this.hints = thinkingHints(s);
+    this.stored = `ai-hints:${modelKey(s)}|${s.thinking ? 'on' : 'off'}`;
+    let kept: Record<string, number> = {};
+    try {
+      kept = JSON.parse(readStored(this.stored) ?? '{}') as Record<string, number>;
+    } catch {
+      // Asked as at first.
+    }
+    this.taken = hintsTaken.get(this.stored) ?? kept;
+  }
+  private live = () => this.hints.filter((h) => (this.taken[h.key] ?? 0) < h.values.length);
+  /** The fields to add to the request. */
+  body = () => Object.fromEntries(this.live().map((h) => [h.key, h.values[this.taken[h.key] ?? 0]]));
+  /** A rejection that names one of them: the next value (or none) next time. Longer names first (reasoning_effort). */
+  rejected(said: string): boolean {
+    const text = said.toLowerCase();
+    const hit = this.live()
+      .sort((a, b) => b.key.length - a.key.length)
+      .find((h) => text.includes(h.key));
+    if (!hit) return false;
+    this.taken = { ...this.taken, [hit.key]: (this.taken[hit.key] ?? 0) + 1 };
+    hintsTaken.set(this.stored, this.taken);
+    writeStored(this.stored, JSON.stringify(this.taken));
+    return true;
+  }
+}
+const errorText = (e: unknown) => (e instanceof Error ? e.message : '');
+
 /** A rejected output length: the model's own maximum, when the server says it. */
 const LENGTH_REJECTED = /max_tokens/i;
 /** Room for thinking and every line of every page given back (a stream allows this much); less where a model allows less. */
@@ -304,13 +370,15 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
       stream: true,
       messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
       ...(structured ? { output_config: { format: { type: 'json_schema', schema: req.schema } } } : {}),
+      ...hints.body(),
     });
   let last = '';
   // A model or server without structured output gets the request again without it (the prompt asks for JSON
   // anyway); one that allows a shorter reply, again with that length.
   let structured = formatTaken.get(modelKey(s)) !== 1;
   let length = 0;
-  for (let tries = 0; tries < 5; tries++) {
+  const hints = new Hints(s);
+  for (let tries = 0; tries < 6; tries++) {
     // With or without the /v1 that OpenAI-style addresses carry.
     const res = await post(`${trimSlash(s.url).replace(/\/v1$/, '')}/v1/messages`, {
       headers: {
@@ -329,6 +397,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
         formatTaken.set(modelKey(s), structured ? 0 : 1);
         return text;
       } catch (e) {
+        if (hints.rejected(errorText(e))) continue;
         if (!structured || !formatRejected(e)) throw e;
         structured = false;
         continue;
@@ -337,6 +406,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
     const said = await res.text().catch(() => '');
     last = `${res.status} ${said.slice(0, 200)}`;
     if (res.status !== 400) break;
+    if (hints.rejected(said)) continue;
     if (LENGTH_REJECTED.test(said) && length < MAX_TOKENS.length - 1) length++;
     else if (FORMAT_REJECTED.test(said) && structured) structured = false;
     else break;
@@ -352,11 +422,14 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
       messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
       stream: true,
       ...(format ? { response_format: format } : {}),
+      ...hints.body(),
     });
   // The schema itself where the model takes it; else plain JSON (the prompt describes it); else no format at all.
   const formats = [{ type: 'json_schema', json_schema: { name: 'document', strict: true, schema: req.schema } }, { type: 'json_object' }, null];
   let last = '';
-  for (let i = formatTaken.get(modelKey(s)) ?? 0; i < formats.length; i++) {
+  const hints = new Hints(s);
+  // Each try changes one thing: the output format, or a thinking hint the server doesn't know.
+  for (let i = formatTaken.get(modelKey(s)) ?? 0, tries = 0; i < formats.length && tries < formats.length + OFF_HINTS.length + 2; i++, tries++) {
     const res = await post(`${trimSlash(s.url)}/chat/completions`, {
       headers: { 'content-type': 'application/json', ...(s.key ? { authorization: `Bearer ${s.key}` } : {}) },
       body: body(formats[i]),
@@ -369,6 +442,10 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
         formatTaken.set(modelKey(s), i);
         return text;
       } catch (e) {
+        if (hints.rejected(errorText(e))) {
+          i--;
+          continue;
+        }
         // Rejected only once the reply had started (the error in the stream): the next format, too.
         if (i < formats.length - 1 && formatRejected(e)) continue;
         throw e;
@@ -376,6 +453,10 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
     }
     const said = await res.text().catch(() => '');
     last = `${res.status} ${said.slice(0, 200)}`;
+    if ((res.status === 400 || res.status === 422) && hints.rejected(said)) {
+      i--;
+      continue;
+    }
     // Only a rejected request format is worth another try.
     if ((res.status !== 400 && res.status !== 422) || !FORMAT_REJECTED.test(said)) break;
   }

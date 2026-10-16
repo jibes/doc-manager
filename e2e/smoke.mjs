@@ -1325,6 +1325,13 @@ async function foldersShell() {
     works && direct === 0 && http?.url === 'https://ai.test/v1/messages' && http.headers['x-api-key'] === 'sk-test' && http.body.model === 'test-model',
     `folders-shell: AI requests go through the app (${http?.url}, ${direct} from the page)`,
   );
+  // Thinking: off unless switched on (asked not to think), then the model's own (adaptive, for Anthropic).
+  check(http?.body.thinking?.type === 'disabled' && (await vis('ai-thinking').getAttribute('aria-checked')) === 'false', `ai: the model is asked not to think by default (${JSON.stringify(http?.body.thinking)})`);
+  await vis('ai-thinking').click();
+  await vis('ai-test').click();
+  await page.getByText('It works.').waitFor({ timeout: 15000 }).catch(() => {});
+  const thinking = (await page.evaluate(() => window.__shell.http))?.body.thinking;
+  check(thinking?.type === 'adaptive', `ai: …and thinks when switched on (${JSON.stringify(thinking)})`);
   await ctx.close();
 }
 

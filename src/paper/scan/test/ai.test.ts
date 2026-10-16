@@ -152,6 +152,42 @@ describe('output formats', () => {
     expect(sent.map((b) => b.response_format?.type)).toEqual(['json_schema', 'json_object', 'json_object']);
   });
 
+  it('ask not to think in every known way, and drop each one a server rejects by name (and not again)', async () => {
+    const sent: Record<string, unknown>[] = [];
+    // A strict server: knows reasoning_effort (but not "none"), rejects any other field it doesn't know.
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      sent.push(body);
+      if (body.reasoning_effort === 'none') return new Response(JSON.stringify({ error: { message: "Unsupported value: 'reasoning_effort' does not support 'none' with this model." } }), { status: 400 });
+      const unknown = ['thinking', 'chat_template_kwargs', 'enable_thinking'].find((k) => k in body);
+      if (unknown) return new Response(JSON.stringify({ error: { message: `Unrecognized request argument supplied: ${unknown}` } }), { status: 400 });
+      return new Response(sse({ choices: [{ delta: { content: answer } }] }));
+    });
+    const s = { api: 'openai' as const, url: 'https://strict.test/v1', key: 'k', model: 'gpt-test' };
+    expect((await describeWithAi(s, 'text')).sender).toBe('Musterwerke Zürich');
+    const last = sent.at(-1)!;
+    expect(last.reasoning_effort).toBe('minimal');
+    expect(['thinking', 'chat_template_kwargs', 'enable_thinking'].some((k) => k in last)).toBe(false);
+    const asked = sent.length;
+    await describeWithAi(s, 'text');
+    expect(sent.length).toBe(asked + 1);
+    expect(sent.at(-1)).toMatchObject({ reasoning_effort: 'minimal' });
+  });
+
+  it('send no thinking hints when thinking is on (the model’s default), and Anthropic’s adaptive thinking', async () => {
+    const sent: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body) as Record<string, unknown>);
+      return new Response(sse({ choices: [{ delta: { content: answer } }] }));
+    });
+    await describeWithAi({ api: 'openai', url: 'https://on.test/v1', key: 'k', model: 'm', thinking: true }, 'text');
+    expect(['reasoning_effort', 'thinking', 'chat_template_kwargs', 'enable_thinking'].some((k) => k in sent[0])).toBe(false);
+    await describeWithAi({ api: 'anthropic', url: 'https://on.test', key: 'k', model: 'm', thinking: true }, 'text').catch(() => {});
+    expect(sent[1].thinking).toEqual({ type: 'adaptive' });
+    await describeWithAi({ api: 'anthropic', url: 'https://off.test', key: 'k', model: 'm' }, 'text').catch(() => {});
+    expect(sent[2].thinking).toEqual({ type: 'disabled' });
+  });
+
   it('read an error sent with a 200 as the error', () => {
     expect(() => openAiReply(JSON.stringify({ error: { message: 'Model not found' } }))).toThrow('Model not found');
   });

@@ -461,6 +461,8 @@ export const de: Strings = {
   detailsFailed: 'Die Angaben konnten nicht gespeichert werden.',
   detailsBadDate: 'Das Datum bitte als JJJJ-MM-TT schreiben.',
   aiTitle: 'Lesen mit KI',
+  aiThinking: 'Modell nachdenken lassen',
+  aiThinkingNote: 'Aus: Das Modell soll sofort antworten – viel schneller, und zum Lesen von Seiten braucht es selten mehr. An: Es denkt nach, wie es das von sich aus täte (langsamer, bei schwieriger Handschrift manchmal besser).',
   aiNote: 'Scans und hinzugefügte Dokumente können von einem KI-Modell unter einer Adresse deiner Wahl gelesen werden: Es berichtigt den Text, liest Handschrift und benennt die Datei. Seiten werden nur dorthin gesendet, wenn es bei einem Scan oder beim Hinzufügen an ist. Der Schlüssel bleibt auf diesem Gerät.',
   aiApi: 'API',
   aiApiAnthropic: 'Anthropic',
