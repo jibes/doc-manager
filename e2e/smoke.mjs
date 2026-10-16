@@ -522,7 +522,7 @@ async function annotations() {
   };
   await select(/^Everything comes in one way/);
   await page.getByTestId('highlight-green').click();
-  await select(/^Use Open file on the home screen/);
+  await select(/^Press \+ and choose Camera/);
   await page.getByTestId('highlight-note').click();
   await page.getByTestId('note-input').fill('Try dragging a file in');
   await page.getByTestId('note-save').click();
@@ -566,7 +566,7 @@ async function annotations() {
   await page.getByTestId('open-find').click();
   await page.getByTestId('tab-notes').click();
   await rows.first().waitFor({ timeout: 5000 });
-  const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Use Open file/.test(await rows.first().innerText());
+  const kept = (await rows.count()) === 1 && /Drop it anywhere/.test(await rows.first().innerText()) && /Press \+ and choose Camera/.test(await rows.first().innerText());
   check(kept, 'annotations: edits and deletions saved into the PDF');
   // The browser's Back with unsaved edits left the document and lost them without a word.
   await page.keyboard.press('Escape');
@@ -697,7 +697,7 @@ async function shellBridge() {
       hasLightSensor: () => true,
       light: (on) => void log.calls.push(['light', on]),
       request: (id, method) =>
-        setTimeout(() => window.dispatchEvent(new CustomEvent('tessel-shell-reply', { detail: { id, ok: true, value: method === 'folders' ? [] : { allFiles: false } } })), 10),
+        setTimeout(() => window.dispatchEvent(new CustomEvent('tessel-shell-reply', { detail: { id, ok: true, value: method === 'folders' || method === 'list' || method === 'names' ? [] : { allFiles: false } } })), 10),
     };
     // Whether the home screen was ever there to see (not under the cover) before the reader.
     window.__homeSeen = false;

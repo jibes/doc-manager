@@ -64,7 +64,7 @@ export default function Settings() {
   const tesselRoot = archive ?? APP_ROOT_ID;
   useEffect(() => {
     let alive = true;
-    if (folders.supported) void hasFolders(tesselRoot).then((x) => alive && setNested(x));
+    if (folders.supported) void hasFolders(tesselRoot).then((x) => alive && setNested(x), () => {});
     return () => {
       alive = false;
     };
