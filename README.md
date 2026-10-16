@@ -2,7 +2,9 @@
 
 **Every document, in its place.** A document manager for PDFs, without a server: no ads, no account, files stay on your devices (synced, if you like, with Syncthing). One Expo codebase: web app and Android app.
 
-Live web app: https://jibes.github.io/doc-reader/
+Live web app: https://jibes.github.io/doc-manager/
+
+(The repository was called `doc-reader` until 3.2: a web app installed from `jibes.github.io/doc-reader/` has to be installed again from the address above. Links to the old repository, and Obtainium, follow the rename by themselves.)
 
 ## Principles
 
@@ -23,7 +25,7 @@ Live web app: https://jibes.github.io/doc-reader/
 
 ## Install on Android
 
-Tessel for Android is on the [Releases](https://github.com/jibes/doc-reader/releases) page: download `tessel-x.y.z.apk` on the phone and open it (allow installs from the browser or file manager when Android asks). For automatic updates, add `https://github.com/jibes/doc-reader` in [Obtainium](https://github.com/ImranR98/Obtainium).
+Tessel for Android is on the [Releases](https://github.com/jibes/doc-manager/releases) page: download `tessel-x.y.z.apk` on the phone and open it (allow installs from the browser or file manager when Android asks). For automatic updates, add `https://github.com/jibes/doc-manager` in [Obtainium](https://github.com/ImranR98/Obtainium).
 
 The app is the web app bundled in a native shell (`shell/android`): every feature works offline, and it appears under **Open with** and **Share** for PDFs. A PDF opened from another app is shown first and filed after: the page starts the PDF engine and reads the file before the app's code runs (`public/index.html`), the app starts on a bare screen, opens the document from the bytes in hand and hands the open document to the reader (`openIncoming`, `src/paper/reader/preopened.ts`); it is only viewed, and ⋯ → Keep in Tessel (or saving something into it) copies it into Documents/Tessel. Releases are signed with this certificate (SHA-256), which Obtainium or AppVerifier can check:
 

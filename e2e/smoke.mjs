@@ -160,7 +160,7 @@ async function run(name, viewport, isMobile) {
     await page.waitForTimeout(600);
     check(parseInt(await page.getByTestId('page-label').innerText(), 10) === 7, `${name}: internal link jumps to page 7`);
     const url = await page.getByTestId('link-url').first().getAttribute('aria-label');
-    check(/github\.com\/jibes\/doc-reader/.test(url ?? ''), `${name}: external link detected (${url})`);
+    check(/github\.com\/jibes\/doc-manager/.test(url ?? ''), `${name}: external link detected (${url})`);
 
     // Download from the menu; print via the shortcut prints the PDF, not the app.
     await page.getByTestId('open-more').click();

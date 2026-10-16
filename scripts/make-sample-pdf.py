@@ -151,7 +151,7 @@ def main(out, password=None):
     ]))
     story += [table, Spacer(1, 24),
               Paragraph('Tessel is free software under the GNU AGPL. No ads, no account, no tracking. Source: '
-                        '<a href="https://github.com/jibes/doc-reader" color="#2f4f86"><u>github.com/jibes/doc-reader</u></a>',
+                        '<a href="https://github.com/jibes/doc-manager" color="#2f4f86"><u>github.com/jibes/doc-manager</u></a>',
                         lead)]
     doc.build(story)
 

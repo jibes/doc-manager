@@ -40,7 +40,7 @@ import { refreshInboxCount, useInboxCount } from '@/paper/archive/inbox';
 const newViewId = () => `v-${Date.now().toString(36)}`;
 
 /** AGPL §13: offer the source to network users. */
-const SOURCE_URL = 'https://github.com/jibes/doc-reader';
+const SOURCE_URL = 'https://github.com/jibes/doc-manager';
 
 function openRecord(doc: DocRecord) {
   // A linked file may need the browser's OK again (after a restart); ask while the tap still counts as a gesture.

@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
   s.summary        = 'Tessel PDF engine (PDFKit)'
   s.license        = 'MIT'
   s.author         = 'Tessel'
-  s.homepage       = 'https://github.com/jibes/doc-reader'
+  s.homepage       = 'https://github.com/jibes/doc-manager'
   s.platforms      = { :ios => '16.4' }
   s.swift_version  = '5.9'
   s.source         = { git: '' }
