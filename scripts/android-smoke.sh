@@ -99,8 +99,20 @@ on_fail() {
   echo "--- crashes ---"; adb logcat -d -b crash 2>/dev/null | tail -40 || true
   echo "--- app, WebView and system ---"
   grep -iE "tessel|AndroidRuntime|chromium|cr_|Renderer|ActivityManager: (Process|Killing)|lowmemorykiller" "$OUT/logcat.txt" | tail -60 || true
+  # The emulator's Play services restart now and then, and Android takes the app down with them (the WebView uses
+  # their font provider). Not the app's failure: the whole run once more, and only for that.
+  if [ -z "${SMOKE_RETRY:-}" ] && grep -qE "Killing [0-9]+:app\.tessel\.viewer/.*dying proc com\.google\.android\.gms" "$OUT/logcat.txt"; then
+    echo "--- the system stopped the app with Play services: running the smoke test again ---"
+    trap - ERR
+    # From a fresh start: the app's data, and what the first run put in Documents/Tessel, gone.
+    adb shell pm clear app.tessel.viewer >/dev/null 2>&1 || true
+    adb shell rm -rf /sdcard/Documents/Tessel >/dev/null 2>&1 || true
+    adb logcat -c || true
+    SMOKE_RETRY=1 exec "$0" "$@"
+  fi
 }
-trap 'on_fail' ERR
+ARGS=("$@")
+trap 'on_fail "${ARGS[@]}"' ERR
 
 adb install -r "$APK"
 # AI reading needs the network: without this permission every request fails ("Failed to fetch").
