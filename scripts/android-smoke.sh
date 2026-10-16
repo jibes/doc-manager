@@ -101,8 +101,14 @@ on_fail() {
   grep -iE "tessel|AndroidRuntime|chromium|cr_|Renderer|ActivityManager: (Process|Killing)|lowmemorykiller" "$OUT/logcat.txt" | tail -60 || true
   # The emulator's Play services restart now and then, and Android takes the app down with them (the WebView uses
   # their font provider). Not the app's failure: the whole run once more, and only for that.
-  if [ -z "${SMOKE_RETRY:-}" ] && grep -qE "Killing [0-9]+:app\.tessel\.viewer/.*dying proc com\.google\.android\.gms" "$OUT/logcat.txt"; then
-    echo "--- the system stopped the app with Play services: running the smoke test again ---"
+  # Likewise when the app is simply gone or behind the launcher without having crashed (no crash of it logged):
+  # the emulator took it away. A crash of the app's own is never retried.
+  local away=""
+  if ! adb logcat -d -b crash 2>/dev/null | grep -q "app.tessel.viewer"; then
+    if [ -z "$(adb shell pidof app.tessel.viewer 2>/dev/null | tr -d '\r')" ] || ! adb shell dumpsys activity activities 2>/dev/null | grep -E "mResumedActivity|topResumedActivity" | grep -q "app.tessel.viewer"; then away=1; fi
+  fi
+  if [ -z "${SMOKE_RETRY:-}" ] && { [ -n "$away" ] || grep -qE "Killing [0-9]+:app\.tessel\.viewer/.*dying proc com\.google\.android\.gms" "$OUT/logcat.txt"; }; then
+    echo "--- the system took the app away (not a crash of its own): running the smoke test again ---"
     trap - ERR
     # From a fresh start: the app's data, and what the first run put in Documents/Tessel, gone.
     adb shell pm clear app.tessel.viewer >/dev/null 2>&1 || true
