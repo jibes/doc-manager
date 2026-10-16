@@ -107,7 +107,7 @@ sleep 4
 adb exec-out screencap -p > "$OUT/2-sample.png"
 # Text view: PDFium's text extraction, running as WebAssembly in a worker inside the WebView.
 tap "Text view"
-wait_for "A file you open from elsewhere is only viewed"
+wait_for "Everything comes in one way"
 adb exec-out screencap -p > "$OUT/2b-text-view.png"
 echo "--- screen (text view) ---"; screen | head -25
 tap "Text view"
@@ -116,68 +116,29 @@ adb shell input keyevent KEYCODE_BACK
 wait_for "Welcome to Tessel"
 adb exec-out screencap -p > "$OUT/3-library.png"
 
-# Documents → Folders with all files access (granted here the way the system settings switch does): internal storage is
-# browsed by the app, documents are served to the WebView, and thumbnails are made from them.
+# The Tessel folder (Documents/Tessel) as Documents lists it: a file put there by another app (adb here, with the
+# access the system settings switch gives) is found, served to the WebView, opened, and deleted from the list.
 adb shell appops set --uid app.tessel.viewer MANAGE_EXTERNAL_STORAGE allow
-adb push e2e/fixtures/columns.pdf /sdcard/Download/smoke-columns.pdf >/dev/null
-wait_for "Folders"
-tap "Folders"
-wait_for "Add folder"
-tap "Settings"
-wait_for "Show every document on this device"
-# Below the fold on a small screen, and the dump clips off-screen bounds to the edge: the index's "Folders" link
-# scrolls its section to the top, which brings the switch into view.
-tap "Folders"
+adb shell mkdir -p /sdcard/Documents/Tessel
+adb push e2e/fixtures/columns.pdf /sdcard/Documents/Tessel/smoke-columns.pdf >/dev/null
+adb shell am force-stop app.tessel.viewer
+adb shell am start -W -n app.tessel.viewer/.MainActivity >/dev/null
+wait_for "Orderly Notes"
 sleep 3
-tap "Show every document on this device"
-sleep 2
-adb shell input keyevent KEYCODE_BACK
-wait_for "Whole device"
-tap "Whole device"
-wait_for "Download"
-tap "Download"
-wait_for "smoke-columns.pdf"
-sleep 5
-adb exec-out screencap -p > "$OUT/4-files.png"
-echo "--- screen (files) ---"; screen | head -25
-tap "smoke-columns.pdf"
+adb exec-out screencap -p > "$OUT/4-documents.png"
+echo "--- screen (documents) ---"; screen | head -25
+if ui | grep -q 'text="Folders"'; then echo "Documents still has a Folders view"; exit 1; fi
+tap "Orderly Notes"
 wait_for "Appearance"
-adb exec-out screencap -p > "$OUT/5-from-folder.png"
-
-# File operations on real storage: new folder, rename, move, delete.
+adb exec-out screencap -p > "$OUT/5-from-tessel-folder.png"
 adb shell input keyevent KEYCODE_BACK
-wait_for "smoke-columns.pdf"
-tap "New folder"
-wait_for "Cancel"
-adb shell input text Smoke
-sleep 1
-tap_last "New folder"
-on_device -d /sdcard/Download/Smoke
-hold "smoke-columns.pdf"
-# The selection bar has its own "Cancel": the dialog is up once there are two.
-tap_until "Rename" "Cancel\"" 2
-adb shell input keyevent KEYCODE_MOVE_END
-for _ in $(seq 1 30); do adb shell input keyevent KEYCODE_DEL; done
-adb shell input text smoke-renamed.pdf
-sleep 1
-echo "--- screen (rename) ---"; screen | head -30
-tap_last "Rename"
-on_device /sdcard/Download/smoke-renamed.pdf
-wait_for "smoke-renamed.pdf\""
-hold "smoke-renamed.pdf"
-tap "Move"
-wait_for "Open the folder to move to"
-tap "Smoke\""
-tap "Move here"
-on_device /sdcard/Download/Smoke/smoke-renamed.pdf
-wait_for "smoke-renamed.pdf\""
-adb exec-out screencap -p > "$OUT/6-moved.png"
-hold "smoke-renamed.pdf"
+wait_for "Orderly Notes"
+hold "Orderly Notes"
 tap_until "Delete" "Delete this item" 1
 tap_last "Delete"
 sleep 2
-if adb shell ls /sdcard/Download/Smoke/smoke-renamed.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi
-echo "--- file operations passed ---"
+if adb shell ls /sdcard/Documents/Tessel/smoke-columns.pdf 2>/dev/null; then echo "Not deleted"; exit 1; fi
+echo "--- Tessel folder passed ---"
 
 # Auto appearance: in the app it follows the light sensor (the switching itself is covered by the web e2e
 # with a simulated sensor). Light stops listening; Auto starts again. Screenshots in a dark and a bright room.

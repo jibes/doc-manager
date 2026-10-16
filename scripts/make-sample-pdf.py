@@ -22,29 +22,29 @@ ACCENT = HexColor('#2f4f86')
 RULE = HexColor('#ddd8cc')
 
 CHAPTERS = [
-    ('Opening files', 'A file you open from elsewhere is only viewed at first. Nothing leaves your device.', [
-        ('Ways to open', [
-            'Use Open file on the home screen, drop a file anywhere on the window, or choose Tessel from '
-            'your system’s Open with menu once it is installed. Such a file is only viewed; save a bookmark, '
-            'a note or a place on your reading list and you are asked to keep it first. EPUB books open too.',
-            'In Chrome and Edge, Tessel keeps the file where it is saved, so form entries, highlights and '
-            'notes are saved back into it. Elsewhere a copy goes into the Tessel folder instead.',
+    ('Adding documents', 'Everything comes in one way: from the camera or from your files, into the Tessel folder.', [
+        ('Camera or files', [
+            'Press + and choose Camera to scan paper, or Files to add PDFs you already have. Either way the '
+            'document becomes a file in the Tessel folder (in its Inbox, once you sync a folder), and pages '
+            'without text get theirs read on your device, so every document can be searched.',
+            'With AI reading set up in Settings, the same switch on each add lets the model read the text '
+            'instead. Pages that already have text are left as they are.',
         ]),
-        ('Removing a file', [
-            'Removing a document from Tessel forgets it: its copy (if it has one), its cover and its saved '
-            'position. The original file is never deleted. On a desktop, hover a row and use the bin; on a phone, press '
-            'and hold the row.',
+        ('Opened from elsewhere', [
+            'A file opened with Tessel from another app, or with Open file, is only viewed. Keep it, or save a '
+            'note or a filled form, and it is added the same way. Removing a document deletes its file (in the '
+            'Tessel folder it goes to the trash first, for 30 days).',
         ]),
     ]),
     ('Finding your way', 'Long documents stay manageable: you always know where you are and how to get anywhere.', [
         ('The scrubber', [
             'The thin line along the bottom edge is the scrubber. Drag it to move through the whole document; '
             'a preview shows the page and the chapter you are about to land on. Short ticks mark chapters, '
-            'accent ticks mark your bookmarks.',
+            'accent ticks mark pages with notes.',
         ]),
-        ('Contents, pages and bookmarks', [
-            'The list button opens Navigate. Contents shows the document’s own outline, Pages shows every '
-            'page as a thumbnail, and Bookmarks lists the pages you marked with the ribbon button.',
+        ('Contents, pages and notes', [
+            'The list button opens Navigate. Contents shows the document’s own outline and Pages shows every '
+            'page as a thumbnail. A note on a page (the note button, or B) is saved in the file itself.',
             'Tap the page number at the bottom to type a page and jump straight to it. Links work too: '
             'this one goes to <a href="#ch5" color="#2f4f86"><u>Keyboard shortcuts</u></a>.',
         ]),
@@ -54,18 +54,17 @@ CHAPTERS = [
             'step through matches while you look at the page. Clear it to remove the highlights.',
         ]),
     ]),
-    ('The reading list', 'Most files are for checking. Some are for reading. Tessel treats them differently.', [
-        ('Adding a document', [
-            'Use the book button in the viewer, or pick documents in Documents, to add them to your reading list. '
-            'Reading-list documents appear at the top of the home screen with their progress, and the one '
-            'you read last waits in a Continue card.',
+    ('Finding documents', 'No folders to file into: one list, searched by what documents say and who sent them.', [
+        ('One list', [
+            'Documents lists everything in the Tessel folder, last opened first. Search finds words inside '
+            'every document; the filter narrows by tag, sender, type and year, and a search or filter can be '
+            'saved as a view. Details (title, sender, type, date, tags) are written into the PDF itself.',
         ]),
-        ('Reading behaviour', [
-            'While you read a document from your reading list, the toolbars step aside as you move forward '
-            'and come back when you scroll up or tap the page. The page indicator also shows how far you '
-            'are. Ordinary documents keep their toolbars visible at all times.',
-            'Reach the last page and the document moves to Finished. Tessel remembers where you left off in '
-            'every file, on the list or not.',
+        ('Sources and duplicates', [
+            'Folders you add in Settings are sources: their PDFs are listed on the Sources side, searched too, '
+            'and can be kept in Tessel. A search on one side says what the other has.',
+            'Documents there twice, or older versions of one, are listed under More → Duplicates, with the '
+            'space removing the others frees.',
         ]),
     ]),
     ('Making it comfortable', 'Pages should look right in a bright office and in a dark room.', [
@@ -79,7 +78,7 @@ CHAPTERS = [
 
 SHORTCUTS = [
     ('Search', '⌘F / Ctrl F'), ('Next / previous match', '⌘G / ⇧⌘G or F3'), ('Contents', 'T'),
-    ('Bookmark page', 'B'), ('Next / previous page', '→  ←'), ('Scroll', '↑ ↓  J K  Space'),
+    ('Note on this page', 'B'), ('Next / previous page', '→  ←'), ('Scroll', '↑ ↓  J K  Space'),
     ('First / last page', 'Home  End'), ('Zoom in / out / reset', '⌘+  ⌘−  ⌘0'), ('Close panel, go back', 'Esc'),
 ]
 

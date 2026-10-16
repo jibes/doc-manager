@@ -131,7 +131,7 @@ async function run(name, viewport, isMobile) {
   if (!isMobile) {
     // Text layer: drag-select a heading and read the selection back.
     await page.waitForSelector('[data-testid=text-layer] span', { timeout: 10000 });
-    const span = page.locator('[data-testid=text-layer] span', { hasText: /^Opening files$/ }).first();
+    const span = page.locator('[data-testid=text-layer] span', { hasText: /^Adding documents$/ }).first();
     await span.scrollIntoViewIfNeeded();
     const sb = await span.boundingBox();
     await page.mouse.move(sb.x + 1, sb.y + sb.height / 2);
@@ -139,7 +139,7 @@ async function run(name, viewport, isMobile) {
     await page.mouse.move(sb.x + sb.width - 1, sb.y + sb.height / 2, { steps: 6 });
     await page.mouse.up();
     const sel = await page.evaluate(() => getSelection().toString().trim());
-    check(sel === 'Opening files', `${name}: text selection → "${sel}"`);
+    check(sel === 'Adding documents', `${name}: text selection → "${sel}"`);
     await page.evaluate(() => getSelection().removeAllRanges());
 
     // Links: internal jumps; external is exposed with its URL.
@@ -201,10 +201,10 @@ async function run(name, viewport, isMobile) {
   await page.getByTestId('find-panel').waitFor();
   await page.waitForTimeout(400);
   await shot('3-contents');
-  await page.getByTestId('find-panel').getByText('The reading list', { exact: true }).click();
+  await page.getByTestId('find-panel').getByText('Finding documents', { exact: true }).click();
   await page.waitForTimeout(500);
   const afterToc = await page.getByTestId('page-label').innerText().catch(() => '');
-  check(parseInt(afterToc, 10) === 5, `${name}: TOC jump to "The reading list" → page ${parseInt(afterToc, 10)}`);
+  check(parseInt(afterToc, 10) === 5, `${name}: TOC jump to "Finding documents" → page ${parseInt(afterToc, 10)}`);
   if (!isMobile) await page.getByTestId('open-find').click();
 
   await reveal();
