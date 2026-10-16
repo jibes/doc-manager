@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-import { t } from '@/i18n';
+import { t } from '@/core/i18n';
 
 const web = Platform.OS === 'web' && typeof navigator !== 'undefined';
 const mac = web && /Mac|iPhone|iPad/.test(navigator.platform);
