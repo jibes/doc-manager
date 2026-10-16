@@ -10,7 +10,9 @@ mkdirSync(OUT, { recursive: true });
 
 // Use a preinstalled Chromium when present, else Playwright's own (`npx playwright-core install chromium`).
 const preinstalled = process.env.CHROMIUM ?? '/opt/pw-browsers/chromium';
-const browser = await chromium.launch(existsSync(preinstalled) ? { executablePath: preinstalled } : {});
+// A UTF-8 locale, as CI has: without one, Chromium can't give files in its own storage names like “Zürich”.
+const env = { ...process.env, LANG: process.env.LANG || 'C.UTF-8' };
+const browser = await chromium.launch(existsSync(preinstalled) ? { executablePath: preinstalled, env } : { env });
 const errors = [];
 let failures = 0;
 
@@ -1349,11 +1351,14 @@ async function aiReading() {
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
   const sent = [];
   let failing = false;
+  // A slow model: the scan is open (and says it is being read) before the answer comes.
+  let slow = 0;
   await ctx.route('https://ai.test/**', async (route) => {
     const req = route.request();
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     const body = req.postDataJSON();
     sent.push({ url: req.url(), headers: req.headers(), body });
+    if (slow) await new Promise((r) => setTimeout(r, slow));
     if (failing) return route.fulfill({ status: 500, headers: cors, body: 'down for maintenance' });
     const text = JSON.stringify(reply);
     if (req.url().endsWith('/v1/messages')) {
@@ -1397,15 +1402,33 @@ async function aiReading() {
   check((await vis('scan-ai').getAttribute('aria-checked')) === 'false', 'ai: reading with AI starts off for a scan');
   await vis('scan-ai').click();
   check((await vis('scan-ai').getAttribute('aria-checked')) === 'true' && (await page.getByText(/Sends the pages to ai\.test/).count()) > 0, 'ai: the scan offers AI reading, naming the host');
+  slow = 4000;
+  const asked = sent.length;
   await vis('scan-save').click();
+  // Saved and opened at once; the model reads it in the background, and the reader says so until it is done.
   await page.waitForURL(/\/read\//, { timeout: 300000 });
-  const call = sent.at(-1);
+  const told = await page.getByTestId('searchable-progress').waitFor({ timeout: 15000 }).then(() => page.getByTestId('searchable-progress').innerText(), () => '');
+  check(/AI|text/i.test(told), `ai: the scan opens at once, saying it is being read (${told})`);
+  await page.getByTestId('searchable-progress').waitFor({ state: 'detached', timeout: 60000 }).catch(() => {});
+  slow = 0;
+  const call = sent.slice(asked).find((c) => c.body.messages?.[0]?.content?.some((x) => x.type === 'image'));
   const content = call?.body.messages?.[0]?.content ?? [];
   check(content.some((c) => c.type === 'image' && c.source?.data?.length > 1000) && /1\.1\t/.test(content.at(-1)?.text ?? ''), 'ai: the page image and the device’s lines are sent');
   await page.goto(BASE);
   await docRows(page).first().waitFor();
-  const row = await docRows(page).first().innerText();
-  check(row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'), `ai: the model names the file (${row.replace(/\n/g, ' · ')})`);
+  let row = '';
+  for (let i = 0; i < 40 && !row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'); i++) row = await page.waitForTimeout(500).then(() => docRows(page).first().innerText());
+  check(row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'), `ai: the model names the document (${row.replace(/\n/g, ' · ')})`);
+  const named = await page.evaluate(async () => {
+    const names = [];
+    const walk = async (dir) => {
+      for await (const [n, e] of dir.entries()) if (e.kind === 'file') names.push(n);
+      else if (!n.startsWith('.')) await walk(e);
+    };
+    await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle('Tessel').catch(() => navigator.storage.getDirectory()));
+    return names;
+  });
+  check(named.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217.pdf'), `ai: …and its file (${named})`);
   await docRows(page).first().click();
   await switchView(page);
   await page.waitForFunction(() => /bez zum 30\.10\.2026/.test(document.body.innerText) && /ACME Instruments GmbH/.test(document.body.innerText), null, { timeout: 30000 }).then(
@@ -1427,12 +1450,15 @@ async function aiReading() {
   await vis('scan-ai').click();
   await vis('scan-title').fill('Offline');
   await vis('scan-save').click();
-  await page.getByText('AI reading failed').waitFor({ timeout: 300000 }).then(() => check(true, 'ai: a failure is reported'), () => check(false, 'ai: a failure is reported'));
+  await page.waitForURL(/\/read\//, { timeout: 300000 });
+  check(true, 'ai: the scan is saved anyway');
+  await page.getByTestId('searchable-progress').waitFor({ timeout: 15000 }).catch(() => {});
+  await page.getByTestId('searchable-progress').waitFor({ state: 'detached', timeout: 60000 }).catch(() => {});
   const oa = sent.at(-1);
   check(oa?.url === 'https://ai.test/v1/chat/completions' && oa?.headers.authorization === 'Bearer sk-test' && oa?.body.messages[0].content.some((c) => c.type === 'image_url'), 'ai: OpenAI-compatible request to /chat/completions with the image');
-  await page.getByTestId('ask-confirm').click();
-  await page.waitForURL(/\/read\//, { timeout: 30000 });
-  check(true, 'ai: the scan is saved anyway');
+  // Back in Documents (the app still open): told the model couldn't, the scan keeping the device's text.
+  await page.getByTestId('back').locator('visible=true').click();
+  await page.getByText(/The model couldn’t read 1 document/).waitFor({ timeout: 30000 }).then(() => check(true, 'ai: a failure is reported'), () => check(false, 'ai: a failure is reported'));
   await ctx.close();
 }
 
@@ -1848,10 +1874,14 @@ async function searchable() {
   const vis = (id) => page.getByTestId(id).locator('visible=true');
   page.on('pageerror', (e) => errors.push(`searchable: ${e.message}`));
 
-  await openFixture(page, 'scan.pdf');
+  // Asked for (a document only viewed: kept first), read in the background while it stays open.
+  await openFixture(page, 'scan.pdf', { view: true });
   await page.waitForTimeout(800);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-searchable').click();
+  await page.getByTestId('ask-confirm').click();
+  const told = await page.getByTestId('searchable-progress').waitFor({ timeout: 15000 }).then(() => true, () => false);
+  check(told, 'searchable: the reader says the text is being read');
   await page.getByText('Text added: the document can now be searched, selected and copied.').waitFor({ timeout: 180000 });
   await page.waitForSelector('[data-testid=text-layer] span', { timeout: 15000 });
   const text = await page.$$eval('[data-testid=text-layer] span', (s) => s.map((x) => x.textContent).join(' '));
@@ -1866,19 +1896,21 @@ async function searchable() {
   await mixed.setFiles(new URL('./fixtures/mixed.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
-  await page.waitForTimeout(3500);
-  await page.getByTestId('open-more').click();
-  const offered = (await page.getByTestId('menu-searchable').count()) === 1;
-  check(offered, 'searchable: offered for a document whose later pages are scans');
-  if (offered) {
-    await page.getByTestId('menu-searchable').click();
-    await page.getByText('Text added: the document can now be searched, selected and copied.').waitFor({ timeout: 180000 });
-    await page.getByTestId('open-find').click();
-    await page.getByTestId('search-input').fill('quick brown');
-    const found = await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 15000 }).then(() => true, () => false);
-    check(found, 'searchable: …and its scanned page can then be searched');
-    await page.keyboard.press('Escape');
-  } else await page.keyboard.press('Escape');
+  // Kept: its scanned pages are read by themselves, in the background, and the document opens again with them;
+  // the app closed meanwhile (here: reloaded), the reading goes on when it is opened again.
+  await page.getByTestId('searchable-progress').waitFor({ timeout: 15000 }).catch(() => {});
+  await page.goto(BASE);
+  await docRows(page).first().click();
+  await page.getByTestId('reader').waitFor();
+  // Read on (or already done while Documents showed): either way it ends with the text in the file.
+  await page.getByText('Text added: the document can now be searched, selected and copied.').waitFor({ timeout: 20000 }).catch(() => {});
+  await page.getByTestId('searchable-progress').waitFor({ state: 'detached', timeout: 180000 }).catch(() => {});
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('search-input').fill('quick brown');
+  const found = await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 15000 }).then(() => true, () => false);
+  check(found, 'searchable: a kept document whose later pages are scans gets their text by itself, even after a reload');
+  await page.keyboard.press('Escape');
 
   // The inbox reads an image-only document's first page for its details, and files it searchable.
   const b64 = readFileSync(new URL('./fixtures/scan.pdf', import.meta.url)).toString('base64');
@@ -2726,6 +2758,10 @@ async function improve() {
   };
   const run = async () => {
     await closeFind();
+    // Read as it was added (or the last time) first: Improve is offered once that is done.
+    await page.getByTestId('searchable-progress').waitFor({ state: 'detached', timeout: 180000 }).catch(() => {});
+    await page.getByTestId('reader').waitFor();
+    await page.waitForTimeout(500);
     await page.getByTestId('open-more').click();
     await page.getByTestId('menu-improve').click();
     const asked = await page.getByText(/go to ai\.test as images/).waitFor({ timeout: 5000 }).then(() => true, () => false);

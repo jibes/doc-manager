@@ -24,6 +24,7 @@ import { useAmbientLight } from '@/paper/state/ambient';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { schedule, startIndexing } from '@/paper/archive/indexer';
 import { refreshInboxCount } from '@/paper/archive/inbox';
+import { resumeReading } from '@/paper/archive/intake';
 import { useLibrary, type ImportItem } from '@/paper/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -57,7 +58,8 @@ export default function RootLayout() {
   // Search across documents: the index is built in the background, and again when the library changes.
   useEffect(() => {
     // Every screen works with the library (opening, deleting, the reading list), whichever the app starts on.
-    void useLibrary.getState().load();
+    // Text left to read when the app last closed is read now, whichever screen it opens on.
+    void useLibrary.getState().load().then(resumeReading);
     startIndexing();
     void refreshInboxCount();
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void refreshInboxCount());

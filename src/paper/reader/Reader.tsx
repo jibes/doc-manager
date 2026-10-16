@@ -18,7 +18,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { aiMessage, opError, t } from '@/core/i18n';
+import { opError, t } from '@/core/i18n';
 import { Button, IconButton, T } from '@/paper/components/primitives';
 import { Toast } from '@/paper/components/Toast';
 import { fonts, radius, space } from '@/core/design/tokens';
@@ -31,16 +31,15 @@ import { libraryActions } from '@/paper/state/library';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { repo, type DocRecord } from '@/core/storage';
 import { detailsOf, saveDetails } from '@/paper/archive/details';
-import { readAdded, useIntake } from '@/paper/archive/intake';
+import { editing, readAdded, readText, useIntake } from '@/paper/archive/intake';
 import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/paper/archive/indexer';
 import type { IndexedDoc } from '@/paper/archive/search';
 import { useThrottled } from '@/core/lib/useThrottled';
 import { inboxDir, refreshInboxCount } from '@/paper/archive/inbox';
 import { docKey } from '@/paper/archive/docKey';
 import { folders } from '@/core/lib/folders';
-import { anyPageWithoutText, makeSearchable, pagesWithoutText } from '@/paper/archive/searchable';
-import { improveWithAi } from '@/paper/archive/improve';
-import { aiHost, aiReady, type AiSettings } from '@/paper/scan/ai';
+import { anyPageWithoutText, pagesWithoutText } from '@/paper/archive/searchable';
+import { aiHost, aiReady } from '@/paper/scan/ai';
 import type { Details } from '@/paper/archive/pdfInfo';
 import { AppearancePanel } from './AppearancePanel';
 import { DetailsPanel } from './DetailsPanel';
@@ -98,43 +97,6 @@ async function keptInArchive(doc: DocRecord, handle: DocHandle, archive: string)
   await libraryActions().linkTo(doc.id, { name: entry.name, size: bytes.byteLength, handle: entry.handle, link: entry.uri });
 }
 
-/** The pages' text read again by the model and written into the file (see textAdded for what it came to). */
-async function textImproved(id: string, handle: DocHandle, ai: AiSettings, onProgress: (done: number, total: number) => void, signal: AbortSignal): Promise<TextAdded & { said?: string }> {
-  let started = false;
-  try {
-    if (!(await repo.requestAccess(id, true))) return { done: false, message: t.improveFailed(t.writeDenied), started };
-    started = true;
-    const result = await improveWithAi(handle, ai, onProgress, signal);
-    if (!result) return { done: false, message: t.improveNothing, started: false };
-    await repo.writeFile(id, result.bytes);
-    return { done: true, said: t.improveDone(result.pages, result.skipped) };
-  } catch (e) {
-    if (signal.aborted) return { done: false, message: t.improveStopped, started: false };
-    const m = e instanceof Error ? e.message : String(e);
-    const why = m === 'denied' ? t.writeDenied : /Could not write the text/.test(m) ? t.searchableNoWrite : /can.t be read here/.test(m) ? t.searchableNoPages : aiMessage(e);
-    return { done: false, message: t.improveFailed(why), started: false };
-  }
-}
-
-/** What making a document searchable came to. `started`: the open document may have the text and the file not. */
-type TextAdded = { done: true } | { done: false; message: string; started: boolean };
-
-async function textAdded(id: string, handle: DocHandle, onProgress: (done: number, total: number) => void): Promise<TextAdded> {
-  let started = false;
-  try {
-    if (!(await repo.requestAccess(id, true))) return { done: false, message: t.searchableFailed(t.writeDenied), started };
-    started = true;
-    const bytes = await makeSearchable(handle, onProgress);
-    if (typeof bytes === 'string') return { done: false, message: bytes === 'has-text' ? t.searchableNothing : t.searchableNone, started: false };
-    await repo.writeFile(id, bytes);
-    return { done: true };
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const why = m === 'denied' ? t.writeDenied : /Could not write the text/.test(m) ? t.searchableNoWrite : /can.t be read here/.test(m) ? t.searchableNoPages : m;
-    return { done: false, message: t.searchableFailed(why), started };
-  }
-}
-
 export function Reader({
   doc,
   handle,
@@ -168,6 +130,11 @@ export function Reader({
   // Only the reader in front takes keys and Back: another one opened over it (a file dropped) leaves this one mounted underneath.
   const focused = useIsFocused();
   const edits = useEdits(doc, handle, focused);
+  // Text read in the background waits for unsaved changes (one would be written over the other).
+  useEffect(() => {
+    editing(doc.id, edits.dirty);
+    return () => editing(doc.id, false);
+  }, [doc.id, edits.dirty]);
   // A message from before the reopen, shown by this reader once (read while rendering, which may happen twice:
   // it is let go once the reader is up).
   const [reloaded, setReloaded] = useState(() => afterReload);
@@ -244,15 +211,25 @@ export function Reader({
 
   // A PDF with pages without text (a scan, or scanned pages after typed ones) can get their text read and added.
   const [textless, setTextless] = useState(false);
-  // Reading text: on the device (Make searchable) or by the model (Improve text with AI).
-  const [reading, setReading] = useState<{ done: number; total: number; ai?: boolean } | null>(null);
+  // Reading text, in the background (Make searchable, Improve text with AI, or as it was added): shown while it
+  // waits or is read; the document opens again with its text once it is in the file.
   const ai = usePrefs((s) => s.ai);
   const canImprove = Platform.OS === 'web' && aiReady(ai);
-  // Being read as it was added: not offered again meanwhile.
   const intakeBusy = useIntake((s) => s.waiting.includes(doc.id));
-  // Leaving the document stops a reading by the model.
-  const stopImproving = useRef<AbortController | null>(null);
-  useEffect(() => () => stopImproving.current?.abort(), []);
+  const reading = useIntake((s) => (s.reading?.id === doc.id ? s.reading : null));
+  useEffect(
+    () =>
+      useIntake.subscribe((s, before) => {
+        const f = s.finished;
+        if (!f || f === before.finished || f.id !== doc.id) return;
+        if (!f.changed) return f.said && setReloaded(f.said);
+        invalidate(doc.id);
+        afterReload = f.said;
+        if (onReload) onReload();
+        else if (f.said) setReloaded(f.said);
+      }),
+    [doc.id, onReload],
+  );
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     let alive = true;
@@ -265,38 +242,16 @@ export function Reader({
     };
   }, [handle, doc.format]);
   const improveText = async () => {
-    if (reading || !(await libraryActions().ensureKept(doc.id))) return;
+    if (intakeBusy || !(await libraryActions().ensureKept(doc.id))) return;
     const yes = await ask({ title: t.improveAsk, body: t.improveAskBody(handle.pageCount, aiHost(ai)), confirm: t.improveGo });
     if (yes === null) return;
-    const stop = new AbortController();
-    stopImproving.current = stop;
-    setReading({ done: 0, total: 0, ai: true });
-    const result = await textImproved(doc.id, handle, ai, (done, total) => setReading({ done, total, ai: true }), stop.signal);
-    stopImproving.current = null;
-    setReading(null);
-    if (stop.signal.aborted && !result.done) return;
-    if (result.done) {
-      invalidate(doc.id);
-      afterReload = result.said ?? t.searchableDone;
-      if (onReload) onReload();
-      else setReloaded(afterReload);
-    } else setReloaded(result.message);
+    const rec = libraryActions().docs.find((d) => d.id === doc.id);
+    if (rec) readText(rec, true);
   };
   const addText = async () => {
-    if (reading || !(await libraryActions().ensureKept(doc.id))) return;
-    setReading({ done: 0, total: 0 });
-    const result = await textAdded(doc.id, handle, (done, total) => setReading({ done, total }));
-    setReading(null);
-    if (result.done) {
-      invalidate(doc.id);
-      afterReload = t.searchableDone;
-      if (onReload) onReload();
-      else setReloaded(t.searchableDone);
-    } else if (result.started && onReload) {
-      // Once reading started, the open document may have the text and the file not: it is opened again.
-      afterReload = result.message;
-      onReload();
-    } else setReloaded(result.message);
+    if (intakeBusy || !(await libraryActions().ensureKept(doc.id))) return;
+    const rec = libraryActions().docs.find((d) => d.id === doc.id);
+    if (rec) readText(rec, false);
   };
 
   const list = useRef<FlatList<number>>(null);
@@ -1133,10 +1088,18 @@ export function Reader({
       {panel === 'details' && (
         <DetailsPanel palette={p} initial={detailsOf(handle, doc.title)} busy={savingDetails} onSave={(d) => void writeDetails(d)} onClose={() => setPanel(null)} />
       )}
-      {reading && (
+      {intakeBusy && (
         <View pointerEvents="none" testID="searchable-progress" style={[styles.reading, { top: insets.top + TOP_BAR + space.md, backgroundColor: p.glass, borderColor: p.hairline }]}>
           <T v="caption" color={p.ink}>
-            {reading.ai ? (reading.total ? t.improveProgress(reading.done, reading.total) : t.improveWithAi) : reading.total ? t.searchableProgress(reading.done, reading.total) : t.makeSearchable}
+            {!reading
+              ? t.readingWaiting
+              : reading.ai
+                ? reading.total
+                  ? t.improveProgress(reading.done, reading.total)
+                  : t.improveWithAi
+                : reading.total
+                  ? t.searchableProgress(reading.done, reading.total)
+                  : t.makeSearchable}
           </T>
         </View>
       )}

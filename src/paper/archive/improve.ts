@@ -1,6 +1,6 @@
 import type { DocHandle, PageWords } from '@/core/engine/types';
 import { anySignal } from '@/core/lib/signals';
-import { applyReading, pageLines, readWithAi, type AiPage, type AiSettings } from '@/paper/scan/ai';
+import { applyReading, pageLines, readWithAi, type AiDescription, type AiPage, type AiSettings } from '@/paper/scan/ai';
 import type { PdfWord } from '@/paper/scan/engine/pdf/writer';
 import { readPage } from './searchable';
 
@@ -65,8 +65,10 @@ export async function improveWithAi(
   ai: AiSettings,
   onProgress: (done: number, total: number) => void,
   signal?: AbortSignal,
-): Promise<{ bytes: ArrayBuffer; pages: number; skipped: number } | null> {
+): Promise<{ bytes: ArrayBuffer; pages: number; skipped: number; found?: AiDescription } | null> {
   const out: PageWords[] = [];
+  // What the model says the document is (its first pages say it best).
+  let found: AiDescription | undefined;
   let skipped = 0;
   let read = 0;
   const send = async (batch: Improvable[]) => {
@@ -82,6 +84,10 @@ export async function improveWithAi(
       })),
     );
     const reading = await readWithAi(ai, sent, anySignal([signal, AbortSignal.timeout(aiTime(batch.length))]));
+    if (!found) {
+      const { pages: _pages, ...description } = reading;
+      found = description;
+    }
     sized.forEach((b, i) => {
       const words = reading.pages[i] ? fromPixels(applyReading(b.px, i, reading.pages[i], ACROSS, b.h), b.h) : b.words;
       out.push({ page: b.page, words, replace: b.layer });
@@ -106,5 +112,5 @@ export async function improveWithAi(
   }
   if (batch.length) await send(batch);
   if (!read) return null;
-  return { bytes: await handle.addTextLayer(out), pages: read, skipped };
+  return { bytes: await handle.addTextLayer(out), pages: read, skipped, found };
 }

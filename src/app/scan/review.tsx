@@ -15,6 +15,7 @@ import type { FilterId } from '@/paper/scan/engine/imaging/filters';
 import { isBlurred } from '@/paper/scan/engine/imaging/sharpness';
 import { defaultTitle } from '@/paper/scan/export';
 import { prefetchExports } from '@/paper/scan/exportCache';
+import { readAdded } from '@/paper/archive/intake';
 import { saveScan, type SaveProgress } from '@/paper/scan/save';
 import { aiHost, aiReady } from '@/paper/scan/ai';
 import { sayScan, useScan, useScanMessage, useScanSaving } from '@/paper/scan/session';
@@ -140,11 +141,12 @@ export default function ScanReview() {
     // The pages being saved: only they leave the scan when it is saved.
     const saved = pages.map((pg) => pg.id);
     const run = async () => {
-      const { doc, aiError, unread } = await saveScan(pages, scan, title, placeholder, null, setProgress, controller.signal, aiOffered && aiRead ? ai : undefined);
+      const { doc, unread } = await saveScan(pages, scan, title, placeholder, null, setProgress, controller.signal);
       clear(saved);
+      // The model reads it in the background (the document opens meanwhile, and says so); untitled, it names it.
+      if (doc && aiOffered && aiRead) readAdded([doc], true, { name: !title.trim() });
       // Moved on meanwhile (the camera, say): the document is in the library; nothing takes the user away.
       if (!here.current) return;
-      if (aiError) await ask({ title: t.scanAiFailedTitle, body: t.scanAiFailed(aiError), confirm: t.done });
       if (unread) await ask({ title: t.scanUnreadTitle(unread), body: t.ocrFailed, confirm: t.done });
       if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
       else router.replace('/');
@@ -325,11 +327,7 @@ export default function ScanReview() {
             ) : progress ? (
               <>
                 <T testID="scan-progress" v="label" color={p.inkSoft} style={{ flex: 1 }}>
-                  {progress.phase === 'ai'
-                    ? t.scanAiReading(progress.total)
-                    : progress.phase === 'read'
-                      ? t.scanReading(progress.done + 1, progress.total)
-                      : t.scanPreparing(Math.min(progress.done + 1, progress.total), progress.total)}
+                  {progress.phase === 'read' ? t.scanReading(progress.done + 1, progress.total) : t.scanPreparing(Math.min(progress.done + 1, progress.total), progress.total)}
                 </T>
                 <Button kind="quiet" label={t.cancel} onPress={() => saving?.abort()} />
               </>
