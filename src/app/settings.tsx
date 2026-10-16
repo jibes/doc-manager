@@ -16,7 +16,7 @@ import { APP_ROOT_ID } from '@/core/lib/nesting';
 import { folders } from '@/core/lib/folders';
 import { changeTessel, documentsHere, importFolder } from '@/paper/archive/tessel';
 import { shell } from '@/core/lib/shell';
-import { showActions } from '@/paper/state/actions';
+import { showActions, type Action } from '@/paper/state/actions';
 import { forget, viewedCount } from '@/paper/state/viewed';
 import { useLibrary } from '@/paper/state/library';
 import { downloadDoc } from '@/core/lib/fileActions';
@@ -123,6 +123,16 @@ export default function Settings() {
     refresh();
     schedule(300);
   };
+  // What a tap on the Tessel folder offers: one choice runs at once, two are asked.
+  const tesselOptions: Action[] = [
+    ...(folders.canAdd ? [{ key: 'tessel-choose', icon: 'folderAdd' as const, label: archive ? t.tesselChange : t.tesselChoose, onPress: () => void choose() }] : []),
+    ...(archive ? [{ key: 'tessel-device', icon: 'folder' as const, label: shell ? t.tesselUseAppFolder : t.tesselUseBrowser, onPress: () => void changeTo(null) }] : []),
+  ];
+  const onTessel = () => {
+    if (where?.locked) return void unlock();
+    if (tesselOptions.length === 1) return tesselOptions[0].onPress();
+    showActions(t.tesselFolderTitle, tesselOptions);
+  };
   const importNow = async () => {
     const n = await importFolder((done, total) => setError(t.importingFolder(done, total))).catch((e: unknown) => (setError(opError(e)), null));
     if (n !== null) setError(t.importedFolder(n));
@@ -178,24 +188,32 @@ export default function Settings() {
           <T color={p.muted}>{t.foldersUnsupported}</T>
         ) : (
           <>
-            <View testID="tessel-folder" style={[styles.card, styles.row, { backgroundColor: p.surface, borderColor: p.hairline, paddingRight: space.lg }]}>
+            {/* One row: where documents are; a tap changes it (or lets Tessel in again). */}
+            <Pressable
+              testID="tessel-folder"
+              accessibilityRole="button"
+              accessibilityLabel={`${t.tesselFolderTitle}: ${where?.name ?? (shell ? t.tesselAppFolder : t.tesselBrowser)}`}
+              disabled={!tesselOptions.length && !where?.locked}
+              onPress={onTessel}
+              style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+                styles.card,
+                styles.row,
+                { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
+              ]}
+            >
               <Icon name="folder" color={p.accent} />
               <View style={{ flex: 1, gap: 2 }}>
                 <T v="label" numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
                   {where?.name ?? (shell ? t.tesselAppFolder : t.tesselBrowser)}
                 </T>
-                <T v="caption" color={p.muted} numberOfLines={2}>
-                  {where?.name ? t.tesselChosenNote : shell ? t.tesselAppFolderNote : t.tesselBrowserNote}
+                <T v="caption" color={where?.locked ? p.accent : p.muted} numberOfLines={1}>
+                  {where?.locked ? t.tesselLocked : where?.name ? t.tesselChosenNote : shell ? t.tesselAppFolderNote : t.tesselBrowserNote}
                 </T>
               </View>
-            </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
-              {where?.locked && <Button testID="tessel-unlock" kind="quiet" label={t.allowAccess} onPress={() => void unlock()} />}
-              {folders.canAdd && <Button testID="tessel-choose" kind="quiet" icon="folderAdd" label={archive ? t.tesselChange : t.tesselChoose} onPress={() => void choose()} />}
-              {!!archive && <Button testID="tessel-device" kind="quiet" label={shell ? t.tesselUseAppFolder : t.tesselUseBrowser} onPress={() => void changeTo(null)} />}
-            </View>
+              {(tesselOptions.length > 0 || where?.locked) && <Icon name="chevronRight" size={18} color={p.muted} />}
+            </Pressable>
             <T v="caption" color={p.muted} style={styles.note}>
-              {t.tesselNote}
+              {where?.name ? `${t.tesselNote} ${t.tesselSyncNote}` : t.tesselNote}
             </T>
             {folders.canAdd && (
               <>

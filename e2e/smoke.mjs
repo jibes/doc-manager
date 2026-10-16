@@ -48,7 +48,9 @@ async function openDocs(page) {
 async function chooseTessel(page, { stay = false, answer = 'move' } = {}) {
   await page.getByTestId('home-settings').locator('visible=true').click();
   const before = await page.getByTestId('tessel-folder').locator('visible=true').innerText();
-  await page.getByTestId('tessel-choose').locator('visible=true').click();
+  // A tap on the folder: choosing is the only thing to do, or one of two (another folder, this device's own).
+  await page.getByTestId('tessel-folder').locator('visible=true').click();
+  await page.getByTestId('action-tessel-choose').click({ timeout: 1500 }).catch(() => {});
   const sheet = page.getByTestId(`action-tessel-${answer}`);
   for (let i = 0; i < 40; i++) {
     if (await sheet.count()) {
@@ -1020,7 +1022,9 @@ async function tesselFolder() {
   await page.getByTestId('back').click();
   // Back to this browser's own, leaving them where they are: Tessel lists only its folder's.
   await vis('home-settings').click();
-  await vis('tessel-device').click();
+  await vis('tessel-folder').click();
+  check((await page.getByTestId('action-tessel-choose').count()) === 1, 'tessel folder: a tap on it offers another folder or this browser');
+  await page.getByTestId('action-tessel-device').click();
   await page.getByTestId('action-tessel-leave').click();
   await page.waitForTimeout(800);
   check(/This browser/.test(await vis('tessel-folder').innerText()) && (await names('Archive'))?.length === 2, 'tessel folder: switched back, the documents stay where they were');
