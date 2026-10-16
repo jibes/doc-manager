@@ -833,7 +833,7 @@ async function tidy() {
   // Duplicates: the same file twice, and an older version.
   await vis('screen-back').click();
   let menu = '';
-  for (let i = 0; i < 60 && !/duplicate/.test(menu); i++) {
+  for (let i = 0; i < 60 && !/2 duplicates/.test(menu); i++) {
     await page.waitForTimeout(500);
     await vis('docs-more').click();
     await page.getByTestId('action-more-trash').waitFor();
