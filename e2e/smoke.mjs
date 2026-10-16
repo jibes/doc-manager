@@ -31,17 +31,27 @@ async function switchView(page) {
   await page.getByTestId('view-toggle').click();
 }
 
-/** Documents, the list (it is the app's one screen; All, not Folders). */
+/** Documents, Tessel's own (the app's one screen; the switch to Sources is there only with sources). */
 async function toReading(page) {
   await page.waitForTimeout(300);
-  await page.getByTestId('docs-all').locator('visible=true').click().catch(() => {});
+  await openDocs(page);
 }
 async function openDocs(page) {
-  await page.getByTestId('docs-all').locator('visible=true').click().catch(() => {});
+  const tessel = page.getByTestId('scope-tessel').locator('visible=true');
+  if (await tessel.count()) await tessel.click();
 }
-/** Documents → Folders: the places (archive, picked folders, the device). */
-async function openFolders(page) {
-  await page.getByTestId('docs-folders').locator('visible=true').click();
+/** Documents, the sources' side. */
+async function openSources(page) {
+  for (let i = 0; i < 40 && !(await page.getByTestId('scope-sources').locator('visible=true').count()); i++) await page.waitForTimeout(250);
+  await page.getByTestId('scope-sources').locator('visible=true').click();
+}
+/** Settings → Add folder (the picker faked by the suite), then back to Documents. */
+async function addSource(page) {
+  await page.getByTestId('home-settings').locator('visible=true').click();
+  await page.getByTestId('settings-add-folder').locator('visible=true').click();
+  await page.getByTestId('settings-folders').locator('visible=true').waitFor();
+  await page.goBack();
+  await page.getByTestId('docs-search').locator('visible=true').waitFor();
 }
 /** ⋯ → Inbox. */
 async function openInbox(page) {
@@ -786,9 +796,9 @@ async function linked() {
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'linked: opens the picked file in place');
   await page.getByTestId('back').click();
   // Kept in place: listed once, first (opened last); the guide was only viewed, so it isn't.
-  await docRows(page).first().waitFor();
-  const listed = await docRows(page).allInnerTexts();
-  check(listed.filter((r) => /Orderly Notes/.test(r)).length === 1 && /Orderly Notes/.test(listed[0]) && !listed.some((r) => /Welcome to Tessel/.test(r)), `linked: the file kept in place is listed once, first (${listed.map((r) => r.split('\n')[0])})`);
+  let listed = [];
+  for (let i = 0; i < 40 && !listed.some((r) => /Orderly Notes/.test(r)); i++) listed = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts());
+  check(listed.filter((r) => /Orderly Notes/.test(r)).length === 1 && /Orderly Notes/.test(listed[0]), `linked: the file kept in place is listed once, first (${listed.map((r) => r.split('\n')[0])})`);
   await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.getByTestId('back').click();
@@ -851,7 +861,7 @@ async function german() {
 
 // Files (desktop Chromium): a picked folder, browsed as a grid with thumbnails. The folder lives in the
 // origin-private file system, standing in for the picker (Playwright can't answer it).
-async function foldersDesktop() {
+async function sources() {
   const ctx = await newContext({ viewport: { width: 1280, height: 800 } }, { fsa: true });
   await ctx.addInitScript(() => {
     window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Library');
@@ -859,8 +869,8 @@ async function foldersDesktop() {
   const page = await ctx.newPage();
   // Screens below the top of the stack stay mounted (hidden): look at the visible one only.
   const vis = (id) => page.getByTestId(id).locator('visible=true');
-  page.on('pageerror', (e) => errors.push(`folders: ${e.message}`));
-  page.on('console', (m) => m.type() === 'error' && !/favicon|404/.test(m.text()) && errors.push(`folders: ${m.text()}`));
+  page.on('pageerror', (e) => errors.push(`sources: ${e.message}`));
+  page.on('console', (m) => m.type() === 'error' && !/favicon|404/.test(m.text()) && errors.push(`sources: ${m.text()}`));
   await page.goto(BASE);
   await page.getByText('Every document').waitFor();
   const fixture = (f) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64');
@@ -879,91 +889,55 @@ async function foldersDesktop() {
     },
     [['columns.pdf', fixture('columns.pdf')], ['notes.txt', btoa('not a document')], ['Books/book.epub', fixture('book.epub')], ['form.pdf', fixture('form.pdf')]],
   );
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  const docs = vis('folder-doc');
-  check((await docs.count()) === 2 && (await vis('folder-dir').count()) === 1, 'folders: a picked folder lists its PDFs and subfolders, nothing else');
-  const thumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.src.startsWith('blob:') && i.naturalWidth > 0).length);
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).filter((i) => i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
-  check((await thumbs()) === 2, `folders: PDFs show their first page as a thumbnail (${await thumbs()})`);
-  const names = async () => (await docs.allInnerTexts()).map((x) => x.split('\n')[0]);
-  const byName = await names();
-  await vis('sort').click();
-  await page.getByTestId('action-sort-date').click();
-  const byDate = await names();
-  check(byName[0] === 'columns' && byDate[0] === 'form', `folders: sorts by name and by date (${byName} / ${byDate})`);
-  await vis('sort-turn').click();
-  check((await names()).join() === [...byDate].reverse().join(), `folders: the arrow turns the order round (${await names()})`);
-  await vis('sort-turn').click();
-  await page.screenshot({ path: `${OUT}folders-grid.png` });
-  await vis('folder-dir').click();
-  await page.waitForTimeout(800);
-  check((await vis('folder-doc').count()) === 0, 'folders: an EPUB book in a folder is not listed');
-  await vis('screen-back').click();
-  await page.getByText('columns', { exact: true }).locator('visible=true').first().click();
-  await page.getByTestId('reader').waitFor();
-  check((await page.getByTestId('page-label').innerText()).includes('2'), 'folders: a document opens from the grid');
-  await page.goto(BASE);
-  await docRows(page).first().waitFor();
-  check(/Orderly Notes/.test(await docRows(page).first().innerText()) && (await docRows(page).filter({ hasText: 'Orderly Notes' }).count()) === 1, 'folders: an opened document is first in Documents, listed once');
-  // Thumbnails are kept: on return they come from the cache, without reading the files again.
-  await openFolders(page);
-  await vis('folder-root').click();
-  await vis('folder-grid').waitFor();
-  await page.waitForTimeout(400);
-  check((await thumbs()) === 2 && (await vis('thumb-pending').count()) === 0, 'folders: thumbnails are cached');
-  // File operations on the folder itself.
-  // Tiles show document names without their extension.
-  const text = (x) => page.getByText(x.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
-  const inOpfs = (path) =>
-    page.evaluate(async (path) => {
-      let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Library');
-      const parts = path.split('/');
-      try {
-        for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d);
-        await dir.getFileHandle(parts.at(-1)).catch(() => dir.getDirectoryHandle(parts.at(-1)));
-        return true;
-      } catch {
-        return false;
-      }
-    }, path);
-  await vis('new-folder').click();
-  await page.getByTestId('ask-input').fill('Archive');
-  await page.getByTestId('ask-confirm').click();
-  await text('Archive').waitFor({ timeout: 5000 }).catch(() => {});
-  check(await inOpfs('Archive'), 'folders: a new folder is made in the folder');
-  await text('form.pdf').click({ button: 'right' });
-  await vis('act-rename').click();
-  check((await page.getByTestId('ask-input').inputValue()) === 'form', 'folders: rename edits the name without its extension');
-  await page.getByTestId('ask-input').fill('visit');
-  await page.getByTestId('ask-confirm').click();
-  await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await inOpfs('visit.pdf')) && !(await inOpfs('form.pdf')), 'folders: right-click selects; a document can be renamed (and keeps .pdf)');
-  await text('visit.pdf').click({ button: 'right' });
-  await vis('act-move').click();
-  await text('Archive').click();
-  await vis('paste').click();
-  await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await inOpfs('Archive/visit.pdf')) && !(await inOpfs('visit.pdf')), 'folders: a document moves into another folder');
-  await page.waitForTimeout(900);
-  await text('visit.pdf').click({ button: 'right' });
-  await vis('act-copy').click();
-  await vis('screen-back').click();
-  await vis('paste').click();
-  await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await inOpfs('visit.pdf')) && (await inOpfs('Archive/visit.pdf')), 'folders: a document can be copied');
-  await text('Archive').click({ button: 'right' });
+  await addSource(page);
+  // Sources: what Tessel reads besides its own folder, one switch away; their PDFs only (no books, no folders).
+  await page.waitForTimeout(1500);
+  check((await vis('docs-folders').count()) === 0 && (await vis('scope-sources').count()) === 1, 'sources: no Folders view; Tessel | Sources instead');
+  check((await docRows(page).count()) === 0, `sources: Tessel's own documents first (none yet: ${await docRows(page).count()})`);
+  await vis('scope-sources').click();
+  for (let i = 0; i < 40 && (await docRows(page).count()) < 2; i++) await page.waitForTimeout(250);
+  const names = (await docRows(page).allInnerTexts()).map((x) => x.split('\n')[0]).sort();
+  check(names.length === 2 && names.some((n) => /Orderly Notes/.test(n)), `sources: a source's PDFs are listed, nothing else (${names})`);
+  // A search on one side says what the other has.
+  await vis('scope-tessel').click();
+  await vis('docs-search').fill('Orderly');
+  await vis('scope-other').waitFor({ timeout: 10000 }).catch(() => {});
+  check(/1 more in Sources/.test(await vis('scope-other').innerText().catch(() => '')), `sources: a search says what the other side has (${await vis('scope-other').innerText().catch(() => 'none')})`);
+  await vis('scope-other').click();
+  check((await docRows(page).count()) === 1 && (await vis('scope-sources').getAttribute('aria-checked')) === 'true', 'sources: …and goes there');
+  await vis('docs-search').fill('');
+  // A source's documents: opened, kept, shared or deleted (no copy, move or rename).
+  const columns = docRows(page).filter({ hasText: 'Orderly Notes' });
+  await columns.click({ button: 'right' });
+  check((await vis('act-keep').count()) === 1 && (await vis('act-copy').count()) === 0 && (await vis('act-move').count()) === 0 && (await vis('act-rename').count()) === 0, 'sources: keep, share and delete only');
+  await vis('act-keep').click();
+  await page.getByText(/Kept in the Tessel folder/).waitFor({ timeout: 15000 }).catch(() => {});
+  const tessel = () =>
+    page.evaluate(async () => {
+      const out = [];
+      for await (const name of (await (await navigator.storage.getDirectory()).getDirectoryHandle('Tessel')).keys()) out.push(name);
+      return out.sort();
+    });
+  check((await tessel()).includes('columns.pdf'), `sources: kept, a copy is in the Tessel folder (${await tessel()})`);
+  await vis('scope-tessel').click();
+  for (let i = 0; i < 40 && (await docRows(page).count()) < 1; i++) await page.waitForTimeout(250);
+  check((await docRows(page).filter({ hasText: 'Orderly Notes' }).count()) === 1, 'sources: …and listed in Tessel');
+  await vis('scope-sources').click();
+  const inLibrary = (name) =>
+    page.evaluate(async (name) => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Library');
+      return dir.getFileHandle(name).then(() => true, () => false);
+    }, name);
+  await docRows(page).filter({ hasNotText: 'Orderly Notes' }).first().click({ button: 'right' });
   await vis('act-delete').click();
   await page.getByTestId('ask-confirm').click();
-  await page.waitForTimeout(500);
-  check(!(await inOpfs('Archive')) && (await text('Archive').count()) === 0, 'folders: a folder can be deleted with what is in it');
-  await vis('screen-back').click();
+  await page.waitForTimeout(800);
+  check(!(await inLibrary('form.pdf')) && (await inLibrary('columns.pdf')), 'sources: a document can be deleted from its source');
   await vis('home-settings').click();
-  check((await vis('all-files').count()) === 0, 'folders: no all-files switch outside the Android app');
+  check((await vis('all-files').count()) === 0, 'sources: no whole-device switch');
   await vis('remove-folder').click();
   await page.waitForTimeout(300);
-  check((await vis('settings-folders').count()) === 0, 'folders: a folder can be removed in settings');
+  check((await vis('settings-folders').count()) === 0, 'sources: a source can be removed in Settings');
   await ctx.close();
 }
 
@@ -1132,35 +1106,33 @@ async function foldersShell() {
   const vis = (id) => page.getByTestId(id).locator('visible=true');
   // Tiles show document names without their extension.
   const text = (s) => page.getByText(s.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
-  const names = async () => (await vis('folder-grid').innerText()).split('\n');
-  const shownThumbs = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length);
+  const nodes = () => page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes));
   await page.goto(BASE);
-  await toReading(page);
   await page.getByText('Every document').waitFor();
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor({ timeout: 10000 }).catch(() => {});
-  check((await vis('folder-grid').count()) === 1, 'folders-shell: a picked folder opens (its ID survives the route)');
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length === 1, null, { timeout: 15000 }).catch(() => {});
-  check((await shownThumbs()) === 1 && !(await names()).includes('Harbour Notes'), `folders-shell: the folder is listed with a thumbnail for the PDF, without the EPUB book (${await shownThumbs()})`);
-  await page.screenshot({ path: `${OUT}folders-shell-grid.png` });
+  await addSource(page);
+  await openSources(page);
+  let listed = [];
+  for (let i = 0; i < 40 && listed.length < 2; i++) listed = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts());
+  check(listed.length === 2 && listed.some((r) => r.includes('Orderly Notes')) && listed.some((r) => r.includes('Visit request')) && !listed.some((r) => r.includes('Harbour Notes')), `folders-shell: a source's PDFs are listed, in its folders too, without the EPUB book (${listed.map((r) => r.split('\n')[0])})`);
+  await page.screenshot({ path: `${OUT}folders-shell-sources.png` });
+  const row = (title) => docRows(page).filter({ hasText: title });
   // A long press on a phone also fires a context menu, and its release a tap: the item stays selected.
-  await text('columns.pdf').click({ button: 'right' });
-  await text('columns.pdf').dispatchEvent('contextmenu');
-  await text('columns.pdf').click();
+  await row('Orderly Notes').click({ button: 'right' });
+  await row('Orderly Notes').dispatchEvent('contextmenu');
+  await row('Orderly Notes').click();
   await page.waitForTimeout(200);
   check((await page.getByText('1 selected').locator('visible=true').count()) === 1, 'folders-shell: a long press selects the item and it stays selected');
   // Held longer (a slow finger, the emulator): the menu event and the release still don't take it back.
   await vis('select-cancel').click();
   await page.waitForTimeout(900);
-  const box = await text('columns.pdf').boundingBox();
+  const box = await row('Orderly Notes').boundingBox();
   const cdp = await page.context().newCDPSession(page);
   const at = [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }];
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at });
   await page.waitForTimeout(700);
-  await text('columns.pdf').dispatchEvent('contextmenu');
+  await row('Orderly Notes').dispatchEvent('contextmenu');
   await page.waitForTimeout(900);
-  await text('columns.pdf').dispatchEvent('contextmenu');
+  await row('Orderly Notes').dispatchEvent('contextmenu');
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.waitForTimeout(300);
   check((await page.getByText('1 selected').locator('visible=true').count()) === 1, `folders-shell: held for 1.6 s, the item is still selected (${await page.getByText(/selected$/).locator('visible=true').innerText().catch(() => 'not picking')})`);
@@ -1171,144 +1143,63 @@ async function foldersShell() {
       return !!bar && [...bar.querySelectorAll('*')].every((e) => e.getBoundingClientRect().right <= innerWidth + 0.5);
     }, id);
   check(await fits('action-bar'), 'folders-shell: the selection actions fit on a phone');
+  // Shared to other apps from the bar.
+  await vis('act-share').click();
+  await page.waitForTimeout(200);
+  check((await page.evaluate(() => window.__shell.shared.length)) === 1, 'folders-shell: documents can be shared to other apps');
   // ✕ ends picking, with a touch as on a phone (it ends the touch press on the row too).
+  await page.waitForTimeout(900);
+  await row('Orderly Notes').click({ button: 'right' });
   const x = await vis('select-cancel').boundingBox();
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x.x + x.width / 2, y: x.y + x.height / 2 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.waitForTimeout(400);
   check((await page.getByText(/selected$/).locator('visible=true').count()) === 0, 'folders-shell: ✕ ends picking');
 
-  // Edits to a document opened from a folder are written back to it.
-  await text('Papers').click();
-  await text('form.pdf').click();
+  // Edits to a document opened from a source are written back to it.
+  await page.waitForTimeout(900);
+  await row('Visit request').click();
   await page.getByTestId('field-name').click();
   await page.keyboard.type('Grace Hopper');
   await page.keyboard.press('Enter');
   await page.getByTestId('save').click();
   await page.getByText('Saved to “form.pdf”').waitFor({ timeout: 5000 }).catch(() => {});
   const written = await page.evaluate(() => Object.entries(window.__shell.written).find(([u]) => u.includes('/form/'))?.[1] ?? '');
-  check(written.includes('Grace Hopper'), 'folders-shell: saving writes the filled form back to the file in its folder');
+  check(written.includes('Grace Hopper'), 'folders-shell: saving writes the filled form back to the file in its source');
   await vis('back').click();
-  await vis('screen-back').click();
 
-  // New folder, then move a document into it (via select → Move → open the folder → paste).
-  await vis('new-folder').click();
-  await page.getByTestId('ask-input').fill('Archive');
-  await page.getByTestId('ask-confirm').click();
-  await text('Archive').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('Archive'), 'folders-shell: a new folder can be made');
-  await text('columns.pdf').click();
-  await page.getByTestId('reader').waitFor();
-  await vis('back').click();
+  // Kept from a source: a copy in the Tessel folder (Documents/Tessel), listed on Tessel's side.
+  await openSources(page);
   await page.waitForTimeout(900);
-  await text('columns.pdf').click({ button: 'right' });
-  await page.screenshot({ path: `${OUT}folders-shell-select.png` });
-  await vis('act-move').click();
-  await page.screenshot({ path: `${OUT}folders-shell-paste.png` });
-  check(await fits('paste-bar'), 'folders-shell: the paste bar fits on a phone');
-  await text('Archive').click();
-  await vis('paste').click();
-  await text('columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('columns'), 'folders-shell: a document moves into another folder');
-  await vis('screen-back').click();
-  await page.waitForTimeout(300);
-  check(!(await names()).includes('columns'), 'folders-shell: …and is gone from where it was');
-  // Rename it there; the library follows the file through the move and the rename.
-  await text('Archive').click();
-  await page.locator('[data-testid="folder-doc"]:visible').first().click({ button: 'right' });
-  await vis('act-rename').click();
-  await page.getByTestId('ask-input').fill('two columns.pdf');
-  await page.getByTestId('ask-confirm').click();
-  await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('two columns'), 'folders-shell: a document can be renamed');
-  await page.goto(BASE);
-  await toReading(page);
-  await docRows(page).first().waitFor();
-  const rows = await docRows(page).allInnerTexts();
-  const row = docRows(page).filter({ hasText: 'Orderly Notes' });
-  check(rows.some((r) => r.includes('Orderly Notes')), 'folders-shell: the library keeps a moved and renamed document');
-  await row.first().click();
-  await page.getByTestId('reader').waitFor();
-  await page.waitForTimeout(500);
-  check((await page.getByTestId('open-error').count()) === 0 && (await page.getByTestId('page-label').innerText()).includes('2'), 'folders-shell: …and opens it from its new place');
-
-  // Copy back to the top folder, share, then delete the copy (and its library entry with it).
-  await page.goto(BASE);
-  await toReading(page);
-  await openFolders(page);
-  await vis('folder-root').filter({ hasText: 'Docs' }).click();
-  await text('Archive').click();
+  await row('Orderly Notes').click({ button: 'right' });
+  await vis('act-keep').click();
+  await page.getByText(/Kept in the Tessel folder/).waitFor({ timeout: 15000 }).catch(() => {});
+  const kept = (await nodes()).find((n) => n.name === 'columns.pdf' && n.parent === 'app');
+  check(!!kept && (await nodes()).some((n) => n.name === 'columns.pdf' && n.parent === 'root'), 'folders-shell: kept, a copy is in the Tessel folder and the source keeps its own');
+  await vis('scope-tessel').click();
+  for (let i = 0; i < 40 && !(await row('Orderly Notes').count()); i++) await page.waitForTimeout(250);
+  check(/Tessel folder/.test(await row('Orderly Notes').first().innerText().catch(() => '')), 'folders-shell: …and listed as Tessel’s');
+  // Deleted from a source: the file goes.
+  await openSources(page);
   await page.waitForTimeout(900);
-  await text('two columns.pdf').click({ button: 'right' });
-  await vis('act-share').click();
-  await page.waitForTimeout(200);
-  check((await page.evaluate(() => window.__shell.shared.length)) === 1, 'folders-shell: documents can be shared to other apps');
-  await page.waitForTimeout(900);
-  await text('two columns.pdf').click({ button: 'right' });
-  await vis('act-copy').click();
-  await vis('screen-back').click();
-  await vis('paste').click();
-  await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
-  check((await names()).includes('two columns'), 'folders-shell: a document can be copied to another folder');
-  await text('Archive').click();
-  await page.waitForTimeout(900);
-  await text('two columns.pdf').click({ button: 'right' });
+  await row('Visit request').click({ button: 'right' });
   await vis('act-delete').click();
   await page.getByTestId('ask-confirm').click();
-  await page.waitForTimeout(500);
-  check(!(await names()).includes('two columns'), 'folders-shell: a document can be deleted');
-  await page.goto(BASE);
-  await toReading(page);
-  await docRows(page).first().waitFor();
-  const left = await docRows(page).allInnerTexts();
-  check(!left.some((r) => r.includes('Orderly Notes')), `folders-shell: a deleted document leaves the library (${left.length} left)`);
+  await page.waitForTimeout(800);
+  check(!(await nodes()).some((n) => n.name === 'form.pdf'), 'folders-shell: a document can be deleted from its source');
 
-  // All files access (Settings): the whole device is a source, browsed by its folders (and searched).
-  await openFolders(page);
-  await vis('home-settings').click();
-  await vis('all-files').click();
-  await page.waitForTimeout(300);
-  await vis('screen-back').click();
-  await text('Whole device').waitFor({ timeout: 5000 }).catch(() => {});
-  const tesselRoots = await vis('roots-tessel').getByTestId('folder-root').allInnerTexts();
-  const sourceRoots = await vis('roots-sources').getByTestId('folder-root').allInnerTexts();
-  check(
-    tesselRoots.length === 1 && tesselRoots[0].startsWith('Tessel') && sourceRoots.map((r) => r.split('\n')[0]).sort().join() === 'Docs,Whole device',
-    `folders-shell: Folders lists the Tessel folder, then the sources: added folders and the whole device (${tesselRoots.map((r) => r.split('\n')[0])} | ${sourceRoots.map((r) => r.split('\n')[0])})`,
-  );
-  check(!(await vis('folder-root').allInnerTexts()).some((r) => /All documents|Internal storage/.test(r)), 'folders-shell: no separate “All documents” and “Internal storage”');
-  await text('Whole device').click();
-  await vis('folder-grid').waitFor();
-  check((await names()).includes('Documents'), 'folders-shell: the whole device is browsed by its folders');
-  // Documents lists what is elsewhere on the device; switched off again, it doesn't (the permission stays).
-  // Download/Leaflet.pdf is form.pdf (in Docs/Papers) again: two rows of it with the whole device, one without.
-  const visits = async (want) => {
-    await page.goto(BASE);
-    await openDocs(page);
-    const n = () => vis('archive-hit').filter({ hasText: 'Visit request' }).count();
-    for (let i = 0; i < 40 && (await n()) !== want; i++) await page.waitForTimeout(500);
-    return n();
-  };
-  check((await visits(2)) === 2, 'folders-shell: with all files access, Documents lists documents anywhere on the device');
-  await vis('home-settings').click();
-  await vis('all-files').click();
-  await page.waitForTimeout(300);
-  check((await visits(1)) === 1, 'folders-shell: switched off, Documents lists only the Tessel folder and the added folders');
-
-  // A scan saved into a folder through the app.
+  // A scan goes where anything added goes: the Tessel folder, through the app.
   await page.goto(BASE);
-  await toReading(page);
   await openScan(page);
   await page.locator('input[type=file]').setInputFiles(new URL('./fixtures/scan-photo.jpg', import.meta.url).pathname);
   await vis('scan-tile').first().waitFor({ timeout: 120000 });
   await vis('scan-title').fill('Receipt');
-  await vis('scan-destination').click();
-  await page.getByRole('radio', { name: 'Docs' }).click();
+  check((await vis('scan-destination').count()) === 0, 'folders-shell: no choice of folder for a scan');
   await vis('scan-save').click();
   await page.waitForURL(/\/read\//, { timeout: 300000 });
-  const created = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'Receipt.pdf'));
-  check(created?.parent === 'root' && created.data.startsWith('%PDF-'), 'folders-shell: a scan is saved into the folder');
-  // Details written into the file in the folder (in place, through the app).
+  const created = (await nodes()).find((n) => n.name === 'Receipt.pdf');
+  check(created?.parent === 'app' && created.data.startsWith('%PDF-'), 'folders-shell: a scan is saved into the Tessel folder');
+  // Details written into the file (in place, through the app).
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-details').click();
   await page.getByTestId('detail-sender').fill('ACME Instruments');
@@ -1316,11 +1207,12 @@ async function foldersShell() {
   await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
   // What the app was asked to write back to the file (the fake app logs it).
   const rewritten = await page.evaluate(() => Object.entries(window.__shell.written).find(([u]) => u.includes('/created/'))?.[1] ?? '');
-  check(rewritten.startsWith(created.data.slice(0, 200)) && /\/Author \(ACME Instruments\)/.test(rewritten) && rewritten.length > created.data.length, `folders-shell: details are appended to the file in its folder (${rewritten.length} bytes)`);
+  check(rewritten.startsWith(created.data.slice(0, 200)) && /\/Author \(ACME Instruments\)/.test(rewritten) && rewritten.length > created.data.length, `folders-shell: details are appended to the file (${rewritten.length} bytes)`);
   await page.goto(BASE);
   await toReading(page);
-  await docRows(page).first().waitFor();
-  check((await docRows(page).first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
+  let scans = 0;
+  for (let i = 0; i < 40 && !scans; i++) scans = await page.waitForTimeout(250).then(() => docRows(page).filter({ hasText: 'Receipt' }).count());
+  check(scans === 1, 'folders-shell: the saved scan is in the library');
 
   // A file opened from elsewhere (system picker) is only viewed; kept, it becomes a real file in Documents/Tessel.
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
@@ -1328,30 +1220,12 @@ async function foldersShell() {
   await page.waitForURL(/\/read\//, { timeout: 30000 });
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(1000);
-  const copied = () => page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes).find((n) => n.name === 'tagged.pdf'));
+  const copied = async () => (await nodes()).find((n) => n.name === 'tagged.pdf');
   check(!(await copied()), 'folders-shell: a file opened from elsewhere is only viewed (no copy made)');
   await keepOpen(page);
   await page.waitForTimeout(500);
   check((await copied())?.parent === 'app', 'folders-shell: kept, it is a file in the Tessel folder');
   await page.goto(BASE);
-  await toReading(page);
-  await openFolders(page);
-  const first = await vis('folder-root').first().innerText();
-  check(first.startsWith('Tessel'), `folders-shell: the Tessel folder is the first place in Files (${first.split('\n')[0]})`);
-  // Documents: PDFs only (a book in a folder isn't listed); the Tessel folder is this device's own storage.
-  await openDocs(page);
-  let hits = [];
-  for (let i = 0; i < 40 && hits.length === 0; i++) hits = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
-  check(hits.length > 0 && !hits.some((h) => h.includes('Harbour Notes')), `folders-shell: a book in a folder is not in Documents (${hits.map((h) => h.split('\n')[0])})`);
-  await vis('docs-filter').click();
-  await page.getByTestId('action-facet-place').click();
-  await page.getByTestId('action-place-tessel').click();
-  // The file was kept there a moment ago: the index may still be reading it.
-  let device = [];
-  for (let i = 0; i < 60 && !device.length; i++) device = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
-  check(device.length === 1 && device[0].includes('Tessel folder'), `folders-shell: a file in Documents/Tessel is in the Tessel folder (${device.map((h) => h.replace(/\n/g, ' · '))})`);
-  await vis('facet-place').click();
-  await page.getByTestId('action-place-any').click().catch(() => {});
 
   // AI reading in the app: the request is made by the app, not the WebView (no CORS, no "Failed to fetch").
   let direct = 0;
@@ -1412,7 +1286,6 @@ async function aiReading() {
   });
 
   await page.goto(BASE);
-  await openFolders(page);
   await vis('home-settings').click();
   await vis('ai-api-anthropic').click();
   // An address without its scheme would send the key to the app's own site: refused.
@@ -1452,7 +1325,6 @@ async function aiReading() {
 
   // OpenAI-compatible, and the server fails: saved anyway, with the device's text, and the user is told.
   await page.goto(BASE);
-  await openFolders(page);
   await vis('home-settings').click();
   await vis('ai-api-openai').click();
   await vis('ai-url').fill('https://ai.test/v1');
@@ -1587,9 +1459,11 @@ async function searchArchive() {
     },
     [['2026/columns.pdf', fixture('columns.pdf')], ['.stversions/old.pdf', fixture('tagged.pdf')]],
   );
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
+  await addSource(page);
+  // The folder is the Tessel folder (its documents are Tessel's own).
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('screen-back').click();
   // One document in the library too.
   await page.goto(BASE);
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
@@ -1675,9 +1549,11 @@ async function documentsScreen() {
     await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     await w.close();
   }, fixture);
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
+  await addSource(page);
+  // The folder is the Tessel folder: its documents and the kept one are Tessel's own.
+  await vis('home-settings').click();
+  await vis('archive-root').click();
+  await vis('screen-back').click();
   // A library document with details.
   await page.goto(BASE);
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
@@ -1723,7 +1599,7 @@ async function documentsScreen() {
   const offered = await page.getByTestId('action-sheet').innerText();
   await page.getByTestId('action-facet-type').click();
   await page.getByTestId('action-sheet').getByText('Rechnung · 1').click();
-  check(/Type/.test(offered) && /Place/.test(offered), `documents: the filter button lists the filters (${offered.replace(/\n/g, ' / ')})`);
+  check(/Type/.test(offered) && !/Place/.test(offered), `documents: the filter button lists the filters (no place: that is the switch) (${offered.replace(/\n/g, ' / ')})`);
   check((await count()) === '1 DOCUMENT' && /Old title/.test(await vis('archive-hit').first().innerText()) && /Rechnung/.test(await vis('facet-type').innerText()), 'documents: choosing a type narrows the list, and shows it');
   await vis('docs-filter').click();
   await page.getByTestId('action-facet-tag').click();
@@ -1731,14 +1607,13 @@ async function documentsScreen() {
   await page.getByTestId('action-any').click();
   check(tagged, 'documents: tags are counted within the chosen type');
 
-  // Save the view (this device only), then choose the archive folder: it moves into Archive/.tessel.
+  // Save the view: it is kept in Archive/.tessel.
   await vis('save-view').click();
   await page.getByTestId('ask-input').fill('Invoices');
   await page.getByTestId('ask-confirm').click();
   await page.getByText('“Invoices” saved.').waitFor();
   check((await vis('view-chip').allInnerTexts()).join() === 'Invoices', 'documents: a view is saved and shown');
   await vis('home-settings').click();
-  await vis('archive-root').click();
   await page.waitForTimeout(500);
   const stored = await page.evaluate(async () => {
     try {
@@ -1766,9 +1641,8 @@ async function documentsScreen() {
   await page.getByTestId('view-chip').filter({ hasText: 'Columns' }).waitFor({ timeout: 5000 }).catch(() => {});
   check((await vis('view-chip').allInnerTexts()).join() === 'Invoices,Columns,Here', `documents: views from the archive folder are listed (${await vis('view-chip').allInnerTexts()})`);
   await vis('view-chip').filter({ hasText: 'Here' }).click();
-  const placeShown = await vis('facet-place').innerText().catch(() => '');
   const hereOn = await vis('view-chip').filter({ hasText: 'Here' }).getAttribute('aria-pressed');
-  check(/Tessel folder/.test(placeShown) && hereOn === 'true', `documents: a view brings back where the documents are (an old view's “this device” is the Tessel folder) (${placeShown}, ${hereOn})`);
+  check(hereOn === 'true', `documents: an old view's “this device” is the Tessel folder (${hereOn})`);
   await vis('view-chip').filter({ hasText: 'Columns' }).click();
   let byText = '';
   for (let i = 0; i < 10 && byText !== '1 DOCUMENT'; i++) byText = await page.waitForTimeout(300).then(count);
@@ -1807,10 +1681,7 @@ async function inbox() {
     },
     [['scan-1.pdf', fixture('xrefstream.pdf')], ['notes.pdf', fixture('columns.pdf')]],
   );
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
+  await addSource(page);
   await vis('home-settings').click();
   await vis('archive-root').click();
   check((await vis('archive-root').getAttribute('aria-checked')) === 'true', 'settings: the archive is a mark on one of the folders');
@@ -1924,10 +1795,7 @@ async function searchable() {
     await w.close();
   }, b64);
   await page.goto(BASE);
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
+  await addSource(page);
   await vis('home-settings').click();
   await vis('archive-root').click();
   await vis('inbox-here-switch').click();
@@ -2019,19 +1887,16 @@ async function syncSafety() {
       return (await (await dir.getFileHandle(parts.at(-1))).getFile()).size;
     }, path);
 
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
+  await addSource(page);
   await vis('home-settings').click();
   await vis('archive-root').click();
   await vis('screen-back').click();
 
   // Deleting in the archive: to its trash, without asking, and undoable.
-  await openFolders(page);
-  await vis('folder-root').filter({ hasText: 'Archive' }).click();
-  await vis('folder-grid').waitFor();
-  await text('keepme.pdf').click({ button: 'right' });
+  await openDocs(page);
+  const keepme = docRows(page).filter({ hasText: 'keepme' });
+  await keepme.waitFor({ timeout: 30000 });
+  await keepme.click({ button: 'right' });
   await vis('act-delete').click();
   await page.getByText('Moved to the trash.').waitFor({ timeout: 10000 });
   check((await names('.tessel/trash')).includes('keepme.pdf') && !(await names('')).includes('keepme.pdf'), 'sync: deleting in the archive moves to its trash');
@@ -2067,11 +1932,10 @@ async function syncSafety() {
   await page.waitForTimeout(3000);
   check((await vis('sync-duplicate').count()) === 0 && (await vis('sync-conflict').count()) === 0, 'sync: resolved items stay resolved');
 
-  // The trash (Documents → Folders, under the archive): restore one, delete one for good.
+  // The trash (Documents → ⋯): restore one, delete one for good.
   await vis('screen-back').click();
-  await openFolders(page);
-  check(/synced/i.test(await vis('archive-mark').innerText()), 'sync: the archive is marked as synced, first in Folders');
-  await vis('folders-trash').click();
+  await vis('docs-more').click();
+  await page.getByTestId('action-more-trash').click();
   await vis('trash-item').first().waitFor();
   check(/30 days left|29 days left/.test(await vis('trash-item').first().innerText()), 'sync: the trash says how long each item stays');
   const before = await vis('trash-item').count();
@@ -2130,10 +1994,7 @@ async function sharedReading() {
     await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     await w.close();
   }, fixture('columns.pdf'));
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
+  await addSource(page);
   await vis('home-settings').click();
   await vis('archive-root').click();
   check((await vis('share-reading-switch').count()) === 0, 'shared: no switch for sharing reading');
@@ -2178,15 +2039,10 @@ async function places() {
     await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     await w.close();
   }, readFileSync(new URL('./fixtures/columns.pdf', import.meta.url)).toString('base64'));
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
-  await openFolders(page);
-  await vis('use-archive').click();
-  await vis('archive-mark').waitFor();
-  check(true, 'places: a folder is made the archive from Folders');
+  await addSource(page);
   await vis('home-settings').click();
+  await vis('archive-root').click();
+  check((await vis('archive-root').getAttribute('aria-checked')) === 'true', 'places: a folder is made the Tessel folder in Settings');
   await vis('inbox-here-switch').click();
   await vis('screen-back').click();
 
@@ -2213,32 +2069,23 @@ async function places() {
   const rows = await docRows(page).filter({ hasText: 'Old title' }).count();
   check(rows === 1, `places: Documents has it once (${rows})`);
   await page.waitForTimeout(500);
-  check((await vis('inbox-badge').innerText().catch(() => '')) === '1', 'places: Documents shows the inbox count');
+  check(/1 document to review/.test(await vis('inbox-review').innerText().catch(() => '')), 'places: Documents says what is waiting in the inbox');
+  await vis('inbox-review').click();
+  await page.waitForURL(/\/inbox/);
+  check(true, 'places: …and the line opens it');
+  await page.goto(BASE);
 
-  // Documents: by place.
-  await openDocs(page);
-  check((await vis('docs-inbox').innerText()).includes('1'), 'places: the inbox is the first row of Documents');
+  // Documents: Tessel's own; without sources, no switch to them.
   let all = 0;
   for (let i = 0; i < 40 && all < 2; i++) all = await page.waitForTimeout(500).then(() => vis('archive-hit').count());
-  await vis('docs-filter').click();
-  await page.getByTestId('action-facet-place').click();
-  // Two places: the Tessel folder and sources.
-  check((await page.locator('[data-testid^="action-place-"]').count()) === 3, 'places: the place filter has the Tessel folder and sources (and any)');
-  await page.getByTestId('action-place-tessel').click();
-  const archived = await vis('archive-hit').count();
-  check(all === 2 && archived === 2, `places: both are in the Tessel folder now (${all}, ${archived})`);
-  await vis('facet-place').click();
-  await page.getByTestId('action-place-sources').click();
-  check((await vis('archive-hit').count()) === 0, 'places: none in a source');
-  await vis('facet-place').click();
-  await page.getByTestId('action-place-any').click();
+  check(all === 2 && (await vis('scope-sources').count()) === 0, `places: both are in the Tessel folder, and there are no sources to switch to (${all})`);
 
   // A folder added inside the archive: adding it says so, and its files are still listed once, in the archive.
   await page.evaluate(() => {
     window.showDirectoryPicker = async () => (await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive')).getDirectoryHandle('2026');
   });
-  await openFolders(page);
-  await vis('add-folder').click();
+  await vis('home-settings').click();
+  await vis('settings-add-folder').click();
   const said = await page.getByText('“2026” is inside the Tessel folder. Its files count once, in the Tessel folder.').waitFor({ timeout: 10000 }).then(() => true, () => false);
   check(said, 'places: adding a folder inside the Tessel folder says where its files count');
   await page.goto(BASE);
@@ -2295,11 +2142,8 @@ async function manyDocs() {
       await w.close();
     }
   }, pdf);
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
-  await openDocs(page);
+  await addSource(page);
+  await openSources(page);
   for (let i = 0; i < 120 && !/^130 /.test(await vis('docs-count').innerText().catch(() => '')); i++) await page.waitForTimeout(500);
   const rows = () => vis('archive-hit').count();
   check((await vis('docs-count').innerText()).startsWith('130') && (await rows()) === 100, `many: 130 documents, the first 100 listed (${await rows()})`);
@@ -2529,17 +2373,15 @@ async function scanner() {
   check((await vis('scan-tile').count()) === 1, 'scanner: a page deleted on its own screen can be undone');
 
   await vis('scan-title').fill('Invoice ACME');
-  await vis('scan-destination').click();
-  await page.getByText(/^Other folder/).click();
-  await page.getByText('Scans').first().waitFor();
+  check((await vis('scan-destination').count()) === 0, 'scanner: no folder to choose (scans go where anything added goes)');
   await vis('scan-save').click();
   await page.waitForURL(/\/read\//, { timeout: 300000 });
   const saved = await page.evaluate(async () => {
-    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Scans');
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Tessel');
     const file = await (await dir.getFileHandle('Invoice ACME.pdf')).getFile();
     return new TextDecoder().decode((await file.slice(0, 5).arrayBuffer()));
   }).catch(() => null);
-  check(saved === '%PDF-', 'scanner: PDF written into the chosen folder');
+  check(saved === '%PDF-', 'scanner: PDF written into the Tessel folder');
   await switchView(page);
   await page.waitForFunction(() => /ACME/.test(document.body.innerText) && /INVOICE/i.test(document.body.innerText), null, { timeout: 30000 }).then(
     () => check(true, 'scanner: recognised text is in the PDF'),
@@ -2564,14 +2406,12 @@ async function tabs() {
     // One screen: Documents, with Add on it; no tab bar, no sidebar, no Reading.
     check((await page.getByTestId('tab-reading').count()) === 0 && (await page.getByTestId('tab-documents').count()) === 0 && (await page.getByTestId('side-folders').count()) === 0, `tabs (${name}): one screen, no tab bar or sidebar`);
     await vis('add-menu').click();
+    await page.getByTestId('action-add-files').waitFor();
     const offered = await page.getByTestId('action-sheet').innerText();
     check(/Camera/.test(offered) && /Files/.test(offered), `tabs (${name}): Add offers the camera and files`);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
-    await vis('docs-folders').click();
-    await vis('add-folder').first().waitFor();
-    check((await vis('add-folder').count()) === 1, `tabs (${name}): Folders offers adding folders`);
-    await vis('docs-all').click();
+    check((await vis('docs-folders').count()) === 0 && (await vis('add-folder').count()) === 0, `tabs (${name}): no Folders view (sources are added in Settings)`);
     await openScan(page);
     await page.waitForURL(/\/scan/);
     check(true, `tabs (${name}): Add → Camera opens the camera`);
@@ -2698,10 +2538,7 @@ async function batch() {
       for await (const [name, h] of dir.entries()) if (h.kind === 'file') out.push(name);
       return out.sort();
     }, path);
-  await openFolders(page);
-  await vis('add-folder').click();
-  await vis('folder-grid').waitFor();
-  await page.goto(BASE);
+  await addSource(page);
   await vis('home-settings').click();
   await vis('archive-root').click();
   await vis('screen-back').click();
@@ -2722,26 +2559,22 @@ async function batch() {
   await hit('Old title').click();
   check(/2 selected/.test(await page.getByText(/selected$/).locator('visible=true').innerText()), 'batch: documents are picked with a right click and a tap');
   check((await hit('Old title').getAttribute('aria-checked')) === 'true', 'batch: picked rows say so');
-  await vis('act-move').click();
-  check(await vis('paste-bar').isVisible(), 'batch: Move goes on to the folders to choose where');
-  await vis('folder-root').filter({ hasText: 'Archive' }).click();
-  await vis('folder-dir').filter({ hasText: 'Done' }).click();
-  await vis('paste').click();
-  await page.waitForTimeout(800);
-  check((await names('Done')).join() === 'one.pdf,three.pdf' && (await names('')).join() === 'two.pdf', `batch: both are moved into the folder (${await names('Done')})`);
+  check((await vis('act-move').count()) === 0 && (await vis('act-copy').count()) === 0, 'batch: no copy or move (Tessel has no folders)');
 
   // To the trash, and back.
   await page.goto(BASE);
   await openDocs(page);
-  for (let i = 0; i < 60 && !((await vis('archive-hit').count()) === 3 && /Done/.test((await hit('Old title').innerText().catch(() => '')))); i++) await page.waitForTimeout(500);
+  for (let i = 0; i < 60 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(900);
   await hit('Orderly Notes').click({ button: 'right' });
   await hit('Old title').click();
   await vis('act-delete').click();
   await page.getByText('Moved 2 items to the trash.').waitFor({ timeout: 10000 });
-  check((await names('Done')).length === 0 && (await vis('archive-hit').count()) === 1, 'batch: deleting in the archive goes to its trash, and leaves the list');
+  check((await names('')).join() === 'two.pdf' && (await vis('archive-hit').count()) === 1, `batch: deleting in the archive goes to its trash, and leaves the list (${await names('')})`);
   await page.getByRole('button', { name: 'Undo' }).click();
   await page.waitForTimeout(1000);
-  check((await names('Done')).join() === 'one.pdf,three.pdf', 'batch: and Undo puts them back');
+  check((await names('')).join() === 'one.pdf,three.pdf,two.pdf', 'batch: and Undo puts them back');
 
   // One layout for every list: rows or tiles, chosen with the button.
   for (let i = 0; i < 40 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
@@ -2783,7 +2616,6 @@ async function improve() {
     return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: text } }] }) });
   });
   await page.goto(BASE);
-  await openFolders(page);
   await vis('home-settings').click();
   await vis('ai-api-openai').click();
   await vis('ai-url').fill('https://ai.test/v1');
@@ -2877,7 +2709,6 @@ async function viewed() {
   // The history can be forgotten.
   await openFixture(page, 'tagged.pdf', { view: true });
   await page.getByTestId('back').click();
-  await openFolders(page);
   await vis('home-settings').click();
   await vis('viewed-forget').click();
   await page.getByText('Forgotten.').waitFor({ timeout: 5000 }).then(
@@ -2926,7 +2757,7 @@ await step('annotations', annotations);
 await step('page-notes', pageNotes);
 await step('upgrade', upgrade);
 await step('linked', linked);
-await step('folders', foldersDesktop);
+await step('sources', sources);
 await step('folders-shell', foldersShell);
 await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
 await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));
