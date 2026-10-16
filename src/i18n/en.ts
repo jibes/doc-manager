@@ -61,8 +61,8 @@ export const en = {
   untitled: 'Untitled',
   // Empty state + drop
   emptyTitle: 'Every document,\nin its place.',
-  emptyBody: 'Open a PDF or an EPUB book to start. Files stay on this device — no ads, no account.',
-  emptyBodyWeb: 'Open a PDF or an EPUB book to start, or drop one anywhere. Files stay on this device — no ads, no account.',
+  emptyBody: 'Open a PDF to look at it, or add your documents with + to keep them. Files stay on this device — no ads, no account.',
+  emptyBodyWeb: 'Open a PDF to look at it, or add your documents with + to keep them; you can drop files anywhere too. Files stay on this device — no ads, no account.',
   openSample: 'Open sample',
   dropTitle: 'Drop to add',
   dropBody: 'Files stay on this device',
@@ -182,7 +182,6 @@ export const en = {
   locateFile: 'Find the file…',
   passwordProtected: 'This PDF is password protected.',
   openFailed: 'This file couldn’t be read as a PDF.',
-  bookFailed: 'This file couldn’t be read as an EPUB book.',
   passwordTitle: 'Password required',
   passwordBody: (name: string) => `“${name}” is protected. Enter its password to open it.`,
   passwordPlaceholder: 'Password',

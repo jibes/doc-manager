@@ -31,7 +31,6 @@ export function errorText(e: unknown): string {
   if (m === t.passwordCancelled) return m;
   if (/password/i.test(m)) return t.passwordProtected;
   if (/missing from storage/i.test(m)) return t.fileMissing;
-  if (/^epub:/.test(m)) return t.bookFailed;
   return t.openFailed;
 }
 

@@ -330,7 +330,8 @@ export default function Documents() {
   const layout = useLayout();
   const column = columnWidth(mainWidth);
   const grid = gridOf(column);
-  const bottom = insets.bottom + space.xxxl + (tabBar ? TAB_BAR_H : 0) + (selected ? 72 : 0);
+  // Room for the Add button (and the action bar while picking).
+  const bottom = insets.bottom + space.xxxl + 56 + (selected ? 72 : 0);
 
   const picked = selected ? shown.filter((h) => selected.has(h.doc.key)).map((h) => h.doc) : [];
   // A long press (or right click) starts picking; taps then add and remove.
