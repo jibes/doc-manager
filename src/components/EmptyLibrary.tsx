@@ -44,7 +44,7 @@ export function EmptyLibrary({ onAdd, onSample }: { onAdd: () => void; onSample:
         </T>
       </Animated.View>
       <Animated.View entering={FadeInUp.delay(220).duration(500)} style={styles.actions}>
-        <Button testID="add" label={t.addPdf} icon="plus" onPress={onAdd} />
+        <Button testID="add-empty" label={t.addPdf} icon="plus" onPress={onAdd} />
         <Button testID="sample" label={t.openSample} kind="quiet" onPress={onSample} />
       </Animated.View>
     </View>

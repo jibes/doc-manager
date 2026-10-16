@@ -120,7 +120,6 @@ adb exec-out screencap -p > "$OUT/3-library.png"
 # browsed by the app, documents are served to the WebView, and thumbnails are made from them.
 adb shell appops set --uid app.tessel.viewer MANAGE_EXTERNAL_STORAGE allow
 adb push e2e/fixtures/columns.pdf /sdcard/Download/smoke-columns.pdf >/dev/null
-tap "Documents"
 wait_for "Folders"
 tap "Folders"
 wait_for "Add folder"
@@ -210,9 +209,11 @@ echo "--- Auto appearance: listening to the light sensor ---"
 # saved to the library and opened.
 for _ in 1 2 3 4; do adb shell input keyevent KEYCODE_BACK; sleep 1; done
 adb shell am start -n app.tessel.viewer/.MainActivity >/dev/null
-# The app opens where it was last used (Reading or Documents): Scan is in the bar on both.
-wait_for "Scan"
-tap "Scan"
+# The app opens on Documents: Add → Camera is the scanner.
+wait_for "Add\""
+tap "Add\""
+wait_for "Camera\""
+tap "Camera\""
 wait_for "While using the app|Only this time|Allow"
 tap "While using the app" || tap "Allow"
 wait_for "Point at a page|Move closer|Hold steady|Too dark"

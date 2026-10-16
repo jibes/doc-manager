@@ -24,7 +24,7 @@ async function newContext(opts, { fsa = false } = {}) {
 }
 
 /** Documents in the list (the app's one screen), last opened first. */
-const opened = (page) => page.locator('[data-testid="archive-hit"]:visible');
+const docRows = (page) => page.locator('[data-testid="archive-hit"]:visible');
 
 /** Page ↔ text view: the Text view button in the bar. */
 async function switchView(page) {
@@ -301,14 +301,14 @@ async function run(name, viewport, isMobile) {
   check((await page.getByTestId('menu-reading').count()) === 0, `${name}: no reading list in the document's menu`);
   await page.keyboard.press('Escape');
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor();
-  check(/Welcome to Tessel|Tessel/.test(await opened(page).first().innerText()), `${name}: back in Documents, it is listed first (last opened)`);
+  await docRows(page).first().waitFor();
+  check(/Welcome to Tessel|Tessel/.test(await docRows(page).first().innerText()), `${name}: back in Documents, it is listed first (last opened)`);
   await page.waitForTimeout(800);
   await shot('8-home');
 
   // Persistence: reload, reopen, expect the same page.
   await page.reload();
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(1200);
   const resumed = parseInt((await page.getByTestId('page-label').innerText()).trim(), 10);
@@ -336,9 +336,9 @@ async function locked() {
   const opened = await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.width > 300), null, { timeout: 10000 }).then(() => true, () => false);
   // Reload on the home screen (static servers without SPA fallback can't reload deep links), then reopen.
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor();
+  await docRows(page).first().waitFor();
   await page.reload();
-  await opened(page).first().click();
+  await docRows(page).first().click();
   const asksAgain = await page.getByTestId('password-dialog').waitFor({ timeout: 5000 }).then(() => true, () => false);
   check(rejected && opened && asksAgain, `locked: wrong password rejected (${rejected}), right one opens (${opened}), asked again after reload (${asksAgain})`);
   await ctx.close();
@@ -363,9 +363,9 @@ async function tagged() {
   check(ok, 'tagged: text view keeps headings and drops running header/footer');
   // The view choice is remembered per document (reload from home: CI's static server has no SPA fallback).
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor();
+  await docRows(page).first().waitFor();
   await page.reload();
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('text-view').waitFor({ timeout: 15000 }).then(
     () => check(true, 'tagged: text view remembered after reload'),
     () => check(false, 'tagged: text view remembered after reload'),
@@ -434,9 +434,9 @@ async function scan() {
     () => check(false, 'scan: OCR recognizes the scanned text'),
   );
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor();
+  await docRows(page).first().waitFor();
   await page.reload();
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await recognized().then(
     () => check(true, 'scan: recognized text is kept for next time'),
     () => check(false, 'scan: recognized text is kept for next time'),
@@ -468,9 +468,9 @@ async function forms() {
   await page.getByTestId('save').click();
   await page.getByText(/^Saved (in Tessel|to “)/).first().waitFor({ timeout: 5000 });
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor();
+  await docRows(page).first().waitFor();
   await page.reload();
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await name.waitFor({ timeout: 10000 });
   const kept =
     (await name.inputValue()) === 'Ada Lovelace' &&
@@ -549,9 +549,9 @@ async function annotations() {
   check((await rows.count()) === 1, `annotations: saving details after a save keeps the notes (${await rows.count()})`);
   await page.keyboard.press('Escape');
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor();
+  await docRows(page).first().waitFor();
   await page.reload();
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('open-find').click();
   await page.getByTestId('tab-notes').click();
   await rows.first().waitFor({ timeout: 5000 });
@@ -570,7 +570,7 @@ async function annotations() {
   check((await page.getByTestId('save').isVisible()) && /\/read\//.test(page.url()), 'annotations: staying keeps the edits (and the address)');
   await page.goBack();
   await page.getByTestId('ask-confirm').click();
-  await opened(page).first().waitFor({ timeout: 5000 });
+  await docRows(page).first().waitFor({ timeout: 5000 });
   check(true, 'annotations: discarding them goes back');
   await ctx.close();
 }
@@ -662,7 +662,7 @@ async function books() {
   await fc.setFiles(new URL('./fixtures/book.epub', import.meta.url).pathname);
   const said = await page.getByText(/is a book\. Tessel opens PDFs/).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
   await page.waitForTimeout(500);
-  check(said && (await page.getByTestId('reader').count()) === 0 && (await opened(page).count()) === 0, 'books: an EPUB is not opened or added, and Tessel says why');
+  check(said && (await page.getByTestId('reader').count()) === 0 && (await docRows(page).count()) === 0, 'books: an EPUB is not opened or added, and Tessel says why');
   await ctx.close();
 }
 
@@ -722,7 +722,7 @@ async function shellBridge() {
   // Only viewed: after a restart it isn't in the library (nothing was saved about it).
   await page.goto(BASE);
   await page.getByText('Every document').waitFor({ timeout: 10000 }).catch(() => {});
-  check((await opened(page).count()) === 0, 'shell: a file from another app is only viewed, not added to the library');
+  check((await docRows(page).count()) === 0, 'shell: a file from another app is only viewed, not added to the library');
   // Light sensor theme: Light in a bright room, Black in the dark, once the light has held for a moment.
   await page.keyboard.press('Escape');
   await page.getByTestId('home-settings').locator('visible=true').click();
@@ -786,22 +786,22 @@ async function linked() {
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'linked: opens the picked file in place');
   await page.getByTestId('back').click();
   // Kept in place: listed once, first (opened last); the guide was only viewed, so it isn't.
-  await opened(page).first().waitFor();
-  const listed = await opened(page).allInnerTexts();
+  await docRows(page).first().waitFor();
+  const listed = await docRows(page).allInnerTexts();
   check(listed.filter((r) => /Orderly Notes/.test(r)).length === 1 && /Orderly Notes/.test(listed[0]) && !listed.some((r) => /Welcome to Tessel/.test(r)), `linked: the file kept in place is listed once, first (${listed.map((r) => r.split('\n')[0])})`);
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.getByTestId('back').click();
   // Edited elsewhere: the library reads the file as it is now.
   await put('linked.pdf', 'tagged.pdf');
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(500);
   check(/\/\s*4/.test(await page.getByTestId('page-label').innerText()), 'linked: changes to the original show up on reopen');
   await page.getByTestId('back').click();
   // Moved away: say so, and let the reader find it again.
   await page.evaluate(async () => (await navigator.storage.getDirectory()).removeEntry('linked.pdf'));
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('open-error').waitFor();
   check(/isn’t where it was/.test(await page.getByTestId('open-error').innerText()), 'linked: a moved file is reported as moved');
   await put('found.pdf', 'columns.pdf');
@@ -905,8 +905,8 @@ async function foldersDesktop() {
   await page.getByTestId('reader').waitFor();
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'folders: a document opens from the grid');
   await page.goto(BASE);
-  await opened(page).first().waitFor();
-  check(/Orderly Notes/.test(await opened(page).first().innerText()) && (await opened(page).filter({ hasText: 'Orderly Notes' }).count()) === 1, 'folders: an opened document is first in Documents, listed once');
+  await docRows(page).first().waitFor();
+  check(/Orderly Notes/.test(await docRows(page).first().innerText()) && (await docRows(page).filter({ hasText: 'Orderly Notes' }).count()) === 1, 'folders: an opened document is first in Documents, listed once');
   // Thumbnails are kept: on return they come from the cache, without reading the files again.
   await openFolders(page);
   await vis('folder-root').click();
@@ -1223,9 +1223,9 @@ async function foldersShell() {
   check((await names()).includes('two columns'), 'folders-shell: a document can be renamed');
   await page.goto(BASE);
   await toReading(page);
-  await opened(page).first().waitFor();
-  const rows = await opened(page).allInnerTexts();
-  const row = opened(page).filter({ hasText: 'Orderly Notes' });
+  await docRows(page).first().waitFor();
+  const rows = await docRows(page).allInnerTexts();
+  const row = docRows(page).filter({ hasText: 'Orderly Notes' });
   check(rows.some((r) => r.includes('Orderly Notes')), 'folders-shell: the library keeps a moved and renamed document');
   await row.first().click();
   await page.getByTestId('reader').waitFor();
@@ -1259,8 +1259,8 @@ async function foldersShell() {
   check(!(await names()).includes('two columns'), 'folders-shell: a document can be deleted');
   await page.goto(BASE);
   await toReading(page);
-  await opened(page).first().waitFor();
-  const left = await opened(page).allInnerTexts();
+  await docRows(page).first().waitFor();
+  const left = await docRows(page).allInnerTexts();
   check(!left.some((r) => r.includes('Orderly Notes')), `folders-shell: a deleted document leaves the library (${left.length} left)`);
 
   // All files access (Settings): the whole device is a source, browsed by its folders (and searched).
@@ -1319,8 +1319,8 @@ async function foldersShell() {
   check(rewritten.startsWith(created.data.slice(0, 200)) && /\/Author \(ACME Instruments\)/.test(rewritten) && rewritten.length > created.data.length, `folders-shell: details are appended to the file in its folder (${rewritten.length} bytes)`);
   await page.goto(BASE);
   await toReading(page);
-  await opened(page).first().waitFor();
-  check((await opened(page).first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
+  await docRows(page).first().waitFor();
+  check((await docRows(page).first().innerText()).includes('Receipt'), 'folders-shell: the saved scan is in the library');
 
   // A file opened from elsewhere (system picker) is only viewed; kept, it becomes a real file in Documents/Tessel.
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
@@ -1440,10 +1440,10 @@ async function aiReading() {
   const content = call?.body.messages?.[0]?.content ?? [];
   check(content.some((c) => c.type === 'image' && c.source?.data?.length > 1000) && /1\.1\t/.test(content.at(-1)?.text ?? ''), 'ai: the page image and the device’s lines are sent');
   await page.goto(BASE);
-  await opened(page).first().waitFor();
-  const row = await opened(page).first().innerText();
+  await docRows(page).first().waitFor();
+  const row = await docRows(page).first().innerText();
   check(row.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217'), `ai: the model names the file (${row.replace(/\n/g, ' · ')})`);
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await switchView(page);
   await page.waitForFunction(() => /bez zum 30\.10\.2026/.test(document.body.innerText) && /ACME Instruments GmbH/.test(document.body.innerText), null, { timeout: 30000 }).then(
     () => check(true, 'ai: corrected and added text is in the PDF'),
@@ -1521,11 +1521,11 @@ async function details() {
     );
     await page.keyboard.press('Escape');
     await page.goto(BASE);
-    await opened(page).first().waitFor();
-    check((await opened(page).first().innerText()).includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind})`);
+    await docRows(page).first().waitFor();
+    check((await docRows(page).first().innerText()).includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind})`);
   }
   // A bad date is caught before anything is written.
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await panel();
   await page.getByTestId('detail-date').fill('2.10.2026');
@@ -1638,7 +1638,7 @@ async function searchArchive() {
 
   // New details are searchable once saved.
   await page.goto(BASE);
-  await opened(page).filter({ hasText: 'Old title' }).first().click();
+  await docRows(page).filter({ hasText: 'Old title' }).first().click();
   await page.getByTestId('reader').waitFor();
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-details').click();
@@ -2207,9 +2207,9 @@ async function places() {
   });
   check(inbox.join() === 'xrefstream.pdf', `places: kept in the Tessel folder's Inbox (${inbox})`);
   await page.goto(BASE);
-  await opened(page).first().waitFor();
+  await docRows(page).first().waitFor();
   await page.waitForTimeout(2000);
-  const rows = await opened(page).filter({ hasText: 'xrefstream' }).count();
+  const rows = await docRows(page).filter({ hasText: 'xrefstream' }).count();
   check(rows === 1, `places: Documents has it once (${rows})`);
   await page.waitForTimeout(500);
   check((await vis('inbox-badge').innerText().catch(() => '')) === '1', 'places: Documents shows the inbox count');
@@ -2263,10 +2263,10 @@ async function lastRead() {
   await page.waitForTimeout(1500);
   await page.keyboard.press('Escape');
   let first = '';
-  for (let i = 0; i < 40 && !first.includes('Orderly Notes'); i++) first = await page.waitForTimeout(250).then(() => opened(page).first().innerText().catch(() => ''));
+  for (let i = 0; i < 40 && !first.includes('Orderly Notes'); i++) first = await page.waitForTimeout(250).then(() => docRows(page).first().innerText().catch(() => ''));
   check((await page.getByTestId('docs-sort').locator('visible=true').innerText()).includes('Last opened') && first.includes('Orderly Notes'), `last read: Documents lists everything, last opened first (${first.split('\n')[0]})`);
   check((await page.getByTestId('continue').count()) === 0 && (await page.getByTestId('tab-reading').count()) === 0, 'last read: no Reading screen and no Continue card');
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(1000);
   check(/^2/.test((await page.getByTestId('page-label').innerText()).trim()), `last read: opened again, it is at the end where it was left (${await page.getByTestId('page-label').innerText()})`);
@@ -2361,7 +2361,7 @@ async function pageNotes() {
   let after = [1];
   for (let i = 0; i < 30 && after.length; i++) after = await page.waitForTimeout(500).then(async () => (await records())[0]?.bookmarks ?? []);
   check(after.length === 0, 'page notes: a bookmark from before is gone from the library');
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.getByTestId('open-find').click();
   await page.getByTestId('tab-notes').click();
@@ -2421,7 +2421,7 @@ async function upgrade() {
   check(now.file, 'upgrade: the copy kept in the browser is a file in the browser’s own Tessel folder');
   check(now.cached.some((c) => c.position?.page === 1), `upgrade: where it was left is in this device’s cache (${JSON.stringify(now.cached)})`);
   await page.goto(BASE);
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(800);
   check(/^2/.test((await page.getByTestId('page-label').innerText()).trim()), `upgrade: it opens where it was left (${await page.getByTestId('page-label').innerText()})`);
@@ -2646,7 +2646,7 @@ async function appearance() {
   check(!/invert/.test(off) && /invert/.test(await filter()), `appearance: the switch itself toggles Invert colours (${off || 'none'})`);
   // Reopened from the library (the static test server has no fallback for deep links).
   await page.goto(BASE);
-  await opened(page).first().click();
+  await docRows(page).first().click();
   await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
   check(/invert/.test(await filter()), 'appearance: the document stays inverted');
   await page.keyboard.press('v');
@@ -2869,7 +2869,7 @@ async function viewed() {
   await page.waitForTimeout(1000);
   check((await vis('save').count()) === 0, 'viewed: Keep keeps it, and the note is saved');
   await page.getByTestId('back').click();
-  await opened(page).first().waitFor({ timeout: 10000 }).then(
+  await docRows(page).first().waitFor({ timeout: 10000 }).then(
     () => check(true, 'viewed: kept, it is the library’s'),
     () => check(false, 'viewed: kept, it is the library’s'),
   );
@@ -2886,7 +2886,15 @@ async function viewed() {
   await ctx.close();
 }
 
-const step = (name, fn) => (!only || only.includes(name) ? fn() : undefined);
+// A suite that throws is a failed check; the others still run.
+const step = async (name, fn) => {
+  if (only && !only.includes(name)) return;
+  try {
+    await fn();
+  } catch (e) {
+    check(false, `${name}: stopped: ${String(e?.message ?? e).split('\n').slice(0, 3).join(' ')}`);
+  }
+};
 await step('german', german);
 await step('locked', locked);
 await step('tagged', tagged);
