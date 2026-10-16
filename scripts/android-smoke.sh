@@ -100,7 +100,7 @@ adb logcat -c
 adb shell am start -W -n app.tessel.viewer/.MainActivity
 wait_for "Every document"
 adb exec-out screencap -p > "$OUT/1-home.png"
-echo "--- screen (home) ---"; screen | head -25
+echo "--- screen (home) ---"; screen | head -25 || true
 tap "Open sample"
 wait_for "Welcome to Tessel"
 sleep 4
@@ -109,7 +109,7 @@ adb exec-out screencap -p > "$OUT/2-sample.png"
 tap "Text view"
 wait_for "Everything comes in one way"
 adb exec-out screencap -p > "$OUT/2b-text-view.png"
-echo "--- screen (text view) ---"; screen | head -25
+echo "--- screen (text view) ---"; screen | head -25 || true
 tap "Text view"
 sleep 2
 adb shell input keyevent KEYCODE_BACK
@@ -126,7 +126,7 @@ adb shell am start -W -n app.tessel.viewer/.MainActivity >/dev/null
 wait_for "Orderly Notes"
 sleep 3
 adb exec-out screencap -p > "$OUT/4-documents.png"
-echo "--- screen (documents) ---"; screen | head -25
+echo "--- screen (documents) ---"; screen | head -25 || true
 if ui | grep -q 'text="Folders"'; then echo "Documents still has a Folders view"; exit 1; fi
 tap "Orderly Notes"
 wait_for "Appearance"
@@ -136,7 +136,7 @@ tap "Back\""
 wait_for "Sort by"
 sleep 2
 hold "Orderly Notes"
-echo "--- screen (picking) ---"; screen | head -30
+echo "--- screen (picking) ---"; screen | head -30 || true
 tap_until "Delete" "Delete this item" 1
 tap_last "Delete"
 sleep 2
@@ -183,7 +183,7 @@ tap "While using the app" || tap "Allow"
 wait_for "Point at a page|Move closer|Hold steady|Too dark"
 sleep 2
 adb exec-out screencap -p > "$OUT/9-camera.png"
-echo "--- screen (camera) ---"; screen | head -20
+echo "--- screen (camera) ---"; screen | head -20 || true
 if ui | grep -q "Unable to play media"; then echo "The camera picture is announced as broken media"; exit 1; fi
 tap "Take photo"
 # Auto-capture may take pages by itself too (the emulated picture can look like a page): any page will do.
@@ -205,7 +205,7 @@ for _ in $(seq 1 60); do ui | grep -q 'Reading text\|Preparing page' || break; s
 wait_for "Scan 2"
 sleep 3
 adb exec-out screencap -p > "$OUT/12-saved.png"
-echo "--- screen (saved scan) ---"; screen | head -20
+echo "--- screen (saved scan) ---"; screen | head -20 || true
 # Saved as a real file in Documents/Tessel (visible to other apps, kept after uninstall), not a hidden copy.
 adb shell ls -la /sdcard/Documents/Tessel/
 adb shell ls /sdcard/Documents/Tessel/ | grep -q '^Scan .*\.pdf' || { echo "The scan is not in Documents/Tessel"; exit 1; }
