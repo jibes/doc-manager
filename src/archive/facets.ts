@@ -103,9 +103,11 @@ export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedD
   return [...items].sort((a, b) => compare(docOf(a), docOf(b)));
 }
 
-/** Where a document is: the archive (synced), another folder, or only on this device. */
-export type Where = 'archive' | 'folders' | 'device';
-export const WHERES: Where[] = ['archive', 'folders', 'device'];
+/** Where a document is: in the Tessel folder (what Tessel keeps), or in a source (a folder Tessel reads). */
+export type Where = 'tessel' | 'sources';
+export const WHERES: Where[] = ['tessel', 'sources'];
+/** Saved views from before the two places: the archive and this device were Tessel's, other folders sources. */
+const OLD_PLACES: Record<string, Where> = { archive: 'tessel', device: 'tessel', folders: 'sources' };
 
 /**
  * A named filter, kept with the archive so every device has it. `place`: only documents there; `relevance`: a
@@ -126,7 +128,7 @@ export function parseViews(json: string): SavedView[] {
         query: typeof v.query === 'string' ? v.query : '',
         filter: Object.fromEntries(FACETS.filter((f) => typeof v.filter?.[f] === 'string').map((f) => [f, v.filter[f]])) as Filter,
         sort: SORTS.includes(v.sort) ? v.sort : 'date',
-        ...(WHERES.includes(v.place!) ? { place: v.place } : {}),
+        ...(WHERES.includes(v.place!) ? { place: v.place } : OLD_PLACES[v.place as string] ? { place: OLD_PLACES[v.place as string] } : {}),
         ...(typeof v.relevance === 'boolean' ? { relevance: v.relevance } : {}),
       }));
   } catch {

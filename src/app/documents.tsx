@@ -574,11 +574,14 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
   );
 }
 
-const placeIcon: Record<Where, IconName> = { archive: 'folder', folders: 'folder', device: 'device' };
-const placeName = (pl: Where) => (pl === 'archive' ? t.placeArchive : pl === 'folders' ? t.placeFolders : t.placeDevice);
-/** Archive (synced), other folders (the user's own), or this device (Tessel's own storage: its folder, or the browser). */
-const placeOf = (d: IndexedDoc, archive: string | null): Where =>
-  d.place.kind === 'library' || d.place.root === APP_ROOT_ID ? 'device' : d.place.root === archive ? 'archive' : 'folders';
+const placeIcon: Record<Where, IconName> = { tessel: 'inbox', sources: 'folder' };
+const placeName = (pl: Where) => (pl === 'tessel' ? t.placeTessel : t.placeSources);
+/**
+ * The Tessel folder is everything Tessel keeps: the folder chosen for it (synced, often), Documents/Tessel on
+ * Android, the browser's own storage. Sources are the folders it reads: those added, and the whole device.
+ */
+const placeOf = (d: IndexedDoc, tessel: string | null): Where =>
+  d.place.kind === 'library' || d.place.root === APP_ROOT_ID || d.place.root === tessel ? 'tessel' : 'sources';
 
 const styles = StyleSheet.create({
   segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },

@@ -16,6 +16,7 @@ import { sameOrRenamed } from '@/lib/names';
 import { startsWith } from '@/lib/bytes';
 import { readStored, writeStored } from '@/lib/stored';
 import { docKey } from '@/archive/shared';
+import { inboxDir } from '@/archive/dirs';
 import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
 import { FILE_MOVED, repo, type DocRecord, type ReadingPosition } from '@/storage';
@@ -27,12 +28,18 @@ import { FILE_MOVED, repo, type DocRecord, type ReadingPosition } from '@/storag
 export type ImportItem = { name: string; size: number; file?: Blob; uri?: string; handle?: FileHandle; link?: string; bundled?: boolean };
 
 /**
- * Android app: a document that would only be a hidden copy inside the app (a scan, a file opened from mail
- * or another app) becomes a real file in Documents/Tessel, and the library links to it. Elsewhere, and for
- * the bundled sample, the library keeps its copy.
+ * A document kept from elsewhere (bytes only: a file from mail or another app) becomes a real file in the Tessel
+ * folder, and the library links to it: in its Inbox when a Tessel folder is chosen (it syncs, and is filed from
+ * there), else in Documents/Tessel (Android). In a browser without a Tessel folder, and for the bundled guide,
+ * the library keeps its copy.
  */
 async function intoAppFolder(item: ImportItem): Promise<ImportItem> {
   if (item.handle || item.link || !item.file || item.bundled) return item;
+  const tessel = usePrefs.getState().archive;
+  if (tessel) {
+    const made = await folders.create({ root: tessel, dir: await inboxDir(tessel) }, item.name, item.file);
+    return { ...item, name: made.name, link: made.uri, handle: made.handle };
+  }
   const app = await folders.appFolder().catch(() => null);
   if (!app) return item;
   const made = await folders.create({ root: app.id }, item.name, item.file);

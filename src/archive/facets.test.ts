@@ -65,9 +65,12 @@ describe('filters', () => {
   it('stores views as JSON and drops what it cannot read', () => {
     const views: SavedView[] = [
       { id: 'v1', name: 'Steuer 2026', query: '', filter: { tag: 'Steuer', year: '2026' }, sort: 'date' },
-      { id: 'v2', name: 'Strom', query: 'strom', filter: {}, sort: 'name', place: 'archive', relevance: false },
+      { id: 'v2', name: 'Strom', query: 'strom', filter: {}, sort: 'name', place: 'tessel', relevance: false },
     ];
     expect(parseViews(serializeViews(views))).toEqual(views);
+    // Views saved before the two places: the archive and this device are the Tessel folder, other folders sources.
+    const old = (place: string) => parseViews(JSON.stringify({ views: [{ id: 'o', name: 'O', sort: 'date', place }] }))[0].place;
+    expect([old('archive'), old('device'), old('folders')]).toEqual(['tessel', 'tessel', 'sources']);
     expect(parseViews('{"views":[{"id":"x"},{"id":"y","name":"Y","filter":{"tag":3,"type":"Brief"},"sort":"weird","place":"moon"},{"id":"z","name":"Z","sort":"size"}]}')).toEqual([
       { id: 'y', name: 'Y', query: '', filter: { type: 'Brief' }, sort: 'date' },
       { id: 'z', name: 'Z', query: '', filter: {}, sort: 'size' },

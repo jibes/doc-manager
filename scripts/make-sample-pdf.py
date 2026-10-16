@@ -22,13 +22,13 @@ ACCENT = HexColor('#2f4f86')
 RULE = HexColor('#ddd8cc')
 
 CHAPTERS = [
-    ('Opening files', 'Every PDF you open lands in Recent, newest first. Nothing leaves your device.', [
+    ('Opening files', 'A file you open from elsewhere is only viewed at first. Nothing leaves your device.', [
         ('Ways to open', [
             'Use Open file on the home screen, drop a file anywhere on the window, or choose Tessel from '
-            'your system’s Open with menu once it is installed. Opening the same file twice simply takes '
-            'you back to it. EPUB books open too, and go straight onto your reading list.',
-            'In Chrome and Edge, Tessel opens the file where it is saved, so form entries, highlights and '
-            'notes are saved back into it. Other browsers keep a copy in Tessel instead.',
+            'your system’s Open with menu once it is installed. Such a file is only viewed; save a bookmark, '
+            'a note or a place on your reading list and you are asked to keep it first. EPUB books open too.',
+            'In Chrome and Edge, Tessel keeps the file where it is saved, so form entries, highlights and '
+            'notes are saved back into it. Elsewhere a copy goes into the Tessel folder instead.',
         ]),
         ('Removing a file', [
             'Removing a document from Tessel forgets it: its copy (if it has one), its cover and its saved '
@@ -56,7 +56,7 @@ CHAPTERS = [
     ]),
     ('The reading list', 'Most files are for checking. Some are for reading. Tessel treats them differently.', [
         ('Adding a document', [
-            'Use the book button in the viewer, or next to any file in Recent, to add it to your reading list. '
+            'Use the book button in the viewer, or pick documents in Documents, to add them to your reading list. '
             'Reading-list documents appear at the top of the home screen with their progress, and the one '
             'you read last waits in a Continue card.',
         ]),

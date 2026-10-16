@@ -97,7 +97,7 @@ sleep 4
 adb exec-out screencap -p > "$OUT/2-sample.png"
 # Text view: PDFium's text extraction, running as WebAssembly in a worker inside the WebView.
 tap "Text view"
-wait_for "Every PDF you open lands in Recent"
+wait_for "A file you open from elsewhere is only viewed"
 adb exec-out screencap -p > "$OUT/2b-text-view.png"
 echo "--- screen (text view) ---"; screen | head -25
 tap "Text view"
@@ -123,8 +123,8 @@ sleep 3
 tap "Show every document on this device"
 sleep 2
 adb shell input keyevent KEYCODE_BACK
-wait_for "Internal storage"
-tap "Internal storage"
+wait_for "Whole device"
+tap "Whole device"
 wait_for "Download"
 tap "Download"
 wait_for "smoke-columns.pdf"

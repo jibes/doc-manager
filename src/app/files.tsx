@@ -114,10 +114,10 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
   const refresh = useCallback(() => {
     folders
       .roots(showAll)
-      // The archive (synced) first.
-      .then((list) => setRoots([...list.filter((r) => r.id === archive), ...list.filter((r) => r.id !== archive)]))
+      // "All documents" is what the index reads of the whole device; browsing it is the device itself.
+      .then((list) => setRoots(list.filter((r) => r.kind !== 'all')))
       .catch((e) => setError(opError(e)));
-  }, [showAll, archive, setError]);
+  }, [showAll, setError]);
   // Read again whenever the screen comes back (a folder removed or unlocked in Settings meanwhile).
   useFocusEffect(refresh);
 
@@ -142,6 +142,10 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
       candidates.map((r, i) => ({ key: `archive-${i}`, icon: 'folder' as IconName, label: r.name, onPress: () => choose(r) })),
     );
   };
+  // What Tessel keeps (the folder chosen for it; Documents/Tessel on Android), then the folders it reads.
+  const isTessel = (r: FolderRoot) => r.id === archive || r.kind === 'app';
+  const tesselRoots = (roots ?? []).filter(isTessel).sort((a, b) => Number(b.id === archive) - Number(a.id === archive));
+  const sourceRoots = (roots ?? []).filter((r) => !isTessel(r));
   const unlockAndOpen = async (r: FolderRoot) => {
     if (r.locked && !(await folders.unlock(r.id).catch(() => false))) return;
     go(r.id, r.name);
@@ -167,8 +171,17 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
         </View>
       ) : (
         <View style={{ gap: space.lg, paddingBottom: bottom + space.xl + (pasting ? BAR_ROOM : 0) }}>
-          <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-            {roots.map((r, i) => (
+          {([
+            [t.placeTessel, tesselRoots, 'roots-tessel'],
+            [t.placeSources, sourceRoots, 'roots-sources'],
+          ] as const).map(([title, list, id]) =>
+            list.length ? (
+              <View key={id} testID={id} style={{ gap: space.sm }}>
+                <T v="kicker" color={p.muted}>
+                  {title}
+                </T>
+                <View style={[styles.list, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+            {list.map((r, i) => (
               <View key={r.id}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', borderColor: p.hairline, borderTopWidth: i ? StyleSheet.hairlineWidth : 0 }}>
                   <Pressable
@@ -183,6 +196,11 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
                       <T v="label" numberOfLines={2} style={{ fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 20 }}>
                         {r.name}
                       </T>
+                      {r.kind === 'app' && !!archive && (
+                        <T v="caption" color={p.muted}>
+                          {t.appFolderLocal}
+                        </T>
+                      )}
                       {r.id === archive && (
                         <T v="caption" color={p.accent} testID="archive-mark">
                           {/^(archive|archiv)$/i.test(r.name.trim()) ? t.syncedOnly : t.archiveSynced}
@@ -217,7 +235,10 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
                 )}
               </View>
             ))}
-          </View>
+                </View>
+              </View>
+            ) : null,
+          )}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
             <Button testID="add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
             <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />

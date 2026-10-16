@@ -22,7 +22,7 @@ export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>
 export function whereIs(place: Extract<Place, { kind: 'folder' }>): string {
   if (place.entry.where) return place.entry.where === '/' ? place.rootName : place.entry.where.split('/').join(' / ');
   // The Tessel folder is this device's own storage, as library copies are.
-  const name = place.root === APP_ROOT_ID ? t.placeDevice : place.rootName;
+  const name = place.root === APP_ROOT_ID ? t.placeTessel : place.rootName;
   let dir = place.dir ?? '';
   // Android folders: IDs such as "primary:Sync/Archive/2024" below the picked "primary:Sync/Archive".
   const tree = /\/tree\/([^/]+)/.exec(place.root);
@@ -76,7 +76,7 @@ export function HitRow({
   const { place } = h.doc;
   const cover = useLibrary((s) => (place.kind === 'library' ? s.covers[place.id] : undefined));
   const aspect = useLibrary((s) => (place.kind === 'library' ? s.docs.find((d) => d.id === place.id)?.coverAspect : undefined));
-  const where = place.kind === 'folder' ? whereIs(place) : t.placeDevice;
+  const where = place.kind === 'folder' ? whereIs(place) : t.placeTessel;
   const bytes = size && h.doc.size ? t.fileSize(h.doc.size) : '';
   return (
     <DocItem
