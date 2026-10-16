@@ -2516,6 +2516,7 @@ async function tabs() {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
     check((await vis('docs-folders').count()) === 0 && (await vis('add-folder').count()) === 0, `tabs (${name}): no Folders view (sources are added in Settings)`);
+    check((await vis('docs-more').count()) === 0, `tabs (${name}): no ⋯ with fewer than two things in it`);
     await openScan(page);
     await page.waitForURL(/\/scan/);
     check(true, `tabs (${name}): Add → Camera opens the camera`);

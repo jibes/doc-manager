@@ -222,15 +222,16 @@ export default function Documents() {
   }, [all, archive]);
   const hasSources = useMemo(() => place === 'sources' || all.some((d) => placeOf(d, archive) === 'sources'), [all, place, archive]);
   // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
-  const moreMenu = () =>
-    showActions(t.more, [
+  const moreItems = [
       ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
       ...(archive ? [{ key: 'more-trash', icon: 'trash' as IconName, label: t.trashTitle, onPress: () => router.push('/trash') }] : []),
       ...(doubled > 0 ? [{ key: 'more-duplicates', icon: 'copy' as IconName, label: t.duplicatesN(doubled), onPress: () => router.push('/duplicates') }] : []),
       ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'copy' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
       ...(archive ? [{ key: 'more-rules', icon: 'tag' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
       ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
-    ]);
+  ];
+  // ⋯ only for two or more; one is a button of its own, none is nothing.
+  const onlyMore = moreItems.length === 1 ? moreItems[0] : null;
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -435,7 +436,11 @@ export default function Documents() {
             <AppHeader tab="documents">
               <IconButton testID="add" icon="documents" label={t.openFile} onPress={async () => void openFiles(await pickPdfs())} />
               <LayoutToggle />
-              <IconButton testID="docs-more" icon="more" label={t.more} onPress={moreMenu} />
+              {onlyMore ? (
+                <IconButton testID={onlyMore.key} icon={onlyMore.icon} label={onlyMore.label} onPress={onlyMore.onPress} />
+              ) : (
+                moreItems.length > 1 && <IconButton testID="docs-more" icon="more" label={t.more} onPress={() => showActions(t.more, moreItems)} />
+              )}
             </AppHeader>
           )}
 
