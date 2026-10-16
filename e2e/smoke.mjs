@@ -1561,7 +1561,10 @@ async function searchArchive() {
   let found = [];
   for (let i = 0; i < 30 && !found.length; i++) found = await hits('Orderly');
   check(found.length === 1 && /Orderly/.test(found[0]), `search: a document in a folder's subfolder is found by its text (${found.map((x) => x.split('\n')[0])})`);
-  check((await hits('Old title')).length === 1, 'search: a library document is found by its title, once');
+  // Kept into the inbox just now: found once its file there is read.
+  let byTitle = [];
+  for (let i = 0; i < 30 && !byTitle.length; i++) byTitle = await hits('Old title');
+  check(byTitle.length === 1, `search: a library document is found by its title, once (${byTitle.map((x) => x.replace(/\n/g, ' / '))})`);
   // "Cross references" in the folder's document matches too.
   let inLibrary = [];
   for (let i = 0; i < 30 && !inLibrary.some((x) => x.startsWith('Old title')); i++) inLibrary = await hits('cross-reference');
