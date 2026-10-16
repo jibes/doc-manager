@@ -158,7 +158,7 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
           <T color={p.muted} style={{ textAlign: 'center', maxWidth: 420 }}>
             {t.foldersEmptyBody}
           </T>
-          <Button testID="add-folder" icon="folderAdd" label={t.addFolder} onPress={add} style={{ marginTop: space.md }} />
+          {folders.canAdd && <Button testID="add-folder" icon="folderAdd" label={t.addFolder} onPress={add} style={{ marginTop: space.md }} />}
         </View>
       ) : (
         <View style={{ gap: space.lg, paddingBottom: bottom + space.xl + (pasting ? BAR_ROOM : 0) }}>
@@ -231,7 +231,7 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
             ) : null,
           )}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-            <Button testID="add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
+            {folders.canAdd && <Button testID="add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />}
             {!archive && candidates.length > 0 && (
               <Button
                 testID="use-archive"

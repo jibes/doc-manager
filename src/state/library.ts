@@ -27,8 +27,7 @@ export type ImportItem = { name: string; size: number; file?: Blob; uri?: string
 /**
  * A document kept from elsewhere (bytes only: a file from mail or another app) becomes a real file in the Tessel
  * folder, and the library links to it: in its Inbox when a Tessel folder is chosen (it syncs, and is filed from
- * there), else in Documents/Tessel (Android). In a browser without a Tessel folder, and for the bundled guide,
- * the library keeps its copy.
+ * there), else in Documents/Tessel (Android) or the browser's own Tessel folder. The bundled guide stays a copy.
  */
 async function intoAppFolder(item: ImportItem): Promise<ImportItem> {
   if (item.handle || item.link || !item.file || item.bundled) return item;
@@ -40,7 +39,7 @@ async function intoAppFolder(item: ImportItem): Promise<ImportItem> {
   const app = await folders.appFolder().catch(() => null);
   if (!app) return item;
   const made = await folders.create({ root: app.id }, item.name, item.file);
-  return { ...item, name: made.name, link: made.uri };
+  return { ...item, name: made.name, link: made.uri, handle: made.handle };
 }
 
 /** What the library stores for an imported item: the file in place where possible, else a copy. */
@@ -195,8 +194,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
   };
 
   /**
-   * Android app, once per document: copies kept inside the app by earlier versions move to Documents/Tessel. When
-   * the folder can't be written, not again for a day (each try reads every copy).
+   * Once per document: copies kept by earlier versions move into the Tessel folder of the device (Documents/Tessel
+   * in the Android app, the browser's own folder in a browser), and the library links to them there. When the folder
+   * can't be written, not again for a day (each try reads every copy).
    */
   const moveCopies = async () => {
     const failedAt = Number(readStored(MOVE_FAILED) ?? 0);
@@ -216,8 +216,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (src.kind !== 'bytes') continue;
       try {
         const made = await folders.create({ root: app.id }, d.fileName, new Blob([src.bytes], { type: 'application/pdf' }));
-        if (!made.uri) continue;
-        await repo.relink(d.id, made.uri);
+        if (made.uri) await repo.relink(d.id, made.uri);
+        else if (made.handle) await repo.saveFile(d.id, made.handle);
+        else continue;
         patch(d.id, (x) => ({ ...x, linked: true, fileName: made.name }));
       } catch {
         failed = true;

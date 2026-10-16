@@ -2,7 +2,7 @@ import { createStore, del, entries, set } from 'idb-keyval';
 
 import { t } from '@/i18n';
 import { PartlyDone, type FolderEntry, type FolderRoot, type FoldersApi } from './folderTypes';
-import { canPickFolders, pickDirectory, type DirHandle, type FileHandle } from './fsa';
+import { canPickFolders, isGranted, ownFolder, pickDirectory, writeFile, type DirHandle, type FileHandle } from './fsa';
 import { APP_ROOT_ID, handleNestings, shellNestings } from './nesting';
 import { shell, shellDocUrl, shellRequest, stageForShell } from './shell';
 
@@ -19,6 +19,7 @@ const APP_ROOT: FolderRoot = { id: APP_ROOT_ID, name: 'Tessel', kind: 'app' };
  */
 const shellFolders: FoldersApi = {
   supported: true,
+  canAdd: true,
   allFilesSupported: true,
   async roots(showAll) {
     const [picked, access] = await Promise.all([shellRequest<{ uri: string; name: string }[]>('folders'), shellAccess()]);
@@ -78,7 +79,6 @@ const shellFolders: FoldersApi = {
   requestAllFiles: () => shellRequest<boolean>('requestAllFiles'),
 };
 
-// Desktop Chromium: picked folders are kept as handles; the browser may ask again after a restart.
 const store = createStore('tessel-folders', 'folders');
 type Saved = { name: string; handle: DirHandle };
 
@@ -87,6 +87,7 @@ async function savedFolders(): Promise<[string, Saved][]> {
 }
 
 async function folderHandle(root: string): Promise<DirHandle> {
+  if (root === APP_ROOT_ID) return ownFolder();
   const saved = (await savedFolders()).find(([id]) => id === root)?.[1];
   if (!saved) throw new Error(t.fileGone);
   return saved.handle;
@@ -102,36 +103,38 @@ async function dirAt(root: string, path?: string): Promise<DirHandle> {
 /** Changing a folder needs the browser's OK to write (asked once; needs the user's tap). */
 async function writable(root: string, path?: string): Promise<DirHandle> {
   const top = await folderHandle(root);
-  if ((await top.queryPermission({ mode: 'readwrite' })) !== 'granted' && (await top.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+  if (!(await isGranted(top, true)) && (await top.requestPermission({ mode: 'readwrite' })) !== 'granted') {
     throw new Error(t.writeDenied);
   }
   return dirAt(root, path);
 }
 
-const exists = (dir: DirHandle, name: string) =>
-  dir.getFileHandle(name).then(
-    () => true,
-    () => dir.getDirectoryHandle(name).then(
-      () => true,
-      () => false,
-    ),
-  );
+/**
+ * The names in a folder (any kind), for comparing. Listed rather than asked one by one: Chromium's own file system
+ * answers a lookup of a name with letters beyond ASCII as an existing folder, whether there is one or not.
+ */
+async function namesIn(dir: DirHandle): Promise<Set<string>> {
+  const out = new Set<string>();
+  for await (const [n] of dir.entries()) out.add(n.normalize('NFC').toLocaleLowerCase());
+  return out;
+}
 
-/** "name", or "name (2)", "name (3)"… if taken. */
+const exists = async (dir: DirHandle, name: string) => (await namesIn(dir)).has(name.normalize('NFC').toLocaleLowerCase());
+
+/** "name", or "name (2)", "name (3)"… if taken (ignoring case, as most file systems do). */
 async function freeName(dir: DirHandle, name: string, isDir: boolean): Promise<string> {
   const dot = isDir ? -1 : name.lastIndexOf('.');
   const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  const taken = await namesIn(dir);
   let candidate = name;
-  for (let n = 2; await exists(dir, candidate); n++) candidate = `${stem} (${n})${ext}`;
+  for (let n = 2; taken.has(candidate.normalize('NFC').toLocaleLowerCase()); n++) candidate = `${stem} (${n})${ext}`;
   return candidate;
 }
 
 async function copyEntry(from: DirHandle, name: string, isDir: boolean, into: DirHandle, as = name): Promise<void> {
   if (!isDir) {
     const file = await (await from.getFileHandle(name)).getFile();
-    const w = await (await into.getFileHandle(as, { create: true })).createWritable();
-    await w.write(file);
-    await w.close();
+    await writeFile(await into.getFileHandle(as, { create: true }), file);
     return;
   }
   const src = await from.getDirectoryHandle(name);
@@ -139,21 +142,23 @@ async function copyEntry(from: DirHandle, name: string, isDir: boolean, into: Di
   for await (const [child, h] of src.entries()) await copyEntry(src, child, h.kind === 'directory', dest);
 }
 
+/**
+ * Browsers: Tessel's own folder in the browser's file system (the Tessel folder where no other is chosen), and in
+ * desktop Chromium folders the user picked, kept as handles (the browser may ask again after a restart).
+ */
 const browserFolders: FoldersApi = {
   supported: true,
+  canAdd: canPickFolders(),
   allFilesSupported: false,
-  appFolder: async () => null,
+  appFolder: async () => APP_ROOT,
   async roots() {
-    return Promise.all(
-      (await savedFolders()).map(async ([id, f]) => ({
-        id,
-        name: f.name,
-        kind: 'folder' as const,
-        locked: (await f.handle.queryPermission({ mode: 'read' }).catch(() => 'denied')) !== 'granted',
-      })),
+    const picked = await Promise.all(
+      (await savedFolders()).map(async ([id, f]) => ({ id, name: f.name, kind: 'folder' as const, locked: !(await isGranted(f.handle)) })),
     );
+    return [APP_ROOT, ...picked];
   },
   async add() {
+    if (!canPickFolders()) return null;
     const handle = await pickDirectory();
     if (!handle) return null;
     const id = `dir-${Date.now().toString(36)}`;
@@ -167,6 +172,7 @@ const browserFolders: FoldersApi = {
     return handleNestings(known);
   },
   async unlock(id, write = false) {
+    if (id === APP_ROOT_ID) return true;
     const h = await folderHandle(id);
     return (await h.requestPermission({ mode: write ? 'readwrite' : 'read' })) === 'granted';
   },
@@ -196,9 +202,7 @@ const browserFolders: FoldersApi = {
     const dir = await writable(at.root, at.dir);
     const free = await freeName(dir, name, false);
     const handle = await dir.getFileHandle(free, { create: true });
-    const w = await handle.createWritable();
-    await w.write(data);
-    await w.close();
+    await writeFile(handle, data);
     return { id: at.dir ? `${at.dir}/${free}` : free, name: free, kind: kindOf(free) ?? 'pdf', size: data.size, modified: Date.now(), handle };
   },
   async rename(root, dir, e, name) {
@@ -277,21 +281,23 @@ const browserFolders: FoldersApi = {
   async writeText(root, path, text) {
     let dir = await writable(root);
     for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
-    const w = await (await dir.getFileHandle(path[path.length - 1], { create: true })).createWritable();
-    await w.write(new Blob([text], { type: 'application/json' }));
-    await w.close();
+    await writeFile(await dir.getFileHandle(path[path.length - 1], { create: true }), new Blob([text], { type: 'application/json' }));
   },
   allFiles: async () => false,
   requestAllFiles: async () => false,
 };
 
+// Without a file system of its own (old browsers): no folders at all.
 const unsupported: FoldersApi = {
   ...browserFolders,
   supported: false,
+  canAdd: false,
+  appFolder: async () => null,
   roots: async () => [],
   add: async () => null,
   canEdit: () => false,
   canShare: false,
 };
 
-export const folders: FoldersApi = shell ? shellFolders : canPickFolders() ? browserFolders : unsupported;
+const ownFileSystem = typeof navigator !== 'undefined' && typeof navigator.storage?.getDirectory === 'function';
+export const folders: FoldersApi = shell ? shellFolders : ownFileSystem ? browserFolders : unsupported;

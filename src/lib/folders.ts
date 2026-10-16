@@ -5,6 +5,7 @@ export type { FolderEntry, FolderRoot, Place } from './folderTypes';
 /** Native builds keep using the system picker; folder browsing lives in the web app (and the Android app). */
 export const folders: FoldersApi = {
   supported: false,
+  canAdd: false,
   allFilesSupported: false,
   roots: async () => [],
   appFolder: async () => null,

@@ -1,7 +1,7 @@
 import { createStore, del, delMany, entries, get, getMany, keys, set, values } from 'idb-keyval';
 
 import type { TextLine } from '@/engine/types';
-import { ensurePermission, isFileHandle, type FileHandle } from '@/lib/fsa';
+import { ensurePermission, isFileHandle, isGranted, writeFile, type FileHandle } from '@/lib/fsa';
 import { shellDocUrl, writeToShell } from '@/lib/shell';
 import { FILE_ACCESS, FILE_MOVED, isShellLink, NOT_KEPT, type DocRecord, type LibraryRepo } from './types';
 
@@ -42,7 +42,7 @@ export const repo: LibraryRepo = {
       return { kind: 'bytes', bytes: await res.arrayBuffer() };
     }
     if (isFileHandle(stored)) {
-      if ((await stored.queryPermission({ mode: 'read' })) !== 'granted') throw new Error(FILE_ACCESS);
+      if (!(await isGranted(stored))) throw new Error(FILE_ACCESS);
       const file = await stored.getFile().catch(() => {
         throw new Error(FILE_MOVED);
       });
@@ -61,9 +61,7 @@ export const repo: LibraryRepo = {
     if (isShellLink(stored)) return writeToShell(bytes, stored.uri);
     if (!isFileHandle(stored)) return set(id, new Blob([bytes], { type: 'application/pdf' }), files);
     if (!(await ensurePermission(stored, true))) throw new Error(FILE_ACCESS);
-    const w = await stored.createWritable();
-    await w.write(bytes);
-    await w.close();
+    await writeFile(stored, bytes);
   },
   async linkedTo(uris) {
     const out = new Map<string, string[]>();

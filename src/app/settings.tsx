@@ -187,7 +187,7 @@ export default function Settings() {
               </View>
             )}
             <View style={{ flexDirection: 'row', marginTop: space.md }}>
-              <Button testID="settings-add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
+              {folders.canAdd && <Button testID="settings-add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />}
             </View>
             <T v="caption" color={p.muted} style={styles.note}>
               {t.foldersNote} {picked?.length ? t.archiveFolderNote : ''}

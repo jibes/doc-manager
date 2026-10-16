@@ -435,7 +435,7 @@ export default function Documents() {
           </View>
 
           {nothing ? (
-            <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.supported ? () => void addFolder(say) : undefined} />
+            <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.canAdd ? () => void addFolder(say) : undefined} />
           ) : !ready && !searching ? (
             <ActivityIndicator color={p.muted} style={{ marginTop: space.xl }} />
           ) : (

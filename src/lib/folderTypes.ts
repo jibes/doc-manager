@@ -45,6 +45,8 @@ export class PartlyDone<T> extends Error {
 export type FoldersApi = {
   /** Folders can be browsed on this platform. */
   supported: boolean;
+  /** Folders can be added (picked); without, there is only the Tessel folder (browsers other than desktop Chromium). */
+  canAdd: boolean;
   /** "All files access" exists here (Android app). */
   allFilesSupported: boolean;
   roots(showAll: boolean): Promise<FolderRoot[]>;

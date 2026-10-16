@@ -34,11 +34,63 @@ export async function pickHandles(multiple = true): Promise<FileHandle[]> {
   }
 }
 
+/** Whether a handle may be read (or written) now. The browser's own file system (Firefox, Safari) has no permissions to ask. */
+export async function isGranted(h: FileHandle | DirHandle, write = false): Promise<boolean> {
+  if (typeof h.queryPermission !== 'function') return true;
+  return (await h.queryPermission({ mode: write ? 'readwrite' : 'read' }).catch(() => 'denied')) === 'granted';
+}
+
 /** Permission to read (or write) a linked file; asks only if not yet granted. Prompts need a user gesture. */
 export async function ensurePermission(h: FileHandle, write = false): Promise<boolean> {
-  const mode = write ? 'readwrite' : 'read';
-  if ((await h.queryPermission({ mode })) === 'granted') return true;
-  return (await h.requestPermission({ mode })) === 'granted';
+  if (await isGranted(h, write)) return true;
+  return (await h.requestPermission({ mode: write ? 'readwrite' : 'read' })) === 'granted';
+}
+
+/** The browser's own file system: Tessel's folder in it (where no other is chosen). */
+export async function ownFolder(): Promise<DirHandle> {
+  const root = (await navigator.storage.getDirectory()) as unknown as DirHandle;
+  return root.getDirectoryHandle('Tessel', { create: true });
+}
+
+// Safari writes files of the browser's own file system only from a worker (no createWritable in the page).
+const WRITER = `onmessage = async ({ data: { path, data } }) => {
+  try {
+    let dir = await navigator.storage.getDirectory();
+    for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
+    const file = await (await dir.getFileHandle(path[path.length - 1], { create: true })).createSyncAccessHandle();
+    file.truncate(0);
+    file.write(new Uint8Array(await data.arrayBuffer()), { at: 0 });
+    file.flush();
+    file.close();
+    postMessage({ ok: true });
+  } catch (e) {
+    postMessage({ ok: false, error: String(e) });
+  }
+};`;
+
+/** Replaces a file's contents: in place, or (the browser's own files, without createWritable) through a worker. */
+export async function writeFile(h: FileHandle, data: Blob | BufferSource): Promise<void> {
+  const blob = data instanceof Blob ? data : new Blob([data as BlobPart]);
+  if (typeof h.createWritable === 'function') {
+    const w = await h.createWritable();
+    await w.write(blob);
+    await w.close();
+    return;
+  }
+  const root = (await navigator.storage.getDirectory()) as unknown as DirHandle;
+  const path = await root.resolve(h);
+  if (!path) throw new Error('This file can’t be written here.');
+  const worker = new Worker(URL.createObjectURL(new Blob([WRITER], { type: 'text/javascript' })));
+  try {
+    const done = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      worker.onmessage = (e) => resolve(e.data);
+      worker.onerror = (e) => resolve({ ok: false, error: e.message });
+      worker.postMessage({ path, data: blob });
+    });
+    if (!done.ok) throw new Error(done.error);
+  } finally {
+    worker.terminate();
+  }
 }
 
 /** A folder the user picked (Chromium). */
