@@ -520,7 +520,7 @@ async function annotations() {
     await page.mouse.up();
     await page.getByTestId('selection-bubble').waitFor({ timeout: 3000 });
   };
-  await select(/^A file you open from elsewhere/);
+  await select(/^Everything comes in one way/);
   await page.getByTestId('highlight-green').click();
   await select(/^Use Open file on the home screen/);
   await page.getByTestId('highlight-note').click();
@@ -531,7 +531,7 @@ async function annotations() {
   await page.getByTestId('tab-notes').click();
   const rows = page.getByTestId('note-row');
   await rows.nth(1).waitFor({ timeout: 5000 });
-  const listed = (await rows.count()) === 2 && /A file you open from elsewhere/.test(await rows.nth(0).innerText()) && /Try dragging a file in/.test(await rows.nth(1).innerText());
+  const listed = (await rows.count()) === 2 && /Everything comes in one way/.test(await rows.nth(0).innerText()) && /Try dragging a file in/.test(await rows.nth(1).innerText());
   check(listed, 'annotations: highlight and note listed with their text');
   await rows.nth(1).getByTestId('note-edit').click();
   await page.getByTestId('note-dialog').waitFor();
@@ -570,7 +570,7 @@ async function annotations() {
   check(kept, 'annotations: edits and deletions saved into the PDF');
   // The browser's Back with unsaved edits left the document and lost them without a word.
   await page.keyboard.press('Escape');
-  await select(/^A file you open from elsewhere/);
+  await select(/^Everything comes in one way/);
   await page.getByTestId('highlight-green').click();
   await page.getByTestId('save').waitFor();
   await page.goBack();
