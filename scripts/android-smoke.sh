@@ -68,6 +68,15 @@ hold() {
   sleep 1
 }
 
+# The emulator's Play services restart now and then after boot, and Android takes the app down with them (the
+# WebView depends on their font provider): started again when that happened, where it opens (Documents).
+ensure_app() {
+  adb shell pidof app.tessel.viewer >/dev/null 2>&1 && return 0
+  echo "The app was stopped by the system (Play services restarted): starting it again"
+  adb shell am start -W -n app.tessel.viewer/.MainActivity >/dev/null
+  wait_for "${1:-Every document|Sort by}"
+}
+
 # Waits for a path to exist on the device (file operations finish asynchronously).
 on_device() {
   for _ in $(seq 1 15); do adb shell ls "$@" >/dev/null 2>&1 && return 0; sleep 1; done
@@ -128,6 +137,7 @@ sleep 3
 adb exec-out screencap -p > "$OUT/4-documents.png"
 echo "--- screen (documents) ---"; screen | head -25 || true
 if ui | grep -q 'text="Folders"'; then echo "Documents still has a Folders view"; exit 1; fi
+ensure_app "Orderly Notes"
 tap "Orderly Notes"
 wait_for "Appearance"
 adb exec-out screencap -p > "$OUT/5-from-tessel-folder.png"
@@ -135,6 +145,7 @@ adb exec-out screencap -p > "$OUT/5-from-tessel-folder.png"
 tap "Back\""
 wait_for "Sort by"
 sleep 2
+ensure_app "Orderly Notes"
 hold "Orderly Notes"
 echo "--- screen (picking) ---"; screen | head -30 || true
 tap_until "Delete" "Delete this item" 1
