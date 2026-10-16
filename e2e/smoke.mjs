@@ -835,6 +835,7 @@ async function tidy() {
   for (let i = 0; i < 60 && !/duplicate/.test(menu); i++) {
     await page.waitForTimeout(500);
     await vis('docs-more').click();
+    await page.getByTestId('action-more-trash').waitFor();
     menu = await page.getByTestId('action-sheet').innerText().catch(() => '');
     await page.keyboard.press('Escape');
   }
@@ -843,8 +844,8 @@ async function tidy() {
   await page.getByTestId('action-more-duplicates').click();
   await vis('duplicate-group').first().waitFor();
   const groups = await vis('duplicate-group').allInnerTexts();
-  const versions = groups.find((g) => /Older versions/.test(g)) ?? '';
-  check(groups.length === 2 && groups.some((g) => /Identical files · frees \d+ KB/.test(g)) && /Stays/.test(versions), `tidy: identical files and older versions, each with what removing frees (${groups.map((g) => g.split('\n')[0])})`);
+  const versions = groups.find((g) => /Older versions/i.test(g)) ?? '';
+  check(groups.length === 2 && groups.some((g) => /Identical files · frees \d+ KB/i.test(g)) && /Stays/i.test(versions), `tidy: identical files and older versions, each with what removing frees (${groups.map((g) => g.split('\n')[0])})`);
   const stays = await vis('duplicate-group').filter({ hasText: 'Older versions' }).getByTestId('duplicate-keep').innerText();
   check(/Old title/.test(stays) && (await vis('duplicate-group').filter({ hasText: 'Older versions' }).getByTestId('duplicate-other').count()) === 1, 'tidy: of versions, the newest stays');
   await vis('duplicate-group').filter({ hasText: 'Identical files' }).getByTestId('duplicate-resolve').click();

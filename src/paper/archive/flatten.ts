@@ -7,9 +7,15 @@ export type Flattened = { moved: number; renamed: number; kept: number };
 /** Folders of the Tessel folder that are its own: the inbox (and hidden ones, which aren't listed). */
 const own = (e: FolderEntry) => e.kind === 'dir' && e.name === INBOX;
 
-/** Whether the Tessel folder still has folders of documents in it (from before it was flat). */
+/** Whether the Tessel folder still has folders with documents in them (from before it was flat). */
 export async function hasFolders(root: string): Promise<boolean> {
-  return (await folders.list(root).catch(() => [])).some((e) => e.kind === 'dir' && !own(e));
+  const holdsPdfs = async (dir?: string): Promise<boolean> => {
+    const inside = await folders.list(root, dir).catch(() => []);
+    if (dir && inside.some((e) => e.kind !== 'dir')) return true;
+    for (const sub of inside) if (sub.kind === 'dir' && (dir || !own(sub)) && (await holdsPdfs(sub.id))) return true;
+    return false;
+  };
+  return holdsPdfs();
 }
 
 /**
