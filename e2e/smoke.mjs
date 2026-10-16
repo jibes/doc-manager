@@ -2082,6 +2082,11 @@ async function sharedReading() {
     const w = await (await (await root.getDirectoryHandle('Books', { create: true })).getFileHandle('notes.pdf', { create: true })).createWritable();
     await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     await w.close();
+    // What a device before 3.0 shared: removed once (3.1).
+    const state = await (await root.getDirectoryHandle('.tessel', { create: true })).getDirectoryHandle('state', { create: true });
+    const s = await (await state.getFileHandle('phone.json', { create: true })).createWritable();
+    await s.write('{"docs":{}}');
+    await s.close();
   }, fixture('columns.pdf'));
   await addSource(page);
   await vis('home-settings').click();
@@ -2105,7 +2110,7 @@ async function sharedReading() {
       return false;
     }
   });
-  check(!written, 'shared: nothing about reading is written to the Tessel folder');
+  check(!written, 'shared: the old shared reading state is gone from the Tessel folder, and nothing new is written there');
   await ctx.close();
 }
 
@@ -2348,12 +2353,22 @@ async function upgrade() {
         };
         open.onerror = () => resolve([]);
       });
-      return { file, cached };
+      const record = await new Promise((resolve) => {
+        const open = indexedDB.open('quire-meta');
+        open.onsuccess = () => {
+          const one = open.result.transaction('docs').objectStore('docs').get('old1');
+          one.onsuccess = () => resolve(one.result);
+          one.onerror = () => resolve(null);
+        };
+        open.onerror = () => resolve(null);
+      });
+      return { file, cached, record };
     });
-  let now = { file: false, cached: [] };
-  for (let i = 0; i < 40 && !(now.file && now.cached.length); i++) now = await page.waitForTimeout(500).then(state);
+  let now = { file: false, cached: [], record: null };
+  for (let i = 0; i < 40 && !(now.file && now.cached.length && now.record && !now.record.position); i++) now = await page.waitForTimeout(500).then(state);
   check(now.file, 'upgrade: the copy kept in the browser is a file in the browser’s own Tessel folder');
   check(now.cached.some((c) => c.position?.page === 1), `upgrade: where it was left is in this device’s cache (${JSON.stringify(now.cached)})`);
+  check(!!now.record && !now.record.position && now.record.openedAt === undefined && !!now.record.shareKey, `upgrade: …and no longer in the library's record (${JSON.stringify(now.record && { position: now.record.position, openedAt: now.record.openedAt })})`);
   await page.goto(BASE);
   await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();

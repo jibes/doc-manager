@@ -37,8 +37,6 @@ type Prefs = {
   views: SavedView[];
   /** This device sorts the archive's inbox (one device should, so two never file the same document). */
   inboxHere: boolean;
-  /** The place last used: the app opens there. */
-  lastTab: 'reading' | 'documents';
   /** How every list of documents shows them: small pictures beside the text, or big ones above it. */
   layout: 'list' | 'grid';
 };
@@ -47,7 +45,7 @@ type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, lastTab: 'reading', layout: 'list' };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, layout: 'list' };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -58,8 +56,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, lastTab, layout } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, lastTab, layout });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, layout } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, layout });
   },
 }));
 

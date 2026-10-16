@@ -23,8 +23,6 @@ export type DocRecord = {
   openedAt?: number;
   position?: ReadingPosition;
   bookmarks: number[];
-  /** Present when the document is on the reading list; it then opens with reading behaviour. */
-  reading?: { since: number; finishedAt?: number };
   /** Last view used for this document: original pages or reflowed text. */
   view?: 'page' | 'text';
   /** Pages shown with inverted colours (dark slides, night reading). */
@@ -33,7 +31,7 @@ export type DocRecord = {
   linked?: boolean;
   /** Absent for PDFs. Books have virtual pages (`pageCount`), about a printed page each. */
   format?: 'epub';
-  /** The same document on every device (archive/shared.ts docKey), for sharing reading between them. */
+  /** The document by its content (archive/docKey.ts): this device's cache knows it by this. */
   shareKey?: string;
   /**
    * Opened from elsewhere to look at, not kept: the record lives in memory only (its place in the viewed history

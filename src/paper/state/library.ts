@@ -8,7 +8,7 @@ import { usePrefs } from '@/paper/state/prefs';
 import { isFileHandle, type FileHandle } from '@/core/lib/fsa';
 import { ask } from '@/paper/state/ask';
 import { forget, recall, remember, viewedKey } from '@/paper/state/viewed';
-import { loadCache, remember as cache } from '@/paper/state/cache';
+import { loadCache, remember as cache, useCache } from '@/paper/state/cache';
 import type { FolderEntry } from '@/core/lib/folderTypes';
 import { folders } from '@/core/lib/folders';
 import { sameOrRenamed } from '@/core/lib/names';
@@ -166,11 +166,23 @@ const POSITION_MS = 400;
 /** The library's actions (stable): for components that mustn't re-render with the library. */
 export const libraryActions = (): LibraryState => useLibrary.getState();
 
+/**
+ * The record as the library keeps it: what only this device knows (when it was opened, where it was left, how it
+ * looked) lives in the cache, by the document's key; a document without its key yet keeps it in its record.
+ */
+function forRepo(d: DocRecord): DocRecord {
+  if (!d.shareKey) return d;
+  // `reading`: the reading list's, from before 3.0.
+  const { openedAt: _openedAt, position: _position, view: _view, invert: _invert, reading: _reading, ...rest } = d as DocRecord & { reading?: unknown };
+  return rest;
+}
+const deviceState = (d: DocRecord) => d.openedAt !== undefined || !!d.position || !!d.view || !!d.invert;
+
 export const useLibrary = create<LibraryState>((set, get) => {
   // Debounced writes still waiting: written now.
   const persistNow = () => {
     clearTimeout(persistTimer);
-    for (const d of get().docs) if (dirty.has(d.id)) repo.put(d);
+    for (const d of get().docs) if (dirty.has(d.id)) repo.put(forRepo(d));
     dirty.clear();
   };
   if (typeof window !== 'undefined' && typeof document !== 'undefined')
@@ -186,11 +198,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
     if (rec.viewed) return void remember(viewedKey(rec.shareKey!, rec.bytes), rec.fileName, { position: rec.position, view: rec.view, invert: rec.invert, openedAt: rec.openedAt });
     // What this device remembers about it goes to the cache, by its content (the library's record is going away).
     if (rec.shareKey) cache(rec.shareKey, { openedAt: rec.openedAt, position: rec.position, view: rec.view, invert: rec.invert ? true : undefined });
-    if (!debounce) return void repo.put(rec);
+    if (!debounce) return void repo.put(forRepo(rec));
     dirty.add(id);
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
-      for (const d of get().docs) if (dirty.has(d.id)) repo.put(d);
+      for (const d of get().docs) if (dirty.has(d.id)) repo.put(forRepo(d));
       dirty.clear();
     }, 600);
   };
@@ -263,6 +275,24 @@ export const useLibrary = create<LibraryState>((set, get) => {
         const key = await docKey(src.bytes);
         patch(d.id, (x) => ({ ...x, shareKey: key }));
       }
+    }
+  };
+
+  /**
+   * Once per record (3.1): where a document was left, kept in its record by earlier versions, goes to this
+   * device's cache (where the cache doesn't know better), and the record no longer holds it.
+   */
+  const toCache = async (stored: DocRecord[]) => {
+    const cached = useCache.getState().docs;
+    for (const d of stored) {
+      const now = get().docs.find((x) => x.id === d.id) ?? d;
+      if (!now.shareKey || !deviceState(d)) continue;
+      const known = cached.get(now.shareKey) ?? {};
+      const missing = Object.fromEntries(
+        (['openedAt', 'position', 'view', 'invert'] as const).filter((k) => known[k] === undefined && d[k] !== undefined && d[k] !== false).map((k) => [k, d[k]]),
+      );
+      if (Object.keys(missing).length) cache(now.shareKey, missing);
+      await repo.put(forRepo(now)).catch(() => {});
     }
   };
 
@@ -360,7 +390,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
         set((s) => ({ docs: [...s.docs.filter((d) => !docs.some((x) => x.id === d.id)), ...docs], books, loaded: true }));
         const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
         set((s) => ({ covers: { ...Object.fromEntries(entries), ...s.covers } }));
-        void moveCopies().then(bookmarksToNotes).then(withKeys);
+        void moveCopies().then(bookmarksToNotes).then(withKeys).then(() => toCache(stored));
       })();
       return loading;
     },
@@ -495,7 +525,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
         await repo.saveFile(id, fileData(item));
         const { viewed: _viewed, ...rest } = rec;
         const kept: DocRecord = { ...rest, fileName: item.name, linked: isLinked(item), addedAt: Date.now() };
-        await repo.put(kept);
+        await repo.put(forRepo(kept));
         repo.release(id);
         set((s) => ({ docs: s.docs.map((d) => (d.id === id ? kept : d)) }));
         void forget(viewedKey(rec.shareKey!, rec.bytes));

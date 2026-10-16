@@ -1,4 +1,5 @@
 import { folders } from '@/core/lib/folders';
+import { readStored, writeStored } from '@/core/lib/stored';
 
 /** The Tessel folder's inbox: where kept files, scans and files from other devices land, to be filed. */
 export const INBOX = 'Inbox';
@@ -27,3 +28,16 @@ export async function ensureDir(root: string, names: string[]): Promise<string |
 /** The inbox folder of the archive, made when missing. */
 export const inboxDir = (archive: string) => ensureDir(archive, [INBOX]);
 
+
+/**
+ * Once per Tessel folder (3.1): `.tessel/state`, where versions before 3.0 shared reading between devices, goes;
+ * nothing reads it any more. Tried again next time when it can't be done now (no write access yet).
+ */
+export async function dropOldState(root: string): Promise<void> {
+  const done = `tessel-state-dropped:${root}`;
+  if (readStored(done)) return;
+  const dir = await folders.dirAt(root, ['.tessel'], false);
+  const state = dir ? (await folders.list(root, dir)).find((e) => e.kind === 'dir' && e.name === 'state') : undefined;
+  if (state) await folders.delete(root, dir ?? undefined, [state]);
+  writeStored(done, '1');
+}

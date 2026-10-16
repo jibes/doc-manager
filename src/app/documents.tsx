@@ -7,6 +7,7 @@ import { ascending, FACETS, facetCounts, matches, placeOf, SORTS, sortDocs, WHER
 import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/paper/archive/indexer';
 import { HitRow, importFromFolder } from '@/paper/archive/Results';
 import { duplicateGroups } from '@/paper/archive/duplicates';
+import { dropOldState } from '@/paper/archive/dirs';
 import type { Hit, IndexedDoc } from '@/paper/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/paper/archive/views';
 import { Icon, type IconName } from '@/paper/components/Icon';
@@ -182,6 +183,9 @@ export default function Documents() {
   useFocusEffect(
     useCallback(() => {
       loadViews().catch(() => {});
+      // Left by versions before 3.0 (shared reading): removed once.
+      const tessel = usePrefs.getState().archive;
+      if (tessel) void dropOldState(tessel).catch(() => {});
       refreshSoon();
     }, []),
   );
