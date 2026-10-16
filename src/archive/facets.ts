@@ -2,10 +2,15 @@ import type { IndexedDoc } from './search';
 
 /** What the Documents screen narrows by: one value per kind (any for the others), and how it sorts. */
 export type Filter = { tag?: string; sender?: string; type?: string; year?: string };
-/** Newest or oldest by the document's date, by name, or largest first; search results also by how well they match. */
-/** `opened`: last opened on this device first (never opened ones after, newest first). */
-export type Sort = 'opened' | 'date' | 'oldest' | 'name' | 'size';
-export const SORTS: Sort[] = ['opened', 'date', 'oldest', 'name', 'size'];
+/**
+ * What a list is sorted by: when this device last opened it (never opened ones after, newest first), the document's
+ * date, its name, its size; search results also by how well they match. Each has its usual way round (names A–Z,
+ * the rest newest or largest first), which `reverse` turns.
+ */
+export type Sort = 'opened' | 'date' | 'name' | 'size';
+export const SORTS: Sort[] = ['opened', 'date', 'name', 'size'];
+/** Whether a list sorted so runs from small to large (A–Z, oldest first, smallest first). */
+export const ascending = (sort: Sort, reverse: boolean) => (sort === 'name') !== reverse;
 /** When this device last opened a document (Tessel records it; files don't say). */
 export type OpenedAt = (d: IndexedDoc) => number | undefined;
 export type Facet = keyof Filter;
@@ -83,24 +88,26 @@ const byName = (a: IndexedDoc, b: IndexedDoc) => natural.compare(titleOf(a), tit
 /** Dates are YYYY-MM-DD: compared as they are. */
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc, opened?: OpenedAt): T[];
-export function sortDocs(items: IndexedDoc[], sort: Sort, docOf?: undefined, opened?: OpenedAt): IndexedDoc[];
-export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc = (x) => x as unknown as IndexedDoc, opened?: OpenedAt): T[] {
+export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc, opened?: OpenedAt, reverse?: boolean): T[];
+export function sortDocs(items: IndexedDoc[], sort: Sort, docOf?: undefined, opened?: OpenedAt, reverse?: boolean): IndexedDoc[];
+export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedDoc = (x) => x as unknown as IndexedDoc, opened?: OpenedAt, reverse = false): T[] {
   const compare = (a: IndexedDoc, b: IndexedDoc): number => {
     switch (sort) {
       case 'opened':
-        return (opened?.(b) ?? 0) - (opened?.(a) ?? 0) || cmp(docDate(b), docDate(a)) || byName(a, b);
+        return (opened?.(b) ?? 0) - (opened?.(a) ?? 0) || cmp(docDate(b), docDate(a));
       case 'name':
         return byName(a, b);
       case 'size':
-        return b.size - a.size || byName(a, b);
-      case 'oldest':
-        return cmp(docDate(a), docDate(b)) || byName(a, b);
+        return b.size - a.size;
       case 'date':
-        return cmp(docDate(b), docDate(a)) || byName(a, b);
+        return cmp(docDate(b), docDate(a));
     }
   };
-  return [...items].sort((a, b) => compare(docOf(a), docOf(b)));
+  // Turned the other way round; equals stay A–Z.
+  return [...items].sort((x, y) => {
+    const [a, b] = [docOf(x), docOf(y)];
+    return (reverse ? compare(b, a) : compare(a, b)) || byName(a, b);
+  });
 }
 
 /** Where a document is: in the Tessel folder (what Tessel keeps), or in a source (a folder Tessel reads). */
@@ -111,9 +118,9 @@ const OLD_PLACES: Record<string, Where> = { archive: 'tessel', device: 'tessel',
 
 /**
  * A named filter, kept with the archive so every device has it. `place`: only documents there; `relevance`: a
- * search's best matches first (else in `sort` order).
+ * search's best matches first (else in `sort` order, turned with `reverse`).
  */
-export type SavedView = { id: string; name: string; query: string; filter: Filter; sort: Sort; place?: Where; relevance?: boolean };
+export type SavedView = { id: string; name: string; query: string; filter: Filter; sort: Sort; reverse?: boolean; place?: Where; relevance?: boolean };
 
 /** Views as stored: anything malformed is dropped rather than breaking the screen. */
 export function parseViews(json: string): SavedView[] {
@@ -127,7 +134,9 @@ export function parseViews(json: string): SavedView[] {
         name: v.name,
         query: typeof v.query === 'string' ? v.query : '',
         filter: Object.fromEntries(FACETS.filter((f) => typeof v.filter?.[f] === 'string').map((f) => [f, v.filter[f]])) as Filter,
+        // "Oldest first" was an order of its own: by date, turned.
         sort: SORTS.includes(v.sort) ? v.sort : 'date',
+        ...(v.reverse === true || (v.sort as string) === 'oldest' ? { reverse: true } : {}),
         ...(WHERES.includes(v.place!) ? { place: v.place } : OLD_PLACES[v.place as string] ? { place: OLD_PLACES[v.place as string] } : {}),
         ...(typeof v.relevance === 'boolean' ? { relevance: v.relevance } : {}),
       }));

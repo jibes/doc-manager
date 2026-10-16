@@ -51,26 +51,32 @@ describe('filters', () => {
 
   it('sorts by date either way, by name or by size', () => {
     expect(sortDocs(docs, 'date').map((d) => d.key)).toEqual(['energie', 'korn', 'old', 'wheel']);
-    expect(sortDocs(docs, 'oldest').map((d) => d.key)).toEqual(['wheel', 'old', 'korn', 'energie']);
+    expect(sortDocs(docs, 'date', undefined, undefined, true).map((d) => d.key)).toEqual(['wheel', 'old', 'korn', 'energie']);
     // Opened on this device last first; never opened after, newest first.
     const opened = (d: IndexedDoc) => ({ old: 200, wheel: 100 })[d.key as 'old' | 'wheel'];
     expect(sortDocs(docs, 'opened', undefined, opened).map((d) => d.key)).toEqual(['old', 'wheel', 'energie', 'korn']);
     expect(sortDocs(docs, 'name').map((d) => d.key)).toEqual(['energie', 'korn', 'wheel', 'old']);
+    expect(sortDocs(docs, 'name', undefined, undefined, true).map((d) => d.key)).toEqual(['old', 'wheel', 'korn', 'energie']);
     const sized = docs.map((d, i) => ({ ...d, size: [5, 50, 5, 1][i] }));
     expect(sortDocs(sized, 'size').map((d) => d.key)).toEqual(['korn', 'energie', 'wheel', 'old']);
+    // Turned, equals stay A–Z.
+    expect(sortDocs(sized, 'size', undefined, undefined, true).map((d) => d.key)).toEqual(['old', 'energie', 'wheel', 'korn']);
     // Anything holding a document sorts by it.
-    expect(sortDocs(docs.map((doc) => ({ doc })), 'oldest', (h) => h.doc)[0].doc.key).toBe('wheel');
+    expect(sortDocs(docs.map((doc) => ({ doc })), 'date', (h) => h.doc, undefined, true)[0].doc.key).toBe('wheel');
   });
 
   it('stores views as JSON and drops what it cannot read', () => {
     const views: SavedView[] = [
       { id: 'v1', name: 'Steuer 2026', query: '', filter: { tag: 'Steuer', year: '2026' }, sort: 'date' },
       { id: 'v2', name: 'Strom', query: 'strom', filter: {}, sort: 'name', place: 'tessel', relevance: false },
+      { id: 'v3', name: 'Alt', query: '', filter: {}, sort: 'date', reverse: true },
     ];
     expect(parseViews(serializeViews(views))).toEqual(views);
     // Views saved before the two places: the archive and this device are the Tessel folder, other folders sources.
     const old = (place: string) => parseViews(JSON.stringify({ views: [{ id: 'o', name: 'O', sort: 'date', place }] }))[0].place;
     expect([old('archive'), old('device'), old('folders')]).toEqual(['tessel', 'tessel', 'sources']);
+    // "Oldest first" from before the order could be turned: by date, turned.
+    expect(parseViews(JSON.stringify({ views: [{ id: 'o', name: 'O', sort: 'oldest' }] }))[0]).toMatchObject({ sort: 'date', reverse: true });
     expect(parseViews('{"views":[{"id":"x"},{"id":"y","name":"Y","filter":{"tag":3,"type":"Brief"},"sort":"weird","place":"moon"},{"id":"z","name":"Z","sort":"size"}]}')).toEqual([
       { id: 'y', name: 'Y', query: '', filter: { type: 'Brief' }, sort: 'date' },
       { id: 'z', name: 'Z', query: '', filter: {}, sort: 'size' },

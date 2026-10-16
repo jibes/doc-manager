@@ -9,7 +9,7 @@ import { Button, IconButton, T } from '@/components/primitives';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { DocItem, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
-import { SelectChip, SortChip } from '@/components/SortChip';
+import { SortChip } from '@/components/SortChip';
 import { showActions } from '@/state/actions';
 import { Toast } from '@/components/Toast';
 import { useNotice } from '@/components/useNotice';
@@ -265,15 +265,17 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
 
 
 /** Folders first, then documents in the order chosen. */
-type Sort = 'name' | 'date' | 'oldest' | 'size';
-const SORTS: Sort[] = ['name', 'date', 'oldest', 'size'];
-const sortName: Record<Sort, string> = { name: t.sortName, date: t.sortDate, oldest: t.sortOldest, size: t.sortSize };
+/** Names A–Z, the rest newest or largest first, unless turned round. */
+type Sort = 'name' | 'date' | 'size';
+const SORTS: Sort[] = ['name', 'date', 'size'];
+const sortName: Record<Sort, string> = { name: t.sortName, date: t.sortDate, size: t.sortSize };
 const byOrder: Record<Sort, (a: FolderEntry, b: FolderEntry) => number> = {
   name: (a, b) => collator.compare(a.name, b.name),
-  date: (a, b) => b.modified - a.modified || collator.compare(a.name, b.name),
-  oldest: (a, b) => a.modified - b.modified || collator.compare(a.name, b.name),
-  size: (a, b) => b.size - a.size || collator.compare(a.name, b.name),
+  date: (a, b) => b.modified - a.modified,
+  size: (a, b) => b.size - a.size,
 };
+/** In that order, or turned round (equals stay A–Z). */
+const ordered = (sort: Sort, reverse: boolean) => (a: FolderEntry, b: FolderEntry) => (reverse ? byOrder[sort](b, a) : byOrder[sort](a, b)) || collator.compare(a.name, b.name);
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 function FolderView({ root, rootName, dir, name, width, bottom }: { root: string; rootName: string; dir?: string; name?: string; width: number; bottom: number }) {
@@ -283,6 +285,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   // It can't be read because the browser wants the user's OK again (after a restart): it can be given here.
   const [locked, setLocked] = useState(false);
   const [sort, setSort] = useState<Sort>(root === 'all' ? 'date' : 'name');
+  const [reverse, setReverse] = useState(false);
   const [query, setQuery] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string> | null>(null);
@@ -327,10 +330,11 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
     if (!entries) return [];
     const q = query.trim().toLowerCase();
     const list = q ? entries.filter((e) => e.name.toLowerCase().includes(q)) : entries;
-    const dirs = list.filter((e) => e.kind === 'dir').sort((a, b) => collator.compare(a.name, b.name));
-    const docs = list.filter((e) => e.kind !== 'dir').sort(byOrder[sort]);
+    // Folders first, by name (turned with the files when they go by name too).
+    const dirs = list.filter((e) => e.kind === 'dir').sort(ordered('name', sort === 'name' && reverse));
+    const docs = list.filter((e) => e.kind !== 'dir').sort(ordered(sort, reverse));
     return [...dirs, ...docs];
-  }, [entries, query, sort]);
+  }, [entries, query, sort, reverse]);
 
   const layout = useLayout();
   const { cols, gap, tile } = gridOf(width);
@@ -416,7 +420,7 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   };
 
   const docs = entries?.filter((e) => e.kind !== 'dir').length ?? 0;
-  // On a phone the filter, Select and Sort go on a line of their own when they don't fit beside the count.
+  // On a phone the filter and the order go on a line of their own when they don't fit beside the count.
   const header = (
     <View style={styles.listHead}>
       <T v="kicker" color={p.muted}>
@@ -429,13 +433,22 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
             <TextInput value={query} onChangeText={setQuery} placeholder={t.filter} accessibilityLabel={t.filter} placeholderTextColor={p.muted} style={[styles.searchInput, { color: p.ink }]} />
           </View>
         )}
-        {(entries?.length ?? 0) > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
         <SortChip
           label={sortName[sort]}
+          up={(sort === 'name') !== reverse}
+          onTurn={() => setReverse((r) => !r)}
           onPress={() =>
             showActions(
               t.sortTitle,
-              SORTS.map((o) => ({ key: `sort-${o}`, icon: o === sort ? 'check' : 'sort', label: sortName[o], onPress: () => setSort(o) })),
+              SORTS.map((o) => ({
+                key: `sort-${o}`,
+                icon: o === sort ? 'check' : 'sort',
+                label: sortName[o],
+                onPress: () => {
+                  if (o !== sort) setReverse(false);
+                  setSort(o);
+                },
+              })),
             )
           }
         />
@@ -607,7 +620,7 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: space.md, paddingTop: space.xxxl, paddingHorizontal: space.lg },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   rootRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.lg, minHeight: 56 },
-  listHead: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: space.md, rowGap: space.xs, minHeight: 36, marginBottom: space.xs },
+  listHead: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: space.md, rowGap: space.xs, minHeight: 36, marginBottom: space.sm },
   listTools: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto', flexShrink: 1, maxWidth: '100%' },
   // Narrower where there is little room (a phone, in German).
   search: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.pill, paddingHorizontal: space.md, height: 32, flexShrink: 1, minWidth: 96 },

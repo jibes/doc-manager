@@ -1,9 +1,9 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
+import { ascending, FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
 import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/archive/indexer';
 import { HitRow } from '@/archive/Results';
 import type { Hit, IndexedDoc } from '@/archive/search';
@@ -12,7 +12,7 @@ import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
 import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useDocsView, useMainWidth, useTabBar, useWide } from '@/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
-import { SelectChip, SortChip } from '@/components/SortChip';
+import { SortChip } from '@/components/SortChip';
 import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, readingAddedText, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
@@ -30,7 +30,7 @@ import { APP_ROOT_ID } from '@/lib/nesting';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
 import { addFolder, PasteBar, Roots } from './files';
 
-/** Rows shown at first, and added by "Show more". */
+/** Rows shown at first, and added each time the list is scrolled near its end. */
 const PAGE = 100;
 /** While indexing, the list and the search are read again at most this often. */
 const REFRESH_MS = 1500;
@@ -38,12 +38,14 @@ const REFRESH_MS = 1500;
 const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
 const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'person', type: 'pages', year: 'calendar' };
 
-const sortName: Record<Sort, string> = { opened: t.sortOpened, date: t.sortDate, oldest: t.sortOldest, name: t.sortName, size: t.sortSize };
+const sortName: Record<Sort, string> = { opened: t.sortOpened, date: t.sortDate, name: t.sortName, size: t.sortSize };
+/** How close to the end of the list (in points) the next rows are added. */
+const AHEAD = 1500;
 
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
 /** What the screen shows: the search, filters and place, and the order. */
-type Showing = { query: string; filter: Filter; sort: Sort; place?: Where; relevance: boolean };
+type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; place?: Where; relevance: boolean };
 /** Views from before the order was kept: a search by date was best matches first. */
 const byRelevanceIn = (v: SavedView) => !!v.query && (v.relevance ?? v.sort === 'date');
 const sameView = (v: SavedView, s: Showing) =>
@@ -51,7 +53,7 @@ const sameView = (v: SavedView, s: Showing) =>
   (v.place ?? null) === (s.place ?? null) &&
   FACETS.every((k) => (v.filter[k] ?? '') === (s.filter[k] ?? '')) &&
   byRelevanceIn(v) === s.relevance &&
-  (s.relevance || v.sort === s.sort);
+  (s.relevance || (v.sort === s.sort && !!v.reverse === s.reverse));
 
 /**
  * Every document in the library and the folders: searched, narrowed by tag, sender, type and year, sorted, and
@@ -82,10 +84,15 @@ export default function Documents() {
   // Phones open on what was opened lately (what Reading's recent list was); wide windows on the newest.
   const [sort, setSort] = useState<Sort>(() => (SORTS.includes(params.sort as Sort) ? (params.sort as Sort) : wide ? 'date' : 'opened'));
   // Asked for from Reading ("All recently opened") while the screen was already open.
+  // Each order its usual way round (names A–Z, the rest newest or largest first) unless turned.
+  const [reverse, setReverse] = useState(false);
   const [askedSort, setAskedSort] = useState(params.sort);
   if (askedSort !== params.sort) {
     setAskedSort(params.sort);
-    if (SORTS.includes(params.sort as Sort)) setSort(params.sort as Sort);
+    if (SORTS.includes(params.sort as Sort)) {
+      setSort(params.sort as Sort);
+      setReverse(false);
+    }
   }
   // When this device last opened (or added) each document: the library knows (files don't say), by document or file.
   const library = useLibrary((s) => s.docs);
@@ -164,9 +171,9 @@ export default function Documents() {
   // With a query, best matches first; without, every document by date or name.
   const base = useMemo(() => {
     const answer = found?.hits ?? [];
-    const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc, openedAt)) : sortDocs(all, sort, undefined, openedAt).map(asHit);
+    const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc, openedAt, reverse)) : sortDocs(all, sort, undefined, openedAt, reverse).map(asHit);
     return place ? hits.filter((h) => placeOf(h.doc, archive) === place) : hits;
-  }, [searching, found, all, sort, bestFirst, place, archive, openedAt]);
+  }, [searching, found, all, sort, reverse, bestFirst, place, archive, openedAt]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -219,6 +226,7 @@ export default function Documents() {
         icon: (!byRelevance && sort === s ? 'check' : 'sort') as IconName,
         label: sortName[s],
         onPress: () => {
+          if (s !== sort || byRelevance) setReverse(false);
           setSort(s);
           setBestFirst(false);
         },
@@ -229,11 +237,12 @@ export default function Documents() {
     setQuery(v.query);
     setFilter(v.filter);
     setSort(v.sort);
+    setReverse(!!v.reverse);
     setPlace(v.place);
     setBestFirst(byRelevanceIn(v));
     setLimit(PAGE);
   };
-  const current = views.find((v) => sameView(v, { query: q, filter, sort, place, relevance: byRelevance }));
+  const current = views.find((v) => sameView(v, { query: q, filter, sort, reverse, place, relevance: byRelevance }));
   const canSave = !current && (!!q || !isEmpty(filter) || !!place);
   // Settings that couldn't be read say so; anything else, that it wasn't saved.
   const viewFailed = (e: unknown) => say(e instanceof Error && e.message === t.settingsUnreadable ? e.message : t.viewFailed);
@@ -242,7 +251,7 @@ export default function Documents() {
     const suggested = [place ? placeName(place) : '', ...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
     const name = (await ask({ title: t.saveView, input: suggested, placeholder: t.viewName, confirm: t.saveView }))?.trim();
     if (!name) return;
-    const view: SavedView = { id: `v-${Date.now().toString(36)}`, name, query: q, filter, sort, ...(place ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
+    const view: SavedView = { id: `v-${Date.now().toString(36)}`, name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(place ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
     saveView(view).then(() => say(t.viewSaved(name)), viewFailed);
   };
   const viewActions = (v: SavedView) =>
@@ -343,10 +352,19 @@ export default function Documents() {
     });
   };
 
+  // More rows as the end of the list comes near (no button to press).
+  const more = view === 'all' && shown.length > limit;
+  const onScroll = ({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (more && contentOffset.y + layoutMeasurement.height > contentSize.height - AHEAD) setLimit((l) => Math.max(l, visible.length + PAGE));
+  };
+
   return (
     <AppFrame tab="documents">
       <ScrollView
+        testID="docs-scroll"
         style={{ flex: 1 }}
+        onScroll={onScroll}
+        scrollEventThrottle={100}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
@@ -459,14 +477,13 @@ export default function Documents() {
             )}
           </ScrollView>
 
-          {/* The count, and Select and Sort beside it (under it, when a phone has no room for both). */}
+          {/* The count, and the order beside it (a long press on a row picks documents). */}
           <View style={styles.countRow}>
             <T v="kicker" color={p.muted} testID="docs-count" numberOfLines={1}>
               {pending && !shown.length ? '' : t.documentsCount(shown.length)}
             </T>
             <View style={styles.countTools}>
-              {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
-              <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} onPress={chooseSort} />
+              <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} up={byRelevance ? undefined : ascending(sort, reverse)} onPress={chooseSort} onTurn={() => setReverse((r) => !r)} />
             </View>
           </View>
           {shown.length > 0 ? (
@@ -493,11 +510,7 @@ export default function Documents() {
           ) : (
             <T color={p.muted}>{t.documentsEmpty}</T>
           )}
-          {shown.length > limit && (
-            <View style={{ flexDirection: 'row', marginTop: space.md }}>
-              <Button testID="show-more" kind="quiet" label={t.showMore} onPress={() => setLimit(limit + PAGE)} />
-            </View>
-          )}
+          {more && <ActivityIndicator testID="docs-more" color={p.muted} style={{ marginTop: space.md }} />}
           </>
           )}
           </>

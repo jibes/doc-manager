@@ -220,8 +220,8 @@ export function invalidate(docId: string) {
 type Candidate = { key: string; place: Place; name: string; size: number; modified: number };
 
 /**
- * The places to index: the archive first, the picked folders and Tessel's own; then, with all files access,
- * every other document on the device (those already found in a folder above are left out of it). Locked ones
+ * The places to index: the archive first, the picked folders and Tessel's own; then, with all files access granted
+ * and switched on in Settings, every other document on the device (those already found in a folder above are left out of it). Locked ones
  * (the browser wants the user's OK again) can't be read now: their records stay. Null: the places are unknown.
  *
  * `skip`: in each place, the folders inside it to leave alone. Where folders were added inside one another a file
@@ -230,7 +230,7 @@ type Candidate = { key: string; place: Place; name: string; size: number; modifi
  */
 async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[]; skip: Map<string, Set<string>> } | null> {
   if (!folders.supported) return { roots: [], locked: [], skip: new Map() };
-  const all = await folders.roots(true).catch(() => null);
+  const all = await folders.roots(usePrefs.getState().allFiles).catch(() => null);
   if (!all) return null;
   const archive = usePrefs.getState().archive;
   const rank = (r: FolderRoot) => (r.id === archive ? 0 : r.kind === 'all' ? 2 : 1);

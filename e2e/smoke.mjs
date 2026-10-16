@@ -1029,6 +1029,9 @@ async function foldersDesktop() {
   await page.getByTestId('action-sort-date').click();
   const byDate = await names();
   check(byName[0] === 'columns' && byDate[0] === 'form', `folders: sorts by name and by date (${byName} / ${byDate})`);
+  await vis('sort-turn').click();
+  check((await names()).join() === [...byDate].reverse().join(), `folders: the arrow turns the order round (${await names()})`);
+  await vis('sort-turn').click();
   await page.screenshot({ path: `${OUT}folders-grid.png` });
   await vis('folder-dir').click();
   await page.getByText('book', { exact: true }).waitFor();
@@ -1080,8 +1083,8 @@ async function foldersDesktop() {
   await vis('paste').click();
   await text('visit.pdf').waitFor({ timeout: 5000 }).catch(() => {});
   check((await inOpfs('Archive/visit.pdf')) && !(await inOpfs('visit.pdf')), 'folders: a document moves into another folder');
-  await vis('select').click();
-  await text('visit.pdf').click();
+  await page.waitForTimeout(900);
+  await text('visit.pdf').click({ button: 'right' });
   await vis('act-copy').click();
   await vis('screen-back').click();
   await vis('paste').click();
@@ -1122,6 +1125,9 @@ async function foldersShell() {
         f1: { name: 'columns.pdf', kind: 'pdf', parent: 'root', key: 'columns', modified: 1.7e12 },
         f2: { name: 'Harbour Notes.epub', kind: 'epub', parent: 'root', key: 'book', modified: 1.71e12 },
         f3: { name: 'form.pdf', kind: 'pdf', parent: 'd1', key: 'form', modified: 1.72e12 },
+        // Elsewhere on the device: only all files access sees it.
+        dl: { name: 'Download', kind: 'dir' },
+        f4: { name: 'Leaflet.pdf', kind: 'pdf', parent: 'dl', key: 'form', modified: 1.73e12 },
       },
     };
     const state = JSON.parse(sessionStorage.getItem('fake') ?? JSON.stringify(fresh));
@@ -1310,8 +1316,8 @@ async function foldersShell() {
   await text('columns.pdf').click();
   await page.getByTestId('reader').waitFor();
   await vis('back').click();
-  await vis('select').click();
-  await text('columns.pdf').click();
+  await page.waitForTimeout(900);
+  await text('columns.pdf').click({ button: 'right' });
   await page.screenshot({ path: `${OUT}folders-shell-select.png` });
   await vis('act-move').click();
   await page.screenshot({ path: `${OUT}folders-shell-paste.png` });
@@ -1325,11 +1331,7 @@ async function foldersShell() {
   check(!(await names()).includes('columns'), 'folders-shell: …and is gone from where it was');
   // Rename it there; the library follows the file through the move and the rename.
   await text('Archive').click();
-  await page.locator('[data-testid="folder-doc"]:visible').first().click({ button: 'right' }).catch(() => {});
-  if (!(await vis('action-bar').count())) {
-    await vis('select').click();
-    await text('columns.pdf').click();
-  }
+  await page.locator('[data-testid="folder-doc"]:visible').first().click({ button: 'right' });
   await vis('act-rename').click();
   await page.getByTestId('ask-input').fill('two columns.pdf');
   await page.getByTestId('ask-confirm').click();
@@ -1352,21 +1354,21 @@ async function foldersShell() {
   await openFolders(page);
   await vis('folder-root').filter({ hasText: 'Docs' }).click();
   await text('Archive').click();
-  await vis('select').click();
-  await text('two columns.pdf').click();
+  await page.waitForTimeout(900);
+  await text('two columns.pdf').click({ button: 'right' });
   await vis('act-share').click();
   await page.waitForTimeout(200);
   check((await page.evaluate(() => window.__shell.shared.length)) === 1, 'folders-shell: documents can be shared to other apps');
-  await vis('select').click();
-  await text('two columns.pdf').click();
+  await page.waitForTimeout(900);
+  await text('two columns.pdf').click({ button: 'right' });
   await vis('act-copy').click();
   await vis('screen-back').click();
   await vis('paste').click();
   await text('two columns.pdf').waitFor({ timeout: 5000 }).catch(() => {});
   check((await names()).includes('two columns'), 'folders-shell: a document can be copied to another folder');
   await text('Archive').click();
-  await vis('select').click();
-  await text('two columns.pdf').click();
+  await page.waitForTimeout(900);
+  await text('two columns.pdf').click({ button: 'right' });
   await vis('act-delete').click();
   await page.getByTestId('ask-confirm').click();
   await page.waitForTimeout(500);
@@ -1394,6 +1396,20 @@ async function foldersShell() {
   await text('Whole device').click();
   await vis('folder-grid').waitFor();
   check((await names()).includes('Documents'), 'folders-shell: the whole device is browsed by its folders');
+  // Documents lists what is elsewhere on the device; switched off again, it doesn't (the permission stays).
+  // Download/Leaflet.pdf is form.pdf (in Docs/Papers) again: two rows of it with the whole device, one without.
+  const visits = async (want) => {
+    await page.goto(BASE);
+    await openDocs(page);
+    const n = () => vis('archive-hit').filter({ hasText: 'Visit request' }).count();
+    for (let i = 0; i < 40 && (await n()) !== want; i++) await page.waitForTimeout(500);
+    return n();
+  };
+  check((await visits(2)) === 2, 'folders-shell: with all files access, Documents lists documents anywhere on the device');
+  await vis('home-settings').click();
+  await vis('all-files').click();
+  await page.waitForTimeout(300);
+  check((await visits(1)) === 1, 'folders-shell: switched off, Documents lists only the Tessel folder and the added folders');
 
   // A scan saved into a folder through the app.
   await page.goto(BASE);
@@ -1801,16 +1817,18 @@ async function documentsScreen() {
   for (let i = 0; i < 60 && !(rows.length === 2 && rows.some((r) => /Nordkorn/.test(r))); i++) rows = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
   check(rows.length === 2 && rows.some((r) => /Nordkorn · Sep 28, 2026/.test(r)), `documents: every document is listed with its details (${rows.map((r) => r.replace(/\n/g, ' / '))})`);
 
-  // Sorting: chosen from a menu, which shows the order in use.
+  // Sorting: what by is chosen from a menu, which shows it; the arrow beside it turns the order round.
   const titles = async () => (await vis('archive-hit').allInnerTexts()).map((r) => r.split('\n')[0]);
-  const newest = await titles();
   await vis('docs-sort').click();
-  await page.getByTestId('action-sort-oldest').click();
-  check(/Oldest first/.test(await vis('docs-sort').innerText()) && (await titles()).join() === [...newest].reverse().join(), `documents: sorted oldest first (${await titles()})`);
+  await page.getByTestId('action-sort-date').click();
+  const newest = await titles();
+  check(/^Date$/.test(await vis('docs-sort').innerText()) && (await vis('docs-sort-turn').getAttribute('aria-label')).startsWith('Descending'), `documents: by date, newest first, says so (${await vis('docs-sort').innerText()})`);
+  await vis('docs-sort-turn').click();
+  check((await titles()).join() === [...newest].reverse().join() && (await vis('docs-sort-turn').getAttribute('aria-label')).startsWith('Ascending'), `documents: the arrow turns it round: oldest first (${await titles()})`);
   await vis('docs-sort').click();
   await page.getByTestId('action-sort-size').click();
   const sizes = (await vis('archive-hit').count()) === 2;
-  check(sizes && /Largest first/.test(await vis('docs-sort').innerText()), 'documents: and largest first');
+  check(sizes && /^Size$/.test(await vis('docs-sort').innerText()) && (await vis('docs-sort-turn').getAttribute('aria-label')).startsWith('Descending'), 'documents: another order starts its usual way round: largest first');
   await vis('docs-sort').click();
   await page.getByTestId('action-sort-date').click();
 
@@ -2410,12 +2428,53 @@ async function lastRead() {
   await page.getByTestId('docs-sort').locator('visible=true').waitFor();
   let first = '';
   for (let i = 0; i < 40 && !first.includes('Orderly Notes'); i++) first = await page.waitForTimeout(250).then(() => page.getByTestId('archive-hit').locator('visible=true').first().innerText().catch(() => ''));
-  check((await page.getByTestId('docs-sort').locator('visible=true').innerText()).includes('Opened recently') && first.includes('Orderly Notes'), 'last read: “All recently opened” is Documents, sorted by last opened');
+  check((await page.getByTestId('docs-sort').locator('visible=true').innerText()).includes('Last opened') && first.includes('Orderly Notes'), 'last read: “All recently opened” is Documents, sorted by last opened');
   await page.getByTestId('tab-reading').locator('visible=true').click();
   await page.getByTestId('continue-add').click();
   await page.getByTestId('reading-list').waitFor();
   check((await page.getByTestId('last-read').count()) === 0, 'last read: adding it puts it on the reading list');
   check((await page.getByTestId('recent-all').count()) === 0 && (await page.getByTestId('recent-row').count()) === 0, 'last read: with a reading list, Reading shows only the list');
+  await ctx.close();
+}
+
+// A long list: the first rows at once, more as the end comes near (no button to press).
+async function manyDocs() {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Many', { create: true });
+  });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`many: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByText('Every document').waitFor();
+  const pdf = readFileSync(new URL('./fixtures/xrefstream.pdf', import.meta.url)).toString('base64');
+  await page.evaluate(async (b64) => {
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Many', { create: true });
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    for (let i = 1; i <= 130; i++) {
+      const w = await (await dir.getFileHandle(`doc-${String(i).padStart(3, '0')}.pdf`, { create: true })).createWritable();
+      await w.write(bytes);
+      await w.close();
+    }
+  }, pdf);
+  await openFolders(page);
+  await vis('add-folder').click();
+  await vis('folder-grid').waitFor();
+  await page.goto(BASE);
+  await openDocs(page);
+  for (let i = 0; i < 120 && !/^130 /.test(await vis('docs-count').innerText().catch(() => '')); i++) await page.waitForTimeout(500);
+  const rows = () => vis('archive-hit').count();
+  check((await vis('docs-count').innerText()).startsWith('130') && (await rows()) === 100, `many: 130 documents, the first 100 listed (${await rows()})`);
+  check((await vis('show-more').count()) === 0, 'many: no Show more button');
+  for (let i = 0; i < 20 && (await rows()) < 130; i++) {
+    await vis('docs-scroll').evaluate((el) => {
+      const s = [el, ...el.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 10 && getComputedStyle(e).overflowY !== 'visible');
+      s.scrollTop = s.scrollHeight;
+    });
+    await page.waitForTimeout(300);
+  }
+  check((await rows()) === 130 && (await vis('docs-more').count()) === 0, `many: scrolling near the end lists the rest (${await rows()})`);
   await ctx.close();
 }
 
@@ -2716,11 +2775,12 @@ async function batch() {
   check((await page.getByText(/selected$/).locator('visible=true').count()) === 0 && (await hit('Orderly Notes').getAttribute('aria-checked')) === null, 'batch: Esc ends picking');
   // A press on the same row right after a long press is taken as part of it: start again a moment later.
   await page.waitForTimeout(900);
-  // A right click starts picking; a tap adds one more.
+  // No Select button: a right click (a long press) starts picking; a tap adds one more.
+  check((await vis('select').count()) === 0, 'batch: no Select button (a long press starts picking)');
   await hit('Orderly Notes').click({ button: 'right' });
   await hit('Old title').click();
   check(/2 selected/.test(await page.getByText(/selected$/).locator('visible=true').innerText()), 'batch: documents are picked with a right click and a tap');
-  check((await hit('Old title').getAttribute('aria-checked')) === 'true' && (await vis('select').count()) === 0, 'batch: picked rows say so, and Select steps aside while picking');
+  check((await hit('Old title').getAttribute('aria-checked')) === 'true', 'batch: picked rows say so');
   await vis('act-move').click();
   check(await vis('paste-bar').isVisible(), 'batch: Move goes on to the folders to choose where');
   await vis('folder-root').filter({ hasText: 'Archive' }).click();
@@ -2926,6 +2986,7 @@ await step('searchable', searchable);
 await step('improve', improve);
 await step('sync', syncSafety);
 await step('batch', batch);
+await step('many', manyDocs);
 await step('shared', sharedReading);
 await step('places', places);
 await step('tabs', tabs);

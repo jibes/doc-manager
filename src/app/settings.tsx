@@ -79,11 +79,18 @@ export default function Settings() {
     ...(folders.supported && archive ? ([['sync', t.syncTitle]] as [string, string][]) : []),
     ...(Platform.OS === 'web' ? ([['ai', t.aiTitle]] as [string, string][]) : []),
   ];
+  // The index follows at once: the device's other documents are read, or leave Documents.
   const toggleAll = async (on: boolean) => {
-    if (!on) return setPrefs({ allFiles: false });
+    if (!on) {
+      setPrefs({ allFiles: false });
+      return schedule(300);
+    }
     const ok = await folders.requestAllFiles().catch(() => false);
     setGranted(ok);
-    if (ok) setPrefs({ allFiles: true });
+    if (ok) {
+      setPrefs({ allFiles: true });
+      schedule(300);
+    }
   };
 
   return (

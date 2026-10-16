@@ -58,6 +58,16 @@ tap() {
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 
+# Holds a finger on the first node matching $1 (a long press: starts picking in a list).
+hold() {
+  local b
+  b=$(bounds_of "$1")
+  [ -n "$b" ] || { echo "Nothing to hold for: $1"; screen | head -40; return 1; }
+  set -- $b
+  adb shell input swipe $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )) $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )) 900
+  sleep 1
+}
+
 # Waits for a path to exist on the device (file operations finish asynchronously).
 on_device() {
   for _ in $(seq 1 15); do adb shell ls "$@" >/dev/null 2>&1 && return 0; sleep 1; done
@@ -144,8 +154,7 @@ adb shell input text Smoke
 sleep 1
 tap_last "New folder"
 on_device -d /sdcard/Download/Smoke
-tap "Select"
-tap "smoke-columns.pdf"
+hold "smoke-columns.pdf"
 # The selection bar has its own "Cancel": the dialog is up once there are two.
 tap_until "Rename" "Cancel\"" 2
 adb shell input keyevent KEYCODE_MOVE_END
@@ -156,8 +165,7 @@ echo "--- screen (rename) ---"; screen | head -30
 tap_last "Rename"
 on_device /sdcard/Download/smoke-renamed.pdf
 wait_for "smoke-renamed.pdf\""
-tap "Select"
-tap "smoke-renamed.pdf"
+hold "smoke-renamed.pdf"
 tap "Move"
 wait_for "Open the folder to move to"
 tap "Smoke\""
@@ -165,8 +173,7 @@ tap "Move here"
 on_device /sdcard/Download/Smoke/smoke-renamed.pdf
 wait_for "smoke-renamed.pdf\""
 adb exec-out screencap -p > "$OUT/6-moved.png"
-tap "Select"
-tap "smoke-renamed.pdf"
+hold "smoke-renamed.pdf"
 tap_until "Delete" "Delete this item" 1
 tap_last "Delete"
 sleep 2

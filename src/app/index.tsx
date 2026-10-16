@@ -6,7 +6,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useMainWidth, useTabBar } from '@/components/AppNav';
 import { Cover } from '@/components/Cover';
 import { DocItem, DocList, gridOf, LayoutToggle, rightClick, useLayout, type Layout } from '@/components/DocItems';
-import { SelectChip } from '@/components/SortChip';
 import { Action, ActionBar, Check, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
 import { shareDocs } from '@/lib/fileActions';
 import { EmptyLibrary } from '@/components/EmptyLibrary';
@@ -223,7 +222,6 @@ export default function Home() {
                     <Button testID="recent-all" kind="quiet" label={t.recentAll} onPress={() => router.push({ pathname: '/documents', params: { sort: 'opened' } })} />
                   )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' }}>
-                    {shown.length > 0 && !selected && <SelectChip onPress={() => setSelected(new Set())} />}
                     <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                   </View>
                 </View>
