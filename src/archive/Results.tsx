@@ -11,10 +11,11 @@ import { docDate } from './facets';
 import { realTitle } from './pdfInfo';
 import type { Hit, IndexedDoc, Place } from './search';
 
-/** A file of a folder in the library (opened in place where it can be). */
-export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>) {
+/** A file of a folder in the library: opened in place where it can be, or (`copy`: kept from a source) copied into the Tessel folder. */
+export async function importFromFolder(place: Extract<Place, { kind: 'folder' }>, copy = false) {
   const file = await folders.read(place.root, place.entry);
-  const [added] = await useLibrary.getState().importFiles([{ name: place.entry.name, size: place.entry.size || file.size, file, handle: place.entry.handle, link: place.entry.uri }]);
+  const size = place.entry.size || file.size;
+  const [added] = await useLibrary.getState().importFiles([copy ? { name: place.entry.name, size, file } : { name: place.entry.name, size, file, handle: place.entry.handle, link: place.entry.uri }]);
   return added;
 }
 
@@ -37,8 +38,9 @@ export function whereIs(place: Extract<Place, { kind: 'folder' }>): string {
 }
 
 /** Opens a document at a page, with the query highlighted: a library document directly, a folder file via the library. */
-export async function openDoc(doc: IndexedDoc, page: number, query: string) {
-  const params = { page: String(page), q: query.trim() };
+export async function openDoc(doc: IndexedDoc, page: number | undefined, query: string) {
+  // Without a page (no match to show), it opens where it was left.
+  const params = page === undefined ? {} : { page: String(page), q: query.trim() };
   const { place } = doc;
   if (place.kind === 'library') return router.push({ pathname: '/read/[id]', params: { id: place.id, ...params } });
   const added = await importFromFolder(place);
@@ -101,7 +103,7 @@ export function HitRow({
       first={first}
       last={last}
       selected={selected}
-      onOpen={() => void openDoc(h.doc, h.page, query).catch((e) => onError(errorText(e)))}
+      onOpen={() => void openDoc(h.doc, h.snippet ? h.page : undefined, query).catch((e) => onError(errorText(e)))}
       onSelect={onSelect}
       onToggle={onToggle}
     />

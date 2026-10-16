@@ -228,7 +228,7 @@ type Candidate = { key: string; place: Place; name: string; size: number; modifi
  */
 async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[]; skip: Map<string, Set<string>> } | null> {
   if (!folders.supported) return { roots: [], locked: [], skip: new Map() };
-  const all = await folders.roots(usePrefs.getState().allFiles).catch(() => null);
+  const all = await folders.roots(false).catch(() => null);
   if (!all) return null;
   const archive = usePrefs.getState().archive;
   const rank = (r: FolderRoot) => (r.id === archive ? 0 : r.kind === 'all' ? 2 : 1);

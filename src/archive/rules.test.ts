@@ -56,33 +56,34 @@ describe('dates', () => {
 
 describe('file paths', () => {
   const fallback = { title: 'Scan', date: '2026-01-05', sender: 'Unknown' };
-  it('fills the template', () => {
-    expect(pathFor('{year}/{sender}/{date} {title}', { ...none, title: 'Lieferschein', sender: 'Nordkorn', date: '2026-09-28' }, fallback)).toEqual(['2026', 'Nordkorn', '2026-09-28 Lieferschein.pdf']);
-    expect(pathFor('{type}/{year}-{month} {title}', { ...none, title: 'A', type: 'Rechnung', date: '2025-03-10' }, fallback)).toEqual(['Rechnung', '2025-03 A.pdf']);
+  it('fills the template: a file name only', () => {
+    expect(pathFor('{date} {sender} {title}', { ...none, title: 'Lieferschein', sender: 'Nordkorn', date: '2026-09-28' }, fallback)).toEqual(['2026-09-28 Nordkorn Lieferschein.pdf']);
+    expect(pathFor('{type} {year}-{month} {title}', { ...none, title: 'A', type: 'Rechnung', date: '2025-03-10' }, fallback)).toEqual(['Rechnung 2025-03 A.pdf']);
   });
 
-  it('uses fallbacks, drops empty folders and stray separators', () => {
-    expect(pathFor('{year}/{type}/{date} – {title}', none, fallback)).toEqual(['2026', '2026-01-05 – Scan.pdf']);
-    expect(pathFor('{type}/{title} - {sender}', { ...none, title: 'X', sender: '' }, { ...fallback, sender: '' })).toEqual(['X.pdf']);
+  it('makes no folders: the old default is the new one, a "/" is a space', () => {
+    expect(pathFor('{year}/{sender}/{date} {title}', { ...none, title: 'Lieferschein', sender: 'Nordkorn', date: '2026-09-28' }, fallback)).toEqual(['2026-09-28 Nordkorn Lieferschein.pdf']);
+    expect(pathFor('{type}/{title}', { ...none, title: 'A', type: 'Rechnung' }, fallback)).toEqual(['Rechnung A.pdf']);
+  });
+
+  it('uses fallbacks and drops stray separators', () => {
+    expect(pathFor('{date} – {type} – {title}', none, fallback)).toEqual(['2026-01-05 – Scan.pdf']);
+    expect(pathFor('{title} - {sender}', { ...none, title: 'X', sender: '' }, { ...fallback, sender: '' })).toEqual(['X.pdf']);
     expect(pathFor('{sender} - {type} - {title}', { ...none, title: 'Rechnung', sender: 'Telekom' }, fallback)).toEqual(['Telekom - Rechnung.pdf']);
     expect(pathFor('{date}_{type}_{title}', { ...none, title: 'Rechnung', date: '2026-10-02' }, fallback)).toEqual(['2026-10-02_Rechnung.pdf']);
-  });
-
-  it('never makes a folder the file name', () => {
-    expect(pathFor('{year}/{sender}/{type}', { ...none, sender: 'Nordkorn', date: '2026-10-02' }, fallback)).toEqual(['2026', 'Nordkorn', 'Scan.pdf']);
-    expect(pathFor('{year}/{sender}/{title}', { ...none, sender: 'Nordkorn', title: '???', date: '2026-10-02' }, fallback)).toEqual(['2026', 'Nordkorn', 'Scan.pdf']);
+    expect(pathFor('{type}', { ...none, date: '2026-10-02' }, fallback)).toEqual(['Scan.pdf']);
   });
 
   it('keeps names safe to sync', () => {
-    expect(pathFor('{sender}/{title}', { ...none, sender: 'A/B: C', title: '..Re: "x"?.' }, fallback)).toEqual(['A B C', 'Re x.pdf']);
+    expect(pathFor('{title} {sender}', { ...none, sender: 'A/B: C', title: '..Re: "x"?.' }, fallback)).toEqual(['Re x . A B C.pdf']);
   });
 });
 
 describe('stored rules', () => {
   it('round-trip and drop what they cannot read', () => {
-    const rules = { template: '{year}/{title}', rules: [rule({ id: 'a', match: 'korn', tags: ['x'] })] };
+    const rules = { template: '{year} {title}', rules: [rule({ id: 'a', match: 'korn', tags: ['x'] })] };
     expect(parseRules(serializeRules(rules))).toEqual(rules);
-    expect(parseRules('{"rules":[{"id":"a"},{"id":"b","match":"m","tags":[1,"t"]}]}')).toEqual({ template: '{year}/{sender}/{date} {title}', rules: [rule({ id: 'b', match: 'm', tags: ['t'] })] });
+    expect(parseRules('{"rules":[{"id":"a"},{"id":"b","match":"m","tags":[1,"t"]}]}')).toEqual({ template: '{date} {sender} {title}', rules: [rule({ id: 'b', match: 'm', tags: ['t'] })] });
     expect(parseRules('nope').rules).toEqual([]);
   });
 });

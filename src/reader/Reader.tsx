@@ -31,6 +31,7 @@ import { libraryActions } from '@/state/library';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { repo, type DocRecord } from '@/storage';
 import { detailsOf, saveDetails } from '@/archive/details';
+import { readAdded } from '@/archive/intake';
 import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/archive/indexer';
 import type { IndexedDoc } from '@/archive/search';
 import { useThrottled } from '@/lib/useThrottled';
@@ -220,7 +221,11 @@ export function Reader({
   }, [archive, doc.shareKey, doc.linked, doc.id, doc.fileName, handle, indexed]);
   // A document only viewed becomes the library's, from where it is (a file in place stays there).
   const keepViewed = async () => {
-    if (await libraryActions().keep(doc.id)) setReloaded(t.keptInTessel);
+    if (!(await libraryActions().keep(doc.id))) return;
+    setReloaded(t.keptInTessel);
+    // As anything added: pages without text get theirs.
+    const kept = libraryActions().docs.find((d) => d.id === doc.id);
+    if (kept) readAdded([kept]);
   };
   const keepInArchive = async () => {
     if (!archive) return;
@@ -229,6 +234,7 @@ export function Reader({
       (e: unknown) => (setReloaded(opError(e)), false),
     );
     if (!kept) return;
+    readAdded([doc]);
     schedule(1000);
     void refreshInboxCount();
     afterReload = t.keptInArchive;

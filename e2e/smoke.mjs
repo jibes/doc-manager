@@ -1521,8 +1521,9 @@ async function details() {
     );
     await page.keyboard.press('Escape');
     await page.goto(BASE);
-    await docRows(page).first().waitFor();
-    check((await docRows(page).first().innerText()).includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind})`);
+    let top = '';
+    for (let i = 0; i < 40 && !top.includes(`Rechnung 40217 ${kind}`); i++) top = await page.waitForTimeout(250).then(() => docRows(page).first().innerText().catch(() => ''));
+    check(top.includes(`Rechnung 40217 ${kind}`), `details: the library shows the new title (${kind}: ${top.split('\n')[0]})`);
   }
   // A bad date is caught before anything is written.
   await docRows(page).first().click();
@@ -2209,7 +2210,7 @@ async function places() {
   await page.goto(BASE);
   await docRows(page).first().waitFor();
   await page.waitForTimeout(2000);
-  const rows = await docRows(page).filter({ hasText: 'xrefstream' }).count();
+  const rows = await docRows(page).filter({ hasText: 'Old title' }).count();
   check(rows === 1, `places: Documents has it once (${rows})`);
   await page.waitForTimeout(500);
   check((await vis('inbox-badge').innerText().catch(() => '')) === '1', 'places: Documents shows the inbox count');
@@ -2310,7 +2311,7 @@ async function manyDocs() {
     });
     await page.waitForTimeout(300);
   }
-  check((await rows()) === 130 && (await vis('docs-more').count()) === 0, `many: scrolling near the end lists the rest (${await rows()})`);
+  check((await rows()) === 130 && (await vis('docs-loading').count()) === 0, `many: scrolling near the end lists the rest (${await rows()})`);
   await ctx.close();
 }
 

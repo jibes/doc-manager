@@ -187,7 +187,7 @@ export default function Sync() {
                         label={d.name}
                         where={whereIs(d.place)}
                         entry={d.place.entry}
-                        onOpen={() => void openDoc(d, 0, '').catch((e) => setNotice(opError(e)))}
+                        onOpen={() => void openDoc(d, undefined, '').catch((e) => setNotice(opError(e)))}
                         onKeep={() => void keepOne(group, d)}
                         testID="sync-keep-one"
                       />

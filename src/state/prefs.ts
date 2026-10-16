@@ -8,8 +8,6 @@ import { DEFAULT_SCAN_SETTINGS, type ScanSettings } from '@/scan/types';
 import { loadPrefs, savePrefs } from '@/storage/prefs';
 import { useAmbient } from './ambient';
 
-/** `scanTo` for the archive's Inbox folder. */
-export const INBOX_TARGET = 'inbox';
 
 export type Appearance = 'light' | 'dark' | 'auto';
 export type FitMode = 'width' | 'page';
@@ -27,11 +25,10 @@ type Prefs = {
   textLeading: TextLeading;
   textWidth: TextWidth;
   /** Android app: browse the whole device (needs all files access). */
-  allFiles: boolean;
+  /** Added documents' pages without text read by the model (when one is set up), unless switched off on the add. */
+  improveAdded: boolean;
   /** Scanner: filter, auto-capture, resolution, text recognition. */
   scan: ScanSettings;
-  /** Where scans are saved: a folder's id, the archive's inbox (INBOX_TARGET), or null for the library. */
-  scanTo: string | null;
   /** Reading scans with an AI model at an address the user gives (off until set up). */
   ai: AiSettings;
   /** The folder documents are kept in (synced to the other devices): saved views live in its .tessel folder. */
@@ -50,7 +47,7 @@ type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', allFiles: false, scan: DEFAULT_SCAN_SETTINGS, scanTo: null, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, lastTab: 'reading', layout: 'list' };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, lastTab: 'reading', layout: 'list' };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -61,8 +58,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, lastTab, layout } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, allFiles, scan, scanTo, ai, archive, views, inboxHere, lastTab, layout });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, lastTab, layout } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, lastTab, layout });
   },
 }));
 

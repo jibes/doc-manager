@@ -10,26 +10,25 @@ import { Toast } from '@/components/Toast';
 import { fonts, radius, space } from '@/design/tokens';
 import { aiMessage, t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
-import { nestingNote } from './files';
+import { nestingNote } from '@/archive/sources';
 import { forget, viewedCount } from '@/state/viewed';
 import { useLibrary } from '@/state/library';
 import { downloadDoc } from '@/lib/fileActions';
 import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
 import { AppearancePicker } from '@/reader/AppearancePanel';
-import { aiInsecure, aiUrl, testAi, type AiApi } from '@/scan/ai';
+import { aiInsecure, aiReady, aiUrl, testAi, type AiApi } from '@/scan/ai';
 import { anySignal } from '@/lib/signals';
 import { hasLightSensor } from '@/state/ambient';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 
 
-/** Settings: the folders Tessel may browse and, in the Android app, optional access to all files. */
+/** Settings: appearance, the Tessel folder and the sources Tessel reads, syncing, and AI reading. */
 export default function Settings() {
   const p = usePalette();
   const column = useColumnWidth();
   const insets = useSafeAreaInsets();
-  const allFiles = usePrefs((s) => s.allFiles);
   const archive = usePrefs((s) => s.archive);
   const scroller = useRef<ScrollView>(null);
   // Where each section starts, for the index at the top.
@@ -38,9 +37,7 @@ export default function Settings() {
     const y = e.nativeEvent.layout.y;
     setAt((all) => (all[key] === y ? all : { ...all, [key]: y }));
   } });
-  const setPrefs = usePrefs((s) => s.set);
   const [picked, setPicked] = useState<FolderRoot[] | null>(null);
-  const [granted, setGranted] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Documents viewed and not kept, whose place this device remembers.
   const [viewed, setViewed] = useState(0);
@@ -66,7 +63,6 @@ export default function Settings() {
       // The folders added (Tessel's own folder isn't one: it is where things go without a chosen one).
       .then((rs) => setPicked(rs.filter((r) => r.kind === 'folder')))
       .catch(() => setError(t.opFailed));
-    if (folders.allFilesSupported) folders.allFiles().then(setGranted, () => setGranted(false));
   }, []);
   useEffect(refresh, [refresh]);
 
@@ -88,27 +84,12 @@ export default function Settings() {
     schedule(1000);
   };
   const chooseArchive = (id: string | null) => setArchive(id).catch(() => setError(t.viewFailed));
-  const allOn = allFiles && granted === true;
   const sections: [string, string][] = [
     ['appearance', t.appearanceTitle],
     ...(folders.supported ? ([['folders', t.foldersTitle]] as [string, string][]) : []),
     ...(folders.supported && archive ? ([['sync', t.syncTitle]] as [string, string][]) : []),
     ...(Platform.OS === 'web' ? ([['ai', t.aiTitle]] as [string, string][]) : []),
   ];
-  // The index follows at once: the device's other documents are read, or leave Documents.
-  const toggleAll = async (on: boolean) => {
-    if (!on) {
-      setPrefs({ allFiles: false });
-      return schedule(300);
-    }
-    const ok = await folders.requestAllFiles().catch(() => false);
-    setGranted(ok);
-    if (ok) {
-      setPrefs({ allFiles: true });
-      schedule(300);
-    }
-  };
-
   return (
     <SubFrame sub="settings">
     <ScrollView
@@ -193,50 +174,6 @@ export default function Settings() {
             <T v="caption" color={p.muted} style={styles.note}>
               {t.foldersNote} {picked?.length ? t.archiveFolderNote : ''}
             </T>
-          </>
-        )}
-
-        {folders.allFilesSupported && (
-          <>
-            <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
-              {t.allFilesTitle}
-            </T>
-            {/* The whole row is the switch: easier to hit than the knob alone. */}
-            <Pressable
-              testID="all-files"
-              accessibilityRole="switch"
-              accessibilityLabel={t.allFilesSwitch}
-              aria-checked={allOn}
-              onPress={() => toggleAll(!allOn)}
-              style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-                styles.card,
-                styles.row,
-                { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
-              ]}
-            >
-              <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
-                {t.allFilesSwitch}
-              </T>
-              <View style={[styles.track, { backgroundColor: allOn ? p.accent : p.hairline }]}>
-                <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: allOn ? 18 : 0 }] }]} />
-              </View>
-            </Pressable>
-            <T v="caption" color={p.muted} style={styles.note}>
-              {t.allFilesNote}
-            </T>
-            {allFiles && granted === false && (
-              <View style={{ gap: space.sm, marginTop: space.md, alignItems: 'flex-start' }}>
-                <T v="caption" color={p.accent}>
-                  {t.allFilesDenied}
-                </T>
-                <Button kind="quiet" label={t.allowAccess} onPress={() => toggleAll(true)} />
-              </View>
-            )}
-            {!allFiles && granted === true && (
-              <T v="caption" color={p.muted} style={styles.note}>
-                {t.allFilesOffNote}
-              </T>
-            )}
           </>
         )}
 
@@ -332,6 +269,7 @@ function SyncSection() {
 function AiSection() {
   const p = usePalette();
   const ai = usePrefs((s) => s.ai);
+  const improveAdded = usePrefs((s) => s.improveAdded);
   const setPrefs = usePrefs((s) => s.set);
   const [status, setStatus] = useState<string | null>(null);
   // The test under way: a change to the settings stops it (its answer would be about the old ones).
@@ -425,6 +363,32 @@ function AiSection() {
       <T v="caption" color={p.muted} style={styles.note}>
         {t.aiNote}
       </T>
+      {aiReady(ai) && (
+        <>
+          <Pressable
+            testID="improve-added"
+            accessibilityRole="switch"
+            accessibilityLabel={t.improveAdded}
+            aria-checked={improveAdded}
+            onPress={() => setPrefs({ improveAdded: !improveAdded })}
+            style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
+              styles.card,
+              styles.row,
+              { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg, marginTop: space.lg },
+            ]}
+          >
+            <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+              {t.improveAdded}
+            </T>
+            <View style={[styles.track, { backgroundColor: improveAdded ? p.accent : p.hairline }]}>
+              <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: improveAdded ? 18 : 0 }] }]} />
+            </View>
+          </Pressable>
+          <T v="caption" color={p.muted} style={styles.note}>
+            {t.improveAddedNote}
+          </T>
+        </>
+      )}
     </>
   );
 }

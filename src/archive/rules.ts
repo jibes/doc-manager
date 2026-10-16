@@ -10,7 +10,14 @@ export type Rule = { id: string; match: string; sender: string; type: string; ta
 export type Rules = { template: string; rules: Rule[] };
 
 /** Year, then sender, then the date and title: "2026/Nordkorn/2026-09-28 Lieferschein.pdf". */
-export const DEFAULT_TEMPLATE = '{year}/{sender}/{date} {title}';
+export const DEFAULT_TEMPLATE = '{date} {sender} {title}';
+/** The default before the Tessel folder was flat. */
+const OLD_DEFAULT = '{year}/{sender}/{date} {title}';
+/** No folders in the Tessel folder: a template names the file only ("/" was a folder once; it is a space now). */
+export const flatTemplate = (template: string) => {
+  const t = template.trim();
+  return !t || t === OLD_DEFAULT ? DEFAULT_TEMPLATE : t.replace(/\s*\/\s*/g, ' ').trim() || DEFAULT_TEMPLATE;
+};
 export const DEFAULT_RULES: Rules = { template: DEFAULT_TEMPLATE, rules: [] };
 export const PLACEHOLDERS = ['year', 'month', 'day', 'date', 'sender', 'type', 'title'] as const;
 
@@ -120,7 +127,7 @@ const safe = (s: string) =>
     .replace(/[. ]+$/, '');
 
 /**
- * Where a filed document goes, from the template: folders and the file name (with ".pdf"). Missing details are
+ * What a filed document is called, from the template: the file name (with ".pdf"), alone in a list. Missing details are
  * left out with what joined them; a document without a date uses `fallbackDate`, one without a title `fallbackTitle`.
  */
 export function pathFor(template: string, d: Details, fallback: { title: string; date: string; sender: string }): string[] {
@@ -143,10 +150,9 @@ export function pathFor(template: string, d: Details, fallback: { title: string;
         .replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? values[key as keyof typeof values] || GAP : all))
         .replace(/(\s*[-–·_]\s*)?\u0000(\s*[-–·_]\s*)?/g, (_all, before?: string, after?: string) => (before && after ? before : ' ')),
     );
-  const parts = (template.trim() || DEFAULT_TEMPLATE).split('/').map(render);
-  // The last part is the file's name; when it comes out empty, the title is (a folder never becomes the name).
-  const name = parts.pop() || safe(fallback.title) || 'Document';
-  return [...parts.filter(Boolean), `${name.replace(/\.pdf$/i, '')}.pdf`];
+  // When the name comes out empty, the title is.
+  const name = render(flatTemplate(template)) || safe(fallback.title) || 'Document';
+  return [`${name.replace(/\.pdf$/i, '')}.pdf`];
 }
 
 /** Rules as stored: anything malformed is dropped. */
@@ -163,7 +169,7 @@ export function parseRules(json: string): Rules {
         type: str(r.type),
         tags: Array.isArray(r.tags) ? r.tags.map(str).filter(Boolean) : [],
       }));
-    return { template: str(raw?.template) || DEFAULT_TEMPLATE, rules };
+    return { template: flatTemplate(str(raw?.template)), rules };
   } catch {
     return DEFAULT_RULES;
   }

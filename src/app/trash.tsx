@@ -49,7 +49,7 @@ export default function Trash() {
     <SubFrame sub="trash">
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column, gap: space.md }}>
-          <ScreenHeader title={t.trashTitle} up={() => goTab('documents', 'folders')}>
+          <ScreenHeader title={t.trashTitle} up={() => goTab('documents')}>
             {items.length > 0 && <Button testID="trash-empty" kind="quiet" label={t.trashEmptyAll} onPress={() => void emptyAll()} />}
           </ScreenHeader>
           {!archive ? (

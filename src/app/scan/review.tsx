@@ -10,8 +10,7 @@ import { Knob } from '@/components/Toggle';
 import { Toast } from '@/components/Toast';
 import { elevation, fonts, radius, space } from '@/design/tokens';
 import { scanError, t } from '@/i18n';
-import { folders, type FolderRoot } from '@/lib/folders';
-import { shell } from '@/lib/shell';
+import { folders } from '@/lib/folders';
 import type { FilterId } from '@/scan/engine/imaging/filters';
 import { isBlurred } from '@/scan/engine/imaging/sharpness';
 import { defaultTitle } from '@/scan/export';
@@ -25,8 +24,7 @@ import { PageImage } from '@/scan/ui/PageImage';
 import { Unsupported } from '@/scan/ui/Unsupported';
 import { useTileDrag } from '@/scan/ui/useTileDrag';
 import { ask } from '@/state/ask';
-import { INBOX_TARGET, usePalette, usePrefs } from '@/state/prefs';
-import { inboxDir } from '@/archive/inbox';
+import { usePalette, usePrefs } from '@/state/prefs';
 
 const MAX_W = 960;
 const TILE_MIN = 140;
@@ -39,13 +37,10 @@ export default function ScanReview() {
   const { pages, title, loaded, aiRead, unsaved, restore, setTitle, setAiRead, applyToAll, clear, seal, moveTo, moveMany, removeMany, updateMany } = useScan();
   const focused = useIsFocused();
   const scan = usePrefs((s) => s.scan);
-  const scanTo = usePrefs((s) => s.scanTo);
   const ai = usePrefs((s) => s.ai);
   // AI reading is offered once set up in Settings, and works on the text recognised on the device.
   const aiOffered = aiReady(ai) && scan.ocr;
   const setPrefs = usePrefs((s) => s.set);
-  const [roots, setRoots] = useState<FolderRoot[]>([]);
-  const [choosing, setChoosing] = useState(false);
   // A save under way (started here or on another review of this scan): the document waits for it.
   const progress = useScanSaving((s) => s.progress);
   const saving = useScanSaving((s) => s.controller);
@@ -86,18 +81,13 @@ export default function ScanReview() {
   const picked = selected ? pages.filter((pg) => selected.has(pg.id)) : [];
 
   useEffect(() => void restore(), [restore]);
-  useEffect(() => {
-    // The app's own folder is the default ("null") choice, listed first.
-    folders.roots(false).then((r) => setRoots(r.filter((x) => x.kind !== 'app')), () => setRoots([]));
-  }, []);
   // Render (and read) the pages in the background while the user looks them over (not while the camera is on top), so saving is quick.
   useEffect(() => {
     if (pages.length && focused) prefetchExports(pages, scan);
   }, [pages, scan, focused]);
 
+  // Saved as anything added is: into the Tessel folder (its Inbox, where there is one).
   const archive = usePrefs((s) => s.archive);
-  const toInbox = !!archive && scanTo === INBOX_TARGET;
-  const target = toInbox ? null : (roots.find((r) => r.id === scanTo) ?? null);
   // The chips show (and set) the filter of the selected pages while selecting, else of all pages; none when they
   // differ, or while selecting with nothing picked (then they do nothing, and say so).
   const scope = selected ? picked : pages;
@@ -140,8 +130,7 @@ export default function ScanReview() {
     if (useScanSaving.getState().controller || !pages.length) return;
     // Write access to the folder is asked for now, while the tap still counts (after the pages are rendered and
     // read it no longer would, and saving would fail at the very end).
-    const root = toInbox ? archive : target?.id;
-    if (root && !(await folders.unlock(root, true).catch(() => false))) return notify(t.scanSaveFailed(t.writeDenied));
+    if (archive && !(await folders.unlock(archive, true).catch(() => false))) return notify(t.scanSaveFailed(t.writeDenied));
     const controller = new AbortController();
     // Saved as it is now: an Undo offered before (a page deleted) can't change what is being written.
     sayScan(null);
@@ -151,8 +140,7 @@ export default function ScanReview() {
     // The pages being saved: only they leave the scan when it is saved.
     const saved = pages.map((pg) => pg.id);
     const run = async () => {
-      const to = toInbox ? { root: archive!, dir: await inboxDir(archive!) } : target && { root: target.id };
-      const { doc, aiError, unread } = await saveScan(pages, scan, title, placeholder, to, setProgress, controller.signal, aiOffered && aiRead ? ai : undefined);
+      const { doc, aiError, unread } = await saveScan(pages, scan, title, placeholder, null, setProgress, controller.signal, aiOffered && aiRead ? ai : undefined);
       clear(saved);
       // Moved on meanwhile (the camera, say): the document is in the library; nothing takes the user away.
       if (!here.current) return;
@@ -172,14 +160,6 @@ export default function ScanReview() {
     if (answer === null) return;
     clear();
     router.replace('/');
-  };
-
-  const addFolder = async () => {
-    const root = await folders.add().catch(() => null);
-    if (!root) return;
-    setRoots((await folders.roots(false).catch(() => [root])).filter((x) => x.kind !== 'app'));
-    setPrefs({ scanTo: root.id });
-    setChoosing(false);
   };
 
   if (Platform.OS !== 'web') return <Unsupported />;
@@ -319,16 +299,6 @@ export default function ScanReview() {
                     </Pressable>
                   </>
                 )}
-                <View style={{ height: 1, backgroundColor: p.hairline }} />
-                <Pressable testID="scan-destination" accessibilityRole="button" onPress={() => setChoosing(true)} style={styles.row}>
-                  <View style={{ flex: 1 }}>
-                    <T>{t.scanSaveTo}</T>
-                    <T v="caption" color={p.muted} numberOfLines={1}>
-                      {toInbox ? t.scanToInbox : target ? target.name : shell ? t.scanAppFolder : t.scanLibraryOnly}
-                    </T>
-                  </View>
-                  <Icon name="chevronRight" color={p.muted} size={20} />
-                </Pressable>
               </View>
               )}
             </>
@@ -374,45 +344,11 @@ export default function ScanReview() {
         </View>
       )}
 
-      {choosing && (
-        <Pressable accessibilityRole="button" accessibilityLabel={t.cancel} onPress={() => setChoosing(false)} style={[StyleSheet.absoluteFill, styles.scrim, { backgroundColor: p.scrim }]}>
-          <Pressable onPress={() => {}} style={[styles.sheetCard, { backgroundColor: p.surface, marginBottom: insets.bottom + space.lg }, elevation(p.shadow, 3)]}>
-            <T v="headline" style={{ marginBottom: space.sm }}>
-              {t.scanSaveTo}
-            </T>
-            <Choice icon="pages" label={shell ? t.scanAppFolder : t.scanLibraryOnly} note={shell ? t.scanAppFolderNote : t.scanLibraryNote} on={!target && !toInbox} onPress={() => (setPrefs({ scanTo: null }), setChoosing(false))} />
-            {archive && <Choice icon="inbox" label={t.scanToInbox} note={t.scanToInboxNote} on={toInbox} onPress={() => (setPrefs({ scanTo: INBOX_TARGET }), setChoosing(false))} />}
-            {roots.map((r) => (
-              <Choice key={r.id} icon="folder" label={r.name} on={target?.id === r.id} onPress={() => (setPrefs({ scanTo: r.id }), setChoosing(false))} />
-            ))}
-            {folders.supported && <Choice icon="folderAdd" label={t.scanOtherFolder} onPress={() => void addFolder()} />}
-          </Pressable>
-        </Pressable>
-      )}
       {focused && <Toast message={message} id={messageId} onDismiss={dismiss} above={selected ? 110 : 64} action={undo ? { label: t.undo, onPress: undo } : undefined} />}
     </View>
   );
 }
 
-function Choice({ icon, label, note, on, onPress }: { icon: 'pages' | 'folder' | 'folderAdd' | 'inbox'; label: string; note?: string; on?: boolean; onPress: () => void }) {
-  const p = usePalette();
-  return (
-    <Pressable accessibilityRole="radio" aria-checked={!!on} onPress={onPress} style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.choice, pressed && { opacity: 0.7 }, hovered && { backgroundColor: p.hairline }]}>
-      <Icon name={icon} color={on ? p.accent : p.inkSoft} size={20} />
-      <View style={{ flex: 1 }}>
-        <T color={on ? p.accent : p.ink} numberOfLines={1}>
-          {label}
-        </T>
-        {note ? (
-          <T v="caption" color={p.muted}>
-            {note}
-          </T>
-        ) : null}
-      </View>
-      {on && <Icon name="check" color={p.accent} size={18} />}
-    </Pressable>
-  );
-}
 
 const styles = StyleSheet.create({
   title: { fontFamily: fonts.serif, fontSize: 20, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.lg, paddingVertical: space.md, marginBottom: space.xl },
@@ -427,7 +363,4 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.md, marginTop: space.xl, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: space.md, borderTopWidth: 1 },
-  scrim: { justifyContent: 'flex-end', alignItems: 'center', padding: space.lg },
-  sheetCard: { width: '100%', maxWidth: 480, borderRadius: radius.lg, padding: space.lg, gap: space.xs },
-  choice: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md, paddingHorizontal: space.sm, borderRadius: radius.sm },
 });

@@ -225,7 +225,7 @@ export default function Inbox() {
                     onFile={() => void fileOne(item)}
                     onDiscard={() => void discardOne(item)}
                     onSuggest={aiReady(ai) ? () => void askAi(item) : undefined}
-                    onOpen={() => void openDoc({ key: item.entry.id, place: { kind: 'folder', root: archive, rootName: '', entry: item.entry }, name: item.entry.name, size: item.entry.size, modified: item.entry.modified, ...detailsOf(item) }, 0, '').catch((e) => setNotice(message(e)))}
+                    onOpen={() => void openDoc({ key: item.entry.id, place: { kind: 'folder', root: archive, rootName: '', entry: item.entry }, name: item.entry.name, size: item.entry.size, modified: item.entry.modified, ...detailsOf(item) }, undefined, '').catch((e) => setNotice(message(e)))}
                   />
                 ))}
               </View>

@@ -1,7 +1,6 @@
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { create } from 'zustand';
 
 import { fonts, space } from '@/design/tokens';
 import { t } from '@/i18n';
@@ -22,13 +21,8 @@ export const TAB_BAR_H = 0;
 /** Scanning runs in the web app (and the Android app, which is the web app). */
 export const scanSupported = Platform.OS === 'web';
 
-/** What Documents shows: everything by what it is, or the folders as they are. */
-export type DocsView = 'all' | 'folders';
-export const useDocsView = create<{ view: DocsView }>(() => ({ view: 'all' }));
-
-/** Back to Documents (its view chosen): brought back if it is open underneath, never stacked. */
-export function goTab(_tab: Tab, view?: DocsView, from?: Tab) {
-  if (view) useDocsView.setState({ view });
+/** Back to Documents: brought back if it is open underneath, never stacked. */
+export function goTab(_tab: Tab, from?: Tab) {
   if (from) return;
   if (router.canDismiss()) router.dismissTo('/');
   else router.replace('/');

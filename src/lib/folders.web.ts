@@ -14,17 +14,17 @@ const shellAccess = () => shellRequest<{ allFiles: boolean; app?: boolean }>('ac
 const APP_ROOT: FolderRoot = { id: APP_ROOT_ID, name: 'Tessel', kind: 'app' };
 
 /**
- * Android app: folders granted through the system folder picker (and, with all files access, the whole
- * device), listed, served and changed by the app (see shell/android Folders.kt).
+ * Android app: folders granted through the system folder picker, listed, served and changed by the app (see
+ * shell/android Folders.kt).
  */
 const shellFolders: FoldersApi = {
   supported: true,
   canAdd: true,
   allFilesSupported: true,
-  async roots(showAll) {
+  async roots() {
     const [picked, access] = await Promise.all([shellRequest<{ uri: string; name: string }[]>('folders'), shellAccess()]);
+    // The sources added (no whole device: Tessel reads what it is given).
     const roots: FolderRoot[] = picked.map((f) => ({ id: f.uri, name: f.name, kind: 'folder' }));
-    if (showAll && access.allFiles) roots.unshift({ id: 'all', name: t.allDocuments, kind: 'all' }, { id: 'device', name: t.internalStorage, kind: 'device' });
     // Android 8–10 need the storage permission for it: shown locked until then.
     roots.unshift({ ...APP_ROOT, locked: !access.app });
     return roots;

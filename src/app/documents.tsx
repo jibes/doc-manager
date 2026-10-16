@@ -5,17 +5,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ascending, FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
 import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/archive/indexer';
-import { HitRow } from '@/archive/Results';
+import { HitRow, importFromFolder } from '@/archive/Results';
 import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
-import { AppFrame, AppHeader, columnWidth, scanSupported, TAB_BAR_H, useDocsView, useMainWidth, useTabBar, useWide } from '@/components/AppNav';
+import { AppFrame, AppHeader, columnWidth, scanSupported, useMainWidth } from '@/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
 import { SortChip } from '@/components/SortChip';
 import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
-import { allInFolders, byFolder, deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
-import { useClipboard } from '@/state/clipboard';
+import { deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
+import { readAdded, useIntake } from '@/archive/intake';
+import { aiReady } from '@/scan/ai';
 import { Toast } from '@/components/Toast';
 import { useNotice } from '@/components/useNotice';
 import { fonts, radius, space } from '@/design/tokens';
@@ -33,7 +34,6 @@ import { repo, type DocRecord } from '@/storage';
 import { useCache } from '@/state/cache';
 import { APP_ROOT_ID } from '@/lib/nesting';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
-import { addFolder, PasteBar, Roots } from './files';
 
 const newViewId = () => `v-${Date.now().toString(36)}`;
 
@@ -61,12 +61,12 @@ const AHEAD = 1500;
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
 /** What the screen shows: the search, filters and place, and the order. */
-type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; place?: Where; relevance: boolean };
+type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; place: Where; relevance: boolean };
 /** Views from before the order was kept: a search by date was best matches first. */
 const byRelevanceIn = (v: SavedView) => !!v.query && (v.relevance ?? v.sort === 'date');
 const sameView = (v: SavedView, s: Showing) =>
   v.query === s.query &&
-  (v.place ?? null) === (s.place ?? null) &&
+  (v.place ?? 'tessel') === s.place &&
   FACETS.every((k) => (v.filter[k] ?? '') === (s.filter[k] ?? '')) &&
   byRelevanceIn(v) === s.relevance &&
   (s.relevance || (v.sort === s.sort && !!v.reverse === s.reverse));
@@ -79,21 +79,18 @@ export default function Documents() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ q?: string; view?: string; sort?: string }>();
-  const view = useDocsView((s) => s.view);
   const archive = usePrefs((s) => s.archive);
   const inboxHere = usePrefs((s) => s.inboxHere);
   const inboxCount = useInboxCount((s) => s.count);
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
-  const tabBar = useTabBar();
-  const wide = useWide();
   const mainWidth = useMainWidth();
-  const pasting = useClipboard((s) => !!s.clip);
-  const [place, setPlace] = useState<Where | undefined>(undefined);
-  // Opened on Folders (from an old Files link), then counted and remembered as the place last used.
-  useEffect(() => {
-    if (params.view === 'folders') useDocsView.setState({ view: 'folders' });
-    void refreshInboxCount();
-  }, [params.view]);
+  // Tessel's own documents, or the sources it reads (one at a time: a scope, not a filter).
+  const [place, setPlace] = useState<Where>('tessel');
+  useEffect(() => void refreshInboxCount(), []);
+  const aiSet = usePrefs((s) => aiReady(s.ai));
+  const improveAdded = usePrefs((s) => s.improveAdded);
+  const intake = useIntake((s) => s.reading);
+  const intakeSaid = useIntake((s) => s.said);
   const { view: viewFile, importFiles } = useLibrary();
   const { kind: installKind, install } = useInstall();
   // Open file: one file is opened to look at (kept when something about it is saved); several, and the guide, are kept.
@@ -101,11 +98,13 @@ export default function Documents() {
     const one = items.length === 1 && !items[0].bundled ? await viewFile(items[0]) : null;
     if (one) return openRecord(one);
     const added = items.length === 1 && !items[0].bundled ? [] : await importFiles(items);
+    readAdded(added);
     if (added.length === 1) openRecord(added[0]);
   };
-  // Add → Files: kept in the Tessel folder (its Inbox, where there is one).
-  const addFiles = async () => {
+  // Add → Files: kept in the Tessel folder (its Inbox, where there is one); pages without text get theirs.
+  const addFiles = async (ai: boolean) => {
     const added = await importFiles(await pickPdfs());
+    readAdded(added, ai);
     if (added.length === 1) openRecord(added[0]);
     else if (added.length) say(t.filesAddedN(added.length));
   };
@@ -118,10 +117,12 @@ export default function Documents() {
       ...(archive ? [{ key: 'more-rules', icon: 'tag' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
       ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
     ]);
-  const addMenu = () =>
+  // The model reading the text is asked for on each add (from the default in Settings), where one is set up.
+  const addMenu = (ai = improveAdded) =>
     showActions(t.addTitle, [
       ...(scanSupported ? [{ key: 'add-camera', icon: 'camera' as IconName, label: t.addCamera, onPress: () => router.push('/scan') }] : []),
-      { key: 'add-files', icon: 'documents' as IconName, label: t.addFiles, onPress: () => void addFiles() },
+      { key: 'add-files', icon: 'documents' as IconName, label: t.addFiles, onPress: () => void addFiles(aiSet && ai) },
+      ...(aiSet ? [{ key: 'add-ai', icon: (ai ? 'check' : 'textView') as IconName, label: ai ? t.addAiOn : t.addAiOff, onPress: () => addMenu(!ai) }] : []),
     ]);
   const [query, setQuery] = useState(params.q ?? '');
   const [filter, setFilter] = useState<Filter>({});
@@ -161,8 +162,6 @@ export default function Documents() {
   // Picked documents (by key), while picking: Esc, Back and switching to Folders (here or in the sidebar) end it.
   const [selected, setSelected] = useState<Set<string> | null>(null);
   useEndPicking(!!selected, setSelected);
-  useEffect(() => useDocsView.subscribe((s, was) => s.view !== was.view && setSelected(null)), []);
-  const setClip = useClipboard((s) => s.set);
   const { done, running, total } = useIndex();
   // Read again as indexing adds, moves and drops documents (not with each one).
   const indexed = useIndex((s) => s.changed);
@@ -218,8 +217,11 @@ export default function Documents() {
   const base = useMemo(() => {
     const answer = found?.hits ?? [];
     const hits = searching ? (bestFirst ? answer : sortDocs(answer, sort, (h) => h.doc, openedAt, reverse)) : sortDocs(all, sort, undefined, openedAt, reverse).map(asHit);
-    return place ? hits.filter((h) => placeOf(h.doc, archive) === place) : hits;
+    return hits.filter((h) => placeOf(h.doc, archive) === place);
   }, [searching, found, all, sort, reverse, bestFirst, place, archive, openedAt]);
+  // A search says what the other side has (the scope isn't a place to forget).
+  const elsewhere = useMemo(() => (searching && found ? found.hits.filter((h) => placeOf(h.doc, archive) !== place && matches(h.doc, filter)).length : 0), [searching, found, place, archive, filter]);
+  const hasSources = useMemo(() => place === 'sources' || all.some((d) => placeOf(d, archive) === 'sources'), [all, place, archive]);
   const counts = useMemo(() => facetCounts(base.map((h) => h.doc), filter), [base, filter]);
   const shown = useMemo(() => base.filter((h) => matches(h.doc, filter)), [base, filter]);
 
@@ -284,20 +286,20 @@ export default function Documents() {
     setFilter(v.filter);
     setSort(v.sort);
     setReverse(!!v.reverse);
-    setPlace(v.place);
+    setPlace(v.place ?? 'tessel');
     setBestFirst(byRelevanceIn(v));
     setLimit(PAGE);
   };
   const current = views.find((v) => sameView(v, { query: q, filter, sort, reverse, place, relevance: byRelevance }));
-  const canSave = !current && (!!q || !isEmpty(filter) || !!place);
+  const canSave = !current && (!!q || !isEmpty(filter) || place !== 'tessel');
   // Settings that couldn't be read say so; anything else, that it wasn't saved.
   const viewFailed = (e: unknown) => say(e instanceof Error && e.message === t.settingsUnreadable ? e.message : t.viewFailed);
 
   const save = async () => {
-    const suggested = [place ? placeName(place) : '', ...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
+    const suggested = [place !== 'tessel' ? placeName(place) : '', ...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
     const name = (await ask({ title: t.saveView, input: suggested, placeholder: t.viewName, confirm: t.saveView }))?.trim();
     if (!name) return;
-    const view: SavedView = { id: newViewId(), name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(place ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
+    const view: SavedView = { id: newViewId(), name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(place !== 'tessel' ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
     saveView(view).then(() => say(t.viewSaved(name)), viewFailed);
   };
   const viewActions = (v: SavedView) =>
@@ -307,23 +309,22 @@ export default function Documents() {
     ]);
 
   // The filters in use, and all of them in one sheet (those without values in these documents left out).
-  const active = (place ? 1 : 0) + FACETS.filter((f) => filter[f]).length;
+  const active = FACETS.filter((f) => filter[f]).length;
   const openFilters = () =>
     showActions(t.filter, [
-      { key: 'facet-place', icon: 'folder' as IconName, label: `${t.placeFacet}: ${place ? placeName(place) : t.facetAny}`, onPress: choosePlace },
       ...FACETS.filter((f) => counts[f].length > 0 || filter[f]).map((f) => ({
         key: `facet-${f}`,
         icon: facetIcon[f],
         label: `${facetName[f]}: ${filter[f] ?? t.facetAny}`,
         onPress: () => choose(f),
       })),
-      ...(active ? [{ key: 'facet-clear', icon: 'close' as IconName, label: t.clearFilters, onPress: () => (setFilter({}), setPlace(undefined)) }] : []),
+      ...(active ? [{ key: 'facet-clear', icon: 'close' as IconName, label: t.clearFilters, onPress: () => setFilter({}) }] : []),
     ]);
-  const choosePlace = () =>
-    showActions(t.placeFacet, [
-      { key: 'place-any', icon: place ? 'close' : 'check', label: t.facetAny, onPress: () => setPlace(undefined) },
-      ...WHERES.map((pl) => ({ key: `place-${pl}`, icon: (place === pl ? 'check' : placeIcon[pl]) as IconName, label: placeName(pl), onPress: () => setPlace(pl) })),
-    ]);
+  const scopeTo = (pl: Where) => {
+    setPlace(pl);
+    setSelected(null);
+    setLimit(PAGE);
+  };
   // Room for the action bar while picking.
   // Nothing indexed yet (and not searching): what to do instead of an empty list with its filters.
   const nothing = ready && all.length === 0 && !searching;
@@ -355,12 +356,15 @@ export default function Documents() {
     setAll((a) => a.filter((d) => !keys.has(d.key)));
     setFound((f) => f && { ...f, hits: f.hits.filter((h) => !keys.has(h.doc.key)) });
   };
-  const clip = (move: boolean) => {
-    setClip({ move, items: byFolder(picked) });
-    setSelected(null);
-    // On to the folders, to open the one they go to.
-    useDocsView.setState({ view: 'folders' });
-  };
+  // A source's documents kept: copied into the Tessel folder, as anything added is.
+  const keep = () =>
+    batch(async () => {
+      const added = [];
+      for (const d of picked) if (d.place.kind === 'folder') added.push(await importFromFolder(d.place, true));
+      const kept = added.filter((x) => !!x);
+      readAdded(kept);
+      return t.keptN(kept.length);
+    });
   const rename = async () => {
     const d = picked[0];
     // The list shows titles, the dialog the file's name: it says which one changes (a title is changed in Details).
@@ -400,7 +404,7 @@ export default function Documents() {
   };
 
   // More rows as the end of the list comes near (no button to press).
-  const more = view === 'all' && shown.length > limit;
+  const more = shown.length > limit;
   const onScroll = ({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (more && contentOffset.y + layoutMeasurement.height > contentSize.height - AHEAD) setLimit((l) => Math.max(l, visible.length + PAGE));
   };
@@ -416,7 +420,7 @@ export default function Documents() {
         contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
         <View style={{ width: column }}>
-          {selected && view === 'all' ? (
+          {selected ? (
             <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
           ) : (
             <AppHeader tab="documents">
@@ -426,32 +430,17 @@ export default function Documents() {
             </AppHeader>
           )}
 
-          {folders.supported && (
-            <View accessibilityRole="tablist" style={[styles.segments, { backgroundColor: p.hairline }]}>
-              {(['all', 'folders'] as const).map((v) => (
-                <Pressable
-                  key={v}
-                  testID={`docs-${v}`}
-                  role="tab"
-                  aria-selected={view === v}
-                  onPress={() => {
-                    setSelected(null);
-                    useDocsView.setState({ view: v });
-                  }}
-                  style={[styles.segment, view === v && { backgroundColor: p.raised }]}
-                >
-                  <T v="label" color={view === v ? p.ink : p.muted}>
-                    {v === 'all' ? t.allView : t.foldersView}
+          {hasSources && (
+            <View accessibilityRole="radiogroup" style={[styles.segments, { backgroundColor: p.hairline }]}>
+              {WHERES.map((pl) => (
+                <Pressable key={pl} testID={`scope-${pl}`} role="radio" aria-checked={place === pl} onPress={() => scopeTo(pl)} style={[styles.segment, place === pl && { backgroundColor: p.raised }]}>
+                  <T v="label" color={place === pl ? p.ink : p.muted}>
+                    {placeName(pl)}
                   </T>
                 </Pressable>
               ))}
             </View>
           )}
-
-          {view === 'folders' ? (
-            <Roots bottom={0} onError={say} />
-          ) : (
-          <>
 
           <View style={[styles.search, { backgroundColor: p.hairline }]}>
             <Icon name="search" size={16} color={p.muted} />
@@ -489,19 +478,35 @@ export default function Documents() {
             ) : (
               <View style={{ gap: space.lg, alignItems: 'center' }}>
                 <EmptyLibrary onAdd={async () => void openFiles(await pickPdfs())} onSample={async () => void openFiles([await sampleItem()])} />
-                {folders.canAdd && <Button testID="docs-add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={() => void addFolder(say)} />}
               </View>
             )
           ) : !ready && !searching ? (
             <ActivityIndicator color={p.muted} style={{ marginTop: space.xl }} />
           ) : (
           <>
-          {/* One row: the filters (first: always in reach), what is waiting (the inbox, on phones; sync issues), and the saved views. */}
+          {/* What waits for a look: the inbox, and documents being read. */}
+          {archive && inboxHere && inboxCount > 0 && place === 'tessel' && (
+            <Pressable testID="inbox-review" accessibilityRole="link" onPress={() => router.push('/inbox')} style={[styles.waiting, { backgroundColor: p.mark, borderColor: p.markRing }]}>
+              <Icon name="inbox" size={16} color={p.ink} />
+              <T v="label" style={{ flex: 1 }}>
+                {t.toReview(inboxCount)}
+              </T>
+              <Icon name="chevronRight" size={16} color={p.muted} />
+            </Pressable>
+          )}
+          {(intake || intakeSaid) && (
+            <View testID="intake" style={[styles.waiting, { borderColor: p.hairline }]}>
+              {intake ? <ActivityIndicator size="small" color={p.muted} /> : <Icon name="check" size={16} color={p.muted} />}
+              <T v="caption" color={p.muted} numberOfLines={1} style={{ flex: 1 }}>
+                {intake ? t.intakeReading(intake.name, intake.done, intake.total) : intakeSaid}
+              </T>
+              {!intake && <IconButton icon="close" size={28} label={t.dismiss} onPress={() => useIntake.setState({ said: null })} />}
+            </View>
+          )}
+          {/* One row: the filters (first: always in reach), sync issues, and the saved views. */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
             <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
-            {archive && inboxHere && !wide && <Chip testID="docs-inbox" icon="inbox" label={t.inboxTitle} count={inboxCount} onPress={() => router.push('/inbox')} />}
             {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
-            {place && <Chip testID="facet-place" label={placeName(place)} on onPress={choosePlace} />}
             {FACETS.filter((f) => filter[f]).map((f) => (
               <Chip key={f} testID={`facet-${f}`} label={filter[f]!} on onPress={() => choose(f)} />
             ))}
@@ -538,6 +543,13 @@ export default function Documents() {
             <T v="kicker" color={p.muted} testID="docs-count" numberOfLines={1}>
               {pending && !shown.length ? '' : t.documentsCount(shown.length)}
             </T>
+            {elsewhere > 0 && (
+              <Pressable testID="scope-other" accessibilityRole="button" onPress={() => scopeTo(place === 'tessel' ? 'sources' : 'tessel')} hitSlop={6}>
+                <T v="caption" color={p.accent}>
+                  {t.otherSide(elsewhere, placeName(place === 'tessel' ? 'sources' : 'tessel'))}
+                </T>
+              </Pressable>
+            )}
             <View style={styles.countTools}>
               <SortChip testID="docs-sort" label={byRelevance ? t.sortRelevance : sortName[sort]} up={byRelevance ? undefined : ascending(sort, reverse)} onPress={chooseSort} onTurn={() => setReverse((r) => !r)} />
             </View>
@@ -566,9 +578,7 @@ export default function Documents() {
           ) : (
             <T color={p.muted}>{t.documentsEmpty}</T>
           )}
-          {more && <ActivityIndicator testID="docs-more" color={p.muted} style={{ marginTop: space.md }} />}
-          </>
-          )}
+          {more && <ActivityIndicator testID="docs-loading" color={p.muted} style={{ marginTop: space.md }} />}
           </>
           )}
           {/* AGPL §13: where the source is. */}
@@ -583,35 +593,36 @@ export default function Documents() {
           </Pressable>
         </View>
       </ScrollView>
-      {selected && view === 'all' && (
-        <ActionBar bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4}>
+      {selected && (
+        <ActionBar bottom={insets.bottom} side={space.xl - 4}>
+          {/* A source's documents are opened, kept, shared or deleted; Tessel's are its own to rename. */}
+          {place === 'sources' && <Action testID="act-keep" icon="inbox" label={t.keep} disabled={!picked.length} onPress={() => void keep()} />}
           {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void batch(() => shareAll(picked))} />}
-          <Action testID="act-copy" icon="copy" label={t.copy} disabled={!allInFolders(picked)} onPress={() => clip(false)} />
-          <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => clip(true)} />
-          <Action
-            testID="act-rename"
-            icon="pencil"
-            label={t.rename}
-            disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
-            onPress={() => void rename()}
-          />
+          {place === 'tessel' && (
+            <Action
+              testID="act-rename"
+              icon="pencil"
+              label={t.rename}
+              disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
+              onPress={() => void rename()}
+            />
+          )}
           <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => void remove()} />
         </ActionBar>
       )}
-      {view === 'folders' && <PasteBar here={null} bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4} onDone={() => {}} onError={say} />}
       {/* Add: the camera or files, into the Tessel folder. */}
-      {!selected && view === 'all' && (
+      {!selected && (
         <Pressable
           testID="add-menu"
           accessibilityRole="button"
           accessibilityLabel={t.addTitle}
-          onPress={addMenu}
+          onPress={() => addMenu()}
           style={[styles.fab, { backgroundColor: p.accent, bottom: insets.bottom + space.xl, right: space.xl }]}
         >
           <Icon name="plus" size={26} color={p.canvas} />
         </Pressable>
       )}
-      <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} above={(tabBar ? TAB_BAR_H : 0) + ((pasting && view === 'folders') || selected ? BAR_ROOM : 0)} />
+      <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} above={selected ? BAR_ROOM : 0} />
     </AppFrame>
   );
 }
@@ -654,11 +665,10 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
   );
 }
 
-const placeIcon: Record<Where, IconName> = { tessel: 'inbox', sources: 'folder' };
 const placeName = (pl: Where) => (pl === 'tessel' ? t.placeTessel : t.placeSources);
 /**
  * The Tessel folder is everything Tessel keeps: the folder chosen for it (synced, often), Documents/Tessel on
- * Android, the browser's own storage. Sources are the folders it reads: those added, and the whole device.
+ * Android, the browser's own storage. Sources are the folders it reads (added in Settings).
  */
 const placeOf = (d: IndexedDoc, tessel: string | null): Where =>
   d.place.kind === 'library' || d.place.root === APP_ROOT_ID || d.place.root === tessel ? 'tessel' : 'sources';
@@ -673,6 +683,7 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.xs, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36 },
   empty: { alignItems: 'center', gap: space.md, paddingVertical: space.xxxl, paddingHorizontal: space.lg },
+  waiting: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.md, minHeight: 40, marginTop: space.md },
   countRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: space.md, rowGap: space.xs, marginTop: space.lg, marginBottom: space.sm, minHeight: 32 },
   countTools: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' },
 });

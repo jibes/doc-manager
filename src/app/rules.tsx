@@ -51,8 +51,10 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
   useEffect(() => void loadRules(archive), [archive]);
   const [template, setTemplate] = useState<string | null>(null);
   const [draft, setDraft] = useState({ match: '', sender: '', type: '', tags: '' });
+  // No folders in the Tessel folder: a template names the file only.
+  const slash = !!template?.includes('/');
   const saveTemplate = () => {
-    if (template === null || template.trim() === rules.template) return;
+    if (template === null || slash || template.trim() === rules.template) return;
     changeRules(archive, (r) => ({ ...r, template: template.trim() || r.template })).then(() => setTemplate(null), onError);
   };
   const add = () => {
@@ -66,10 +68,10 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
       <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
         <Field label={t.rulesTemplate} value={template ?? rules.template} onChange={setTemplate} testID="rules-template" />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <T v="caption" color={p.muted} style={{ flex: 1 }}>
-            {t.rulesTemplateNote}
+          <T v="caption" color={slash ? p.markRing : p.muted} style={{ flex: 1 }} testID="rules-template-note">
+            {slash ? t.rulesTemplateNoSlash : t.rulesTemplateNote}
           </T>
-          {template !== null && template.trim() !== rules.template && <Button testID="rules-template-save" kind="quiet" label={t.save} onPress={saveTemplate} />}
+          {template !== null && !slash && template.trim() !== rules.template && <Button testID="rules-template-save" kind="quiet" label={t.save} onPress={saveTemplate} />}
         </View>
       </View>
       {rules.rules.length > 0 && (
