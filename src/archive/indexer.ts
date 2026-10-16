@@ -2,9 +2,7 @@ import { createStore, set, values, type UseStore } from 'idb-keyval';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
-import { readPackage } from '@/book/epub';
 import { engine } from '@/engine';
-import { t } from '@/i18n';
 import { BASE } from '@/lib/base';
 import { folders, type FolderRoot } from '@/lib/folders';
 import type { FolderEntry } from '@/lib/folderTypes';
@@ -334,15 +332,6 @@ async function read(c: Candidate): Promise<Indexable | null> {
   if (!bytes) return null;
   const hash = await contentHash(bytes);
   const share = await docKey(bytes);
-  // A book: its title, author, date and subjects (its text isn't searched yet).
-  if (/\.epub$/i.test(c.name)) {
-    try {
-      const pkg = readPackage(new Uint8Array(bytes));
-      return { ...base, ...empty, hash, share, title: pkg.title ?? '', sender: pkg.author ?? '', type: t.bookType, tags: pkg.subjects.slice(0, 8), date: pkg.date ?? '' };
-    } catch {
-      return { ...base, ...empty, hash, share, type: t.bookType, failed: true };
-    }
-  }
   let handle;
   try {
     handle = await engine.open({ kind: 'bytes', bytes });

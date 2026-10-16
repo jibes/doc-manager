@@ -1,6 +1,5 @@
 // End-to-end smoke test against a running web build (default: expo dev server on :8081).
 // Usage: BASE=http://localhost:8081 node e2e/smoke.mjs
-import { Buffer } from 'node:buffer';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
@@ -681,125 +680,19 @@ async function regressions() {
   await ctx.close();
 }
 
-// EPUB books: straight onto the reading list; contents, footnotes, inline formatting, figures, search,
-// position, finishing; EPUB 2 contents; a broken file explained.
+// EPUB books aren't Tessel's: opening one says so and adds nothing.
 async function books() {
   const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`books: ${e.message}`));
-  await openFixture(page, 'book.epub');
-  const view = page.getByTestId('text-view');
-  await view.waitFor({ timeout: 10000 });
-  await page.waitForTimeout(800);
-  const label = async () => (await page.getByTestId('page-label').innerText()).replace(/\s+/g, ' ');
-  check(/^1 \/ \d+ · 0%/.test(await label()), `books: opens at the start, on the reading list (${await label()})`);
-  const fmt = await view.evaluate((root) => {
-    const span = (re) => [...root.querySelectorAll('span, div')].find((e) => e.children.length === 0 && re.test(e.textContent));
-    const em = span(/^the tide$/);
-    const strong = span(/^very$/);
-    const para = em?.parentElement;
-    const cs = (e) => e && getComputedStyle(e);
-    return { em: cs(em)?.fontStyle, strong: cs(strong)?.fontWeight, same: cs(em)?.fontFamily === cs(para)?.fontFamily };
-  });
-  check(fmt.em === 'italic' && Number(fmt.strong) >= 600 && fmt.same, `books: inline emphasis keeps the text font (${JSON.stringify(fmt)})`);
-  // Footnote reference → the note.
-  await view.getByRole('link', { name: '1', exact: true }).first().click();
-  await page.waitForTimeout(800);
-  const noteShown = await view.evaluate((root) => [...root.querySelectorAll('div')].some((e) => e.children.length === 0 && /first ferry leaves/.test(e.textContent) && e.getBoundingClientRect().top < innerHeight && e.getBoundingClientRect().bottom > 0));
-  check(noteShown, 'books: a footnote reference jumps to the note');
-  // Reading hides the toolbars; a tap on the text brings them back.
-  await page.keyboard.press('Home');
+  await page.goto(BASE);
+  const add = page.getByTestId('add').locator('visible=true').first();
+  await add.waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), add.click()]);
+  await fc.setFiles(new URL('./fixtures/book.epub', import.meta.url).pathname);
+  const said = await page.getByText(/is a book\. Tessel opens PDFs/).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
   await page.waitForTimeout(500);
-  await page.mouse.move(640, 430);
-  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 250);
-  await page.waitForTimeout(700);
-  const toolbar = () => page.getByTestId('back').evaluate((e) => { for (let n = e; n; n = n.parentElement) if (getComputedStyle(n).opacity === '0') return false; return true; });
-  const hidden = !(await toolbar());
-  await page.mouse.click(640, 430);
-  await page.waitForTimeout(500);
-  check(hidden && (await toolbar()), `books: a tap on the text shows the hidden toolbar (hidden before: ${hidden})`);
-  // Contents.
-  await page.getByTestId('open-find').click();
-  await page.getByTestId('find-panel').getByText('The Harbour', { exact: true }).click();
-  await page.waitForTimeout(800);
-  check(/^1 \//.test(await label()), `books: contents jump to chapter one (${await label()})`);
-  const img = await view.evaluate((root) => { const i = root.querySelector('img'); return i ? i.naturalWidth : -1; });
-  check(img > 0, 'books: images from the book are shown');
-  await page.getByTestId('find-panel').getByText('At dusk').click();
-  await page.waitForTimeout(800);
-  const dusk = await view.evaluate((root) => [...root.querySelectorAll('div')].some((e) => e.children.length === 0 && e.textContent === 'At dusk' && e.getBoundingClientRect().top > 50 && e.getBoundingClientRect().top < innerHeight));
-  check(dusk, 'books: contents jump to a section');
-  await page.keyboard.press('Escape');
-  await page.getByTestId('find-panel').waitFor({ state: 'detached' });
-  // Search.
-  await page.keyboard.press('Control+f');
-  await page.getByTestId('search-input').fill('first ferry');
-  await page.waitForTimeout(500);
-  await page.getByTestId('search-input').press('Enter');
-  // Esc in the (focused) field closes the panel and keeps the matches.
-  await page.getByTestId('search-input').press('Escape');
-  await page.waitForTimeout(800);
-  check((await page.getByTestId('find-panel').count()) === 0 && (await page.getByTestId('find-clear').count()) === 1, 'books: Esc in the search field closes search, keeps matches');
-  const marked = await view.evaluate((root) => [...root.querySelectorAll('span')].filter((e) => /^first ferry$/i.test(e.textContent) && getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)').length);
-  check(marked > 0, `books: search highlights matches (${marked})`);
-  await page.getByTestId('find-clear').click();
-  // Position is kept; reaching the end finishes the book.
-  await page.keyboard.press('Home');
-  await page.waitForTimeout(500);
-  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(1000);
-  const before = await label();
-  await page.keyboard.press('Escape');
-  await page.getByTestId('reading-list').waitFor();
-  const card = await page.getByTestId('reading-list').innerText();
-  check(/Harbour Notes/.test(card) && (await page.getByTestId('recent-row').count()) === 0, 'books: on the reading list (not again under Recent)');
-  await page.reload();
-  await page.getByTestId('continue').click();
-  await view.waitFor();
-  await page.waitForTimeout(1200);
-  check((await label()) === before, `books: reopens where it was left (${before} → ${await label()})`);
-  // Jumping to the end isn't reading it; scrolling there is.
-  await page.keyboard.press('End');
-  await page.waitForTimeout(1200);
-  await page.keyboard.press('Escape');
-  await page.getByTestId('reading-list').waitFor();
-  check(!/Finished/i.test(await page.getByTestId('reading-list').innerText()), 'books: jumping to the end does not finish the book');
-  await page.getByTestId('continue').click();
-  await view.waitFor();
-  await page.waitForTimeout(800);
-  for (let i = 0; i < 4; i++) {
-    await page.keyboard.press('PageUp');
-    await page.waitForTimeout(150);
-  }
-  for (let i = 0; i < 6; i++) {
-    await page.keyboard.press(' ');
-    await page.waitForTimeout(250);
-  }
-  await page.waitForTimeout(900);
-  await page.keyboard.press('Escape');
-  await page.getByTestId('reading-list').waitFor();
-  check(/Finished · 1/i.test(await page.getByTestId('reading-list').innerText()), 'books: reading to the end finishes the book');
-  // EPUB 2 with an NCX table of contents.
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
-  await fc.setFiles(new URL('./fixtures/book2.epub', import.meta.url).pathname);
-  await view.waitFor({ timeout: 10000 });
-  await keepOpen(page);
-  await page.waitForTimeout(500);
-  await page.getByTestId('open-find').click();
-  await page.getByTestId('find-panel').getByText('Departure').waitFor({ timeout: 5000 }).then(
-    () => check(true, 'books: EPUB 2 contents (NCX)'),
-    () => check(false, 'books: EPUB 2 contents (NCX)'),
-  );
-  await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
-  // Not really an EPUB.
-  await page.getByTestId('continue').waitFor();
-  const [fc2] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
-  await fc2.setFiles({ name: 'broken.epub', mimeType: 'application/epub+zip', buffer: Buffer.from('not a zip') });
-  await page.getByText('couldn’t be read as an EPUB book').waitFor({ timeout: 5000 }).then(
-    () => check(true, 'books: a broken EPUB is explained'),
-    () => check(false, 'books: a broken EPUB is explained'),
-  );
+  check(said && (await page.getByTestId('reader').count()) === 0 && (await opened(page).count()) === 0, 'books: an EPUB is not opened or added, and Tessel says why');
   await ctx.close();
 }
 
@@ -1034,9 +927,8 @@ async function foldersDesktop() {
   await vis('sort-turn').click();
   await page.screenshot({ path: `${OUT}folders-grid.png` });
   await vis('folder-dir').click();
-  await page.getByText('book', { exact: true }).waitFor();
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility()).some((i) => i.naturalWidth > 0), null, { timeout: 10000 }).catch(() => {});
-  check((await thumbs()) === 1, 'folders: books show their cover');
+  await page.waitForTimeout(800);
+  check((await vis('folder-doc').count()) === 0, 'folders: an EPUB book in a folder is not listed');
   await vis('screen-back').click();
   await page.getByText('columns', { exact: true }).locator('visible=true').first().click();
   await page.getByTestId('reader').waitFor();
@@ -1164,7 +1056,9 @@ async function foldersShell() {
       forgetFolder: ({ uri }) => ((state.trees = state.trees.filter((u) => u !== uri)), null),
       access: () => ({ allFiles: state.all, app: true }),
       requestAllFiles: () => ((state.all = true), true),
-      list: ({ root, dir }) => {
+      // The app lists PDFs only (Folders.kt).
+      list: (args) => handlers.listAll(args).filter((e) => e.kind !== 'epub'),
+      listAll: ({ root, dir }) => {
         if (root === 'all') return Object.keys(nodes).filter((id) => nodes[id].kind !== 'dir').map((id) => ({ ...entry(id), where: nodes[nodes[id].parent].name }));
         if (root === 'device') return [{ id: '/storage/emulated/0/Documents', name: 'Documents', kind: 'dir', size: 0, modified: 0 }];
         if (root === 'app') return kids(dir || 'app').map(entry);
@@ -1276,8 +1170,8 @@ async function foldersShell() {
   await vis('add-folder').click();
   await vis('folder-grid').waitFor({ timeout: 10000 }).catch(() => {});
   check((await vis('folder-grid').count()) === 1, 'folders-shell: a picked folder opens (its ID survives the route)');
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length === 2, null, { timeout: 15000 }).catch(() => {});
-  check((await shownThumbs()) === 2, `folders-shell: the folder is listed with a thumbnail for the PDF and the book (${await shownThumbs()})`);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="folder-doc"] img')].filter((i) => i.checkVisibility() && i.naturalWidth > 0).length === 1, null, { timeout: 15000 }).catch(() => {});
+  check((await shownThumbs()) === 1 && !(await names()).includes('Harbour Notes'), `folders-shell: the folder is listed with a thumbnail for the PDF, without the EPUB book (${await shownThumbs()})`);
   await page.screenshot({ path: `${OUT}folders-shell-grid.png` });
   // A long press on a phone also fires a context menu, and its release a tap: the item stays selected.
   await text('columns.pdf').click({ button: 'right' });
@@ -1473,11 +1367,11 @@ async function foldersShell() {
   await openFolders(page);
   const first = await vis('folder-root').first().innerText();
   check(first.startsWith('Tessel'), `folders-shell: the Tessel folder is the first place in Files (${first.split('\n')[0]})`);
-  // Documents: books are listed with their details; the Tessel folder is this device's own storage.
+  // Documents: PDFs only (a book in a folder isn't listed); the Tessel folder is this device's own storage.
   await openDocs(page);
   let hits = [];
-  for (let i = 0; i < 40 && !hits.some((h) => h.includes('Harbour Notes') && h.includes('Ada Quay')); i++) hits = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
-  check(hits.some((h) => h.includes('Harbour Notes') && h.includes('Ada Quay')), `folders-shell: a book in a folder is in Documents with its title and author (${hits.map((h) => h.split('\n')[0])})`);
+  for (let i = 0; i < 40 && hits.length === 0; i++) hits = await page.waitForTimeout(500).then(() => vis('archive-hit').allInnerTexts());
+  check(hits.length > 0 && !hits.some((h) => h.includes('Harbour Notes')), `folders-shell: a book in a folder is not in Documents (${hits.map((h) => h.split('\n')[0])})`);
   await vis('docs-filter').click();
   await page.getByTestId('action-facet-place').click();
   await page.getByTestId('action-place-tessel').click();

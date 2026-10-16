@@ -17,7 +17,7 @@ export type FolderEntry = {
   /** Unique within its root: a document ID, a path, or a path relative to the picked folder. */
   id: string;
   name: string;
-  kind: 'dir' | 'pdf' | 'epub';
+  kind: 'dir' | 'pdf';
   size: number;
   /** Milliseconds since the epoch; 0 if unknown. */
   modified: number;

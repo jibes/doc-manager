@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 
 import { errorText, t } from '@/i18n';
-import { openBook } from '@/book';
-import { coverData, readBytes } from '@/book/platform';
 import { asPasswordError, engine } from '@/engine';
 import { preopen } from '@/reader/preopened';
 import { askPassword, passwordFor, rememberPassword } from '@/state/password';
@@ -17,7 +15,6 @@ import { startsWith } from '@/lib/bytes';
 import { readStored, writeStored } from '@/lib/stored';
 import { docKey } from '@/archive/shared';
 import { inboxDir } from '@/archive/dirs';
-import { imageSize } from '@/book/image';
 import type { DocSource } from '@/engine/types';
 import { FILE_MOVED, repo, type DocRecord, type ReadingPosition } from '@/storage';
 
@@ -52,6 +49,9 @@ const isLinked = (item: ImportItem) => (item.handle || item.link ? true : undefi
 
 type LibraryState = {
   docs: DocRecord[];
+  /** EPUB books from before Tessel was PDFs only: not listed, kept until removed (Settings offers to save them first). */
+  books: DocRecord[];
+  forgetBooks(): Promise<void>;
   covers: Record<string, string | null>;
   loaded: boolean;
   /** File names currently being imported. */
@@ -141,40 +141,12 @@ export async function openWithPassword<T>(
   }
 }
 
-/** EPUB by name, or by its signature: a ZIP whose first entry is "mimetype" = application/epub+zip. */
+/** EPUB by name, or by its signature (a ZIP whose first entry is "mimetype" = application/epub+zip): books aren't Tessel's. */
 function isEpub(name: string, source: DocSource): boolean {
   if (/\.epub$/i.test(name)) return true;
   if (source.kind !== 'bytes') return false;
   const head = new TextDecoder('latin1').decode(new Uint8Array(source.bytes, 0, Math.min(64, source.bytes.byteLength)));
   return head.startsWith('PK') && head.includes('mimetypeapplication/epub+zip');
-}
-
-/** Books are for reading: they go straight onto the reading list. */
-async function importBook(item: ImportItem, source: DocSource, set: (fn: (s: LibraryState) => Partial<LibraryState>) => void): Promise<DocRecord> {
-  const book = openBook(await readBytes(source));
-  const id = newId();
-  const cover = book.cover ? book.images[book.cover] : undefined;
-  const size = cover ? imageSize(cover.bytes) : null;
-  const rec: DocRecord = {
-    id,
-    title: book.title?.trim() || cleanTitle(undefined, item.name.replace(/\.epub$/i, '')),
-    author: book.author,
-    fileName: item.name,
-    bytes: item.size,
-    pageCount: book.pageCount,
-    coverAspect: size ? size.h / size.w : 1.5,
-    addedAt: Date.now(),
-    bookmarks: [],
-    reading: { since: Date.now() },
-    format: 'epub',
-    linked: isLinked(item),
-  };
-  await repo.saveFile(id, fileData(item));
-  if (cover) await repo.saveCover(id, coverData(cover.bytes, cover.type));
-  await repo.put(rec);
-  const coverUri = await repo.coverUri(id);
-  set((s) => ({ docs: [rec, ...s.docs], covers: { ...s.covers, [id]: coverUri } }));
-  return rec;
 }
 
 /** When moving copies into the Tessel folder last failed; tried again after a day. */
@@ -232,7 +204,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
     // One that can't be moved doesn't keep the others where they are.
     let failed = false;
     for (const d of get().docs) {
-      if (d.linked || d.viewed || d.fileName === SAMPLE_FILE) continue;
+      if (d.linked || d.viewed || d.format === 'epub' || d.fileName === SAMPLE_FILE) continue;
       let src;
       try {
         src = await repo.source(d.id);
@@ -241,8 +213,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       }
       if (src.kind !== 'bytes') continue;
       try {
-        const type = /\.epub$/i.test(d.fileName) ? 'application/epub+zip' : 'application/pdf';
-        const made = await folders.create({ root: app.id }, d.fileName, new Blob([src.bytes], { type }));
+        const made = await folders.create({ root: app.id }, d.fileName, new Blob([src.bytes], { type: 'application/pdf' }));
         if (!made.uri) continue;
         await repo.relink(d.id, made.uri);
         patch(d.id, (x) => ({ ...x, linked: true, fileName: made.name }));
@@ -314,19 +285,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
   };
 
   /** A kept document's cover, made from its file once it is the library's. */
-  const makeCover = async (id: string, file: Blob, book: boolean) => {
+  const makeCover = async (id: string, file: Blob) => {
     try {
       const bytes = await file.arrayBuffer();
-      if (book) {
-        const b = openBook(new Uint8Array(bytes));
-        const c = b.cover ? b.images[b.cover] : undefined;
-        if (!c) return;
-        await repo.saveCover(id, coverData(c.bytes, c.type));
-      } else {
-        const { cover, handle } = await engine.renderCover({ kind: 'bytes', bytes }, COVER_WIDTH, passwordFor(id));
-        handle.close();
-        await repo.saveCover(id, cover);
-      }
+      const { cover, handle } = await engine.renderCover({ kind: 'bytes', bytes }, COVER_WIDTH, passwordFor(id));
+      handle.close();
+      await repo.saveCover(id, cover);
       const uri = await repo.coverUri(id);
       set((s) => ({ covers: { ...s.covers, [id]: uri } }));
     } catch {
@@ -336,6 +300,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
   return {
     docs: [],
+    books: [],
     covers: {},
     loaded: false,
     importing: [],
@@ -344,8 +309,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
     load() {
       // Once, however many ask at the same time (a later answer would drop documents added meanwhile).
       loading ??= (async () => {
-        const docs = (await repo.list()).sort(byRecent);
-        set((s) => ({ docs: [...s.docs.filter((d) => !docs.some((x) => x.id === d.id)), ...docs], loaded: true }));
+        const all = (await repo.list()).sort(byRecent);
+        // Books from before Tessel was PDFs only: not listed; kept until saved or removed in Settings.
+        const books = all.filter((d) => d.format === 'epub');
+        const docs = all.filter((d) => d.format !== 'epub');
+        set((s) => ({ docs: [...s.docs.filter((d) => !docs.some((x) => x.id === d.id)), ...docs], books, loaded: true }));
         const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
         set((s) => ({ covers: { ...Object.fromEntries(entries), ...s.covers } }));
         void moveCopies();
@@ -370,7 +338,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
             ? ({ kind: 'bytes', bytes: await item.file.arrayBuffer() } as const)
             : ({ kind: 'uri', uri: item.uri! } as const);
           if (isEpub(item.name, source)) {
-            added.push(await importBook(item, source, set));
+            set({ error: t.booksNotHere(item.name) });
             continue;
           }
           const opened = await openWithPassword(item.name, (pw) => engine.renderCover(source, COVER_WIDTH, pw));
@@ -412,9 +380,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
       // Nothing to hold (a file only the native app can reach): it is kept, as before.
       if (!file || item.bundled) return (await get().importFiles([item]))[0] ?? null;
       const bytes = await file.arrayBuffer();
-      const book = isEpub(item.name, { kind: 'bytes', bytes });
+      if (isEpub(item.name, { kind: 'bytes', bytes })) {
+        set({ error: t.booksNotHere(item.name) });
+        return null;
+      }
       // Opened while the library loads (a file from another app is shown as soon as it can be).
-      const opening = book ? null : openWithPassword(item.name, (pw) => engine.open({ kind: 'bytes', bytes }, pw));
+      const opening = openWithPassword(item.name, (pw) => engine.open({ kind: 'bytes', bytes }, pw));
       await get().load();
       const existing = await findExisting(item).catch(() => undefined);
       let opened;
@@ -424,36 +395,22 @@ export const useLibrary = create<LibraryState>((set, get) => {
         set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
         return null;
       }
-      if (opening && !opened) return null;
+      if (!opened) return null;
       if (existing) {
         // The library's own: that one opens (from what was opened, unless the library's has more in it).
-        if (opened && existing.exact) preopen(existing.doc.id, opened.value);
-        else opened?.value.close();
+        if (existing.exact) preopen(existing.doc.id, opened.value);
+        else opened.value.close();
         return existing.doc;
       }
       const share = await docKey(bytes);
       const key = viewedKey(share, file.size);
       const was = await recall(key).catch(() => undefined);
       const id = newId();
-      let facts: Pick<DocRecord, 'title' | 'author' | 'pageCount' | 'coverAspect' | 'format'>;
-      if (book) {
-        let b;
-        try {
-          b = openBook(new Uint8Array(bytes));
-        } catch (e) {
-          set({ error: `${t.importFailed(item.name)} ${errorText(e)}` });
-          return null;
-        }
-        const cover = b.cover ? b.images[b.cover] : undefined;
-        const size = cover ? imageSize(cover.bytes) : null;
-        facts = { title: b.title?.trim() || cleanTitle(undefined, item.name.replace(/\.epub$/i, '')), author: b.author, pageCount: b.pageCount, coverAspect: size ? size.h / size.w : 1.5, format: 'epub' };
-      } else {
-        const handle = opened!.value;
-        const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
-        facts = { title: cleanTitle(handle.metadata.title, item.name), author: handle.metadata.author, pageCount: handle.pageCount, coverAspect: first.height / first.width };
-        if (opened!.password) rememberPassword(id, opened!.password);
-        preopen(id, handle);
-      }
+      const handle = opened.value;
+      const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
+      const facts = { title: cleanTitle(handle.metadata.title, item.name), author: handle.metadata.author, pageCount: handle.pageCount, coverAspect: first.height / first.width };
+      if (opened.password) rememberPassword(id, opened.password);
+      preopen(id, handle);
       const now = Date.now();
       const rec: DocRecord = {
         id,
@@ -490,13 +447,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
       try {
         await repo.saveFile(id, fileData(item));
         const { viewed: _viewed, ...rest } = rec;
-        // Books are for reading: kept, they go onto the reading list (as books imported always have).
-        const kept: DocRecord = { ...rest, fileName: item.name, linked: isLinked(item), addedAt: Date.now(), ...(rec.format === 'epub' && !rec.reading ? { reading: { since: Date.now() } } : {}) };
+        const kept: DocRecord = { ...rest, fileName: item.name, linked: isLinked(item), addedAt: Date.now() };
         await repo.put(kept);
         repo.release(id);
         set((s) => ({ docs: s.docs.map((d) => (d.id === id ? kept : d)) }));
         void forget(viewedKey(rec.shareKey!, rec.bytes));
-        if (file) void makeCover(id, file, rec.format === 'epub');
+        if (file) void makeCover(id, file);
         return true;
       } catch (e) {
         set({ error: `${t.importFailed(rec.fileName)} ${errorText(e)}` });
@@ -509,6 +465,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!rec?.viewed) return true;
       const yes = await ask({ title: t.keepAsk, body: t.keepAskBody(rec.title, !!rec.linked), confirm: t.keepConfirm });
       return yes !== null && get().keep(id);
+    },
+
+    async forgetBooks() {
+      for (const d of get().books) await repo.remove(d.id).catch(() => {});
+      set({ books: [] });
     },
 
     closeViewed(id) {

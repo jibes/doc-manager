@@ -366,9 +366,9 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
   // A document keeps its extension (without it, it wouldn't be one any more): only the name before it is edited.
   const rename = async () => {
     const e = picked[0];
-    const ext = e.kind === 'dir' ? '' : (/\.(pdf|epub)$/i.exec(e.name)?.[0] ?? '');
+    const ext = e.kind === 'dir' ? '' : (/\.pdf$/i.exec(e.name)?.[0] ?? '');
     const typed = (await ask({ title: t.rename, input: ext ? e.name.slice(0, -ext.length) : e.name, placeholder: t.newName, confirm: t.rename }))?.trim();
-    const n = typed && ext && !/\.(pdf|epub)$/i.test(typed) ? `${typed}${ext}` : typed;
+    const n = typed && ext && !/\.pdf$/i.test(typed) ? `${typed}${ext}` : typed;
     if (!n || n === e.name) return;
     await run(async () => {
       const to = await folders.rename(root, dir, e, n);
@@ -604,7 +604,7 @@ export function PasteBar({ here, bottom, side = 0, onDone, onError, onMessage }:
 
 
 /** The thumbnail already says it's a document: "Report.pdf" shows as "Report". */
-const bareName = (name: string) => name.replace(/\.(pdf|epub)$/i, '');
+const bareName = (name: string) => name.replace(/\.pdf$/i, '');
 
 const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: space.md, paddingTop: space.xxxl, paddingHorizontal: space.lg },

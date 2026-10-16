@@ -364,7 +364,7 @@ class MainActivity : ComponentActivity() {
         override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
             chooserCallback?.onReceiveValue(null)
             chooserCallback = callback
-            val types = params.acceptTypes.flatMap { it.split(',') }.map { it.trim() }.filter { it.contains('/') }.ifEmpty { listOf("application/pdf", "application/epub+zip") }
+            val types = params.acceptTypes.flatMap { it.split(',') }.map { it.trim() }.filter { it.contains('/') }.ifEmpty { listOf("application/pdf") }
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType(if (types.size == 1) types[0] else "*/*")

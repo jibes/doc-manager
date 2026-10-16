@@ -386,7 +386,7 @@ function Row({
       testID="recent-row"
       picture={{ kind: 'cover', uri: cover, aspect: doc.coverAspect }}
       title={doc.title}
-      meta={[onList ? t.readingList : '', t.docMeta(doc.pageCount, doc.bytes, doc.openedAt), doc.format === 'epub' ? 'EPUB' : '', doc.linked ? t.inPlace : ''].filter(Boolean).join(' · ')}
+      meta={[onList ? t.readingList : '', t.docMeta(doc.pageCount, doc.bytes, doc.openedAt), doc.linked ? t.inPlace : ''].filter(Boolean).join(' · ')}
       progress={onList ? progressOf(doc) : undefined}
       first={first}
       last={last}

@@ -155,7 +155,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
           ) : image ? (
             <Cover uri={image.uri} aspect={image.aspect} width={36} progress={progress} />
           ) : (
-            <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={36} label={picture.kind === 'file' && picture.entry.kind === 'epub' ? 'EPUB' : 'PDF'} small />
+            <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={36} label="PDF" small />
           )}
           {busy && <ActivityIndicator style={StyleSheet.absoluteFill} color={p.accent} />}
         </View>
@@ -214,7 +214,7 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, sele
         ) : image ? (
           <Cover uri={image.uri} aspect={image.aspect} width={coverW} progress={progress} />
         ) : (
-          <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={width} label={picture.kind === 'file' && picture.entry.kind === 'epub' ? 'EPUB' : 'PDF'} />
+          <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={width} label="PDF" />
         )}
         {busy && <ActivityIndicator style={StyleSheet.absoluteFill} color={p.accent} />}
         {picking && <Check on={!!selected} style={[styles.check, checkAt]} />}
@@ -235,7 +235,7 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, sele
 export function Thumbnail({ picture, width }: { picture: Picture; width: number }) {
   const image = usePicture(picture);
   if (image) return <Cover uri={image.uri} aspect={image.aspect} width={width} />;
-  return <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={width} label={picture.kind === 'file' && picture.entry.kind === 'epub' ? 'EPUB' : 'PDF'} small={width < 48} />;
+  return <Plain testID={image === null ? 'thumb-none' : 'thumb-pending'} width={width} label="PDF" small={width < 48} />;
 }
 
 /** A document without a picture (yet, or at all). */

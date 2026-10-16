@@ -118,7 +118,7 @@ export async function deleteAll(docs: IndexedDoc[]): Promise<{ trashed: { root: 
 export async function renameDoc(d: IndexedDoc, name: string) {
   if (!inFolder(d)) return;
   const { root, dir, entry } = d.place;
-  const next = /\.(pdf|epub)$/i.test(name) ? name : `${name}${entry.name.match(/\.(pdf|epub)$/i)?.[0] ?? ''}`;
+  const next = /\.pdf$/i.test(name) ? name : `${name}${entry.name.match(/\.pdf$/i)?.[0] ?? ''}`;
   const to = await folders.rename(root, dir, entry, next);
   // The file as it is now (its ID, handle): the library follows it, and its record keeps its text.
   const now = (await folders.list(root, dir).catch(() => [] as FolderEntry[])).find((e) => (to ? e.uri === to : e.name === next));

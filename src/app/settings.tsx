@@ -12,6 +12,8 @@ import { aiMessage, t } from '@/i18n';
 import { folders, type FolderRoot } from '@/lib/folders';
 import { nestingNote } from './files';
 import { forget, viewedCount } from '@/state/viewed';
+import { useLibrary } from '@/state/library';
+import { downloadDoc } from '@/lib/fileActions';
 import { shareNow, useSharing } from '@/archive/sharing';
 import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
@@ -44,6 +46,20 @@ export default function Settings() {
   // Documents viewed and not kept, whose place this device remembers.
   const [viewed, setViewed] = useState(0);
   useEffect(() => void viewedCount().then(setViewed), []);
+  // EPUB books from before Tessel was PDFs only: saved, then removed.
+  const books = useLibrary((s) => s.books);
+  const saveBooks = async () => {
+    try {
+      for (const b of books) await downloadDoc(b);
+      setError(t.booksSaved(books.length));
+    } catch {
+      setError(t.opFailed);
+    }
+  };
+  const removeBooks = async () => {
+    if ((await ask({ title: t.booksRemoveAsk(books.length), body: t.booksRemoveBody, confirm: t.remove, destructive: true })) === null) return;
+    await useLibrary.getState().forgetBooks();
+  };
 
   const refresh = useCallback(() => {
     folders
@@ -246,6 +262,21 @@ export default function Settings() {
             </T>
             <View style={{ flexDirection: 'row', marginTop: space.md }}>
               <Button testID="viewed-forget" kind="quiet" label={t.viewedClear} onPress={() => void forget().then(() => (setViewed(0), setError(t.viewedCleared)))} />
+            </View>
+          </>
+        )}
+
+        {books.length > 0 && (
+          <>
+            <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+              {t.booksTitle}
+            </T>
+            <T v="caption" color={p.muted} style={styles.note} testID="books-note">
+              {t.booksNote(books.length)}
+            </T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+              <Button testID="books-save" kind="quiet" icon="install" label={t.booksSave} onPress={() => void saveBooks()} />
+              <Button testID="books-remove" kind="quiet" icon="trash" label={t.booksRemove} onPress={() => void removeBooks()} />
             </View>
           </>
         )}

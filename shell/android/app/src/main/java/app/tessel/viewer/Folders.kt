@@ -169,8 +169,8 @@ class Folders(private val context: Context) {
         val files = MediaStore.Files.getContentUri("external")
         @Suppress("DEPRECATION") val data = MediaStore.MediaColumns.DATA
         val cols = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_MODIFIED, data)
-        val where = "${MediaStore.MediaColumns.MIME_TYPE} IN (?, ?) OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-        val args = arrayOf(PDF, EPUB, "%.pdf", "%.epub")
+        val where = "${MediaStore.MediaColumns.MIME_TYPE} = ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        val args = arrayOf(PDF, "%.pdf")
         val out = JSONArray()
         val root = storageRoot.absolutePath
         resolver.query(files, cols, where, args, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { c ->
@@ -195,7 +195,6 @@ class Folders(private val context: Context) {
 
     private fun kindOf(name: String, mime: String?): String? = when {
         mime == PDF || name.endsWith(".pdf", true) -> "pdf"
-        mime == EPUB || name.endsWith(".epub", true) -> "epub"
         else -> null
     }
 

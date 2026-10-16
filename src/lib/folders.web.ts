@@ -8,7 +8,7 @@ import { shell, shellDocUrl, shellRequest, stageForShell } from './shell';
 
 export type { FolderEntry, FolderRoot, Place } from './folderTypes';
 
-const kindOf = (name: string): FolderEntry['kind'] | null => (/\.pdf$/i.test(name) ? 'pdf' : /\.epub$/i.test(name) ? 'epub' : null);
+const kindOf = (name: string): FolderEntry['kind'] | null => (/\.pdf$/i.test(name) ? 'pdf' : null);
 
 const shellAccess = () => shellRequest<{ allFiles: boolean; app?: boolean }>('access').then((a) => ({ allFiles: a.allFiles, app: a.app ?? false }));
 const APP_ROOT: FolderRoot = { id: APP_ROOT_ID, name: 'Tessel', kind: 'app' };

@@ -7,8 +7,6 @@ import { Button, T } from '@/components/primitives';
 import { fonts, space } from '@/design/tokens';
 import { canOpenInPlace, pickHandles } from '@/lib/fsa';
 import { goBack } from '@/lib/nav';
-import { useBook } from '@/book/useBook';
-import { BookReader } from '@/reader/BookReader';
 import { Reader } from '@/reader/Reader';
 import { useDocument } from '@/reader/useDocument';
 import { useLibrary } from '@/state/library';
@@ -27,11 +25,7 @@ export default function ReadScreen() {
   const doc = useLibrary((s) => s.docs.find((d) => d.id === id));
   const relink = useLibrary((s) => s.relink);
   const [attempt, setAttempt] = useState(0);
-  // Books and PDFs load differently; only the one matching the record runs.
-  const isBook = doc?.format === 'epub';
-  const pdf = useDocument(id, doc && !isBook ? doc.fileName : undefined, attempt);
-  const book = useBook(id, attempt, isBook);
-  const state = isBook ? book : pdf;
+  const state = useDocument(id, doc?.fileName, attempt);
   const retry = () => setAttempt((a) => a + 1);
   const [slow, setSlow] = useState(false);
 
@@ -95,7 +89,6 @@ export default function ReadScreen() {
     );
   }
 
-  if (state.status === 'ready' && 'book' in state) return <BookReader doc={doc} book={state.book} image={state.image} />;
   if (state.status === 'ready' && 'handle' in state)
     return (
       <Reader

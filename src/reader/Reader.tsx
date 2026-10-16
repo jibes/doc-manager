@@ -91,7 +91,7 @@ async function detailsWritten(id: string, handle: DocHandle, details: Details): 
 /** The document as a file in the archive's Inbox, which it then is: reading state, bookmarks and all stay with it. */
 async function keptInArchive(doc: DocRecord, handle: DocHandle, archive: string) {
   const bytes = await handle.bytes();
-  const type = doc.format === 'epub' ? 'application/epub+zip' : 'application/pdf';
+  const type = 'application/pdf';
   const entry = await folders.create({ root: archive, dir: await inboxDir(archive) }, doc.fileName, new Blob([bytes], { type }));
   await libraryActions().linkTo(doc.id, { name: entry.name, size: bytes.byteLength, handle: entry.handle, link: entry.uri });
 }
@@ -242,12 +242,12 @@ export function Reader({
   // Reading text: on the device (Make searchable) or by the model (Improve text with AI).
   const [reading, setReading] = useState<{ done: number; total: number; ai?: boolean } | null>(null);
   const ai = usePrefs((s) => s.ai);
-  const canImprove = Platform.OS === 'web' && doc.format !== 'epub' && aiReady(ai);
+  const canImprove = Platform.OS === 'web' && aiReady(ai);
   // Leaving the document stops a reading by the model.
   const stopImproving = useRef<AbortController | null>(null);
   useEffect(() => () => stopImproving.current?.abort(), []);
   useEffect(() => {
-    if (Platform.OS !== 'web' || doc.format === 'epub') return;
+    if (Platform.OS !== 'web') return;
     let alive = true;
     // The first page at once; the others once the first pages are drawn.
     pagesWithoutText(handle, 1)

@@ -22,7 +22,7 @@ export const canOpenInPlace = () => !!picker();
 export const isFileHandle = (v: unknown): v is FileHandle =>
   typeof v === 'object' && v !== null && (v as { kind?: unknown }).kind === 'file' && typeof (v as FileHandle).getFile === 'function';
 
-const TYPES = { description: 'PDF, EPUB', accept: { 'application/pdf': ['.pdf'], 'application/epub+zip': ['.epub'] } };
+const TYPES = { description: 'PDF', accept: { 'application/pdf': ['.pdf'] } };
 
 /** Picks documents as handles; [] when cancelled. */
 export async function pickHandles(multiple = true): Promise<FileHandle[]> {

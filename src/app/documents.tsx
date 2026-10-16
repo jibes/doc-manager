@@ -317,8 +317,8 @@ export default function Documents() {
   const rename = async () => {
     const d = picked[0];
     // The list shows titles, the dialog the file's name: it says which one changes (a title is changed in Details).
-    const titled = !!d.title && d.title !== d.name.replace(/\.(pdf|epub)$/i, '');
-    const name = (await ask({ title: t.renameFile, body: titled ? t.renameFileBody(d.title) : undefined, input: d.name.replace(/\.(pdf|epub)$/i, ''), placeholder: t.newName, confirm: t.rename }))?.trim();
+    const titled = !!d.title && d.title !== d.name.replace(/\.pdf$/i, '');
+    const name = (await ask({ title: t.renameFile, body: titled ? t.renameFileBody(d.title) : undefined, input: d.name.replace(/\.pdf$/i, ''), placeholder: t.newName, confirm: t.rename }))?.trim();
     if (!name) return;
     await batch(() => renameDoc(d, name));
   };

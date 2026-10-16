@@ -478,6 +478,14 @@ export const en = {
   keepConfirm: 'Keep',
   keepInTessel: 'Keep in Tessel',
   keptInTessel: 'Kept in Tessel.',
+  booksNotHere: (name: string) => `“${name}” is a book. Tessel opens PDFs; open books in a reading app.`,
+  booksTitle: 'Books',
+  booksNote: (n: number) => `${n === 1 ? 'One book was' : `${n} books were`} added before Tessel opened only PDFs. ${n === 1 ? 'It isn’t' : 'They aren’t'} listed any more: save ${n === 1 ? 'it' : 'them'} to keep ${n === 1 ? 'it' : 'them'}, then remove ${n === 1 ? 'it' : 'them'} from Tessel.`,
+  booksSave: 'Save books',
+  booksSaved: (n: number) => (n === 1 ? 'Book saved.' : `${n} books saved.`),
+  booksRemove: 'Remove from Tessel',
+  booksRemoveAsk: (n: number) => (n === 1 ? 'Remove the book from Tessel?' : `Remove ${n} books from Tessel?`),
+  booksRemoveBody: 'Copies Tessel kept are deleted. Files in your folders stay where they are.',
   viewedHistory: 'Viewed documents',
   viewedHistoryNote: (n: number) =>
     `Documents opened from elsewhere and not kept: Tessel remembers where you left the last ${n === 1 ? 'one' : n} on this device. Nothing of the files is kept.`,
@@ -493,7 +501,6 @@ export const en = {
   nestedInArchive: (name: string) => `“${name}” is inside the Tessel folder. Its files count once, in the Tessel folder.`,
   nestedIn: (inner: string, outer: string) => `“${inner}” is inside “${outer}”. Its files count once, under “${inner}”.`,
   nestedHolds: (outer: string, inner: string) => `“${outer}” holds “${inner}”. Those files count once, under “${inner}”.`,
-  bookType: 'Book',
   archiveSynced: 'Tessel folder · synced',
   /** For a folder that is called Archive already. */
   syncedOnly: 'Synced with your other devices',
