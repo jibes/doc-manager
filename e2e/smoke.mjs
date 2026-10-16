@@ -2430,17 +2430,18 @@ async function lastRead() {
   check(/Orderly Notes[\s\S]*Page \d of 2/.test(cont), 'last read: Continue shows the document last read');
   check(/Page 2 of 2 · 100%/.test(cont), `last read: read to the end, Continue says the last page and 100% (${cont.replace(/\n/g, ' / ')})`);
   check((await page.getByTestId('recent-row').count()) === 0, 'last read: …and Recently opened doesn’t list it again');
-  // The whole history is Documents, last opened first.
-  await page.getByTestId('recent-all').click();
+  // No link to the whole history: on a phone, Documents is it (last opened first).
+  check((await page.getByTestId('recent-all').count()) === 0, 'last read: no “All recently opened” link');
+  await openDocs(page);
   await page.getByTestId('docs-sort').locator('visible=true').waitFor();
   let first = '';
   for (let i = 0; i < 40 && !first.includes('Orderly Notes'); i++) first = await page.waitForTimeout(250).then(() => page.getByTestId('archive-hit').locator('visible=true').first().innerText().catch(() => ''));
-  check((await page.getByTestId('docs-sort').locator('visible=true').innerText()).includes('Last opened') && first.includes('Orderly Notes'), 'last read: “All recently opened” is Documents, sorted by last opened');
+  check((await page.getByTestId('docs-sort').locator('visible=true').innerText()).includes('Last opened') && first.includes('Orderly Notes'), 'last read: the Documents tab lists everything, last opened first');
   await page.getByTestId('tab-reading').locator('visible=true').click();
   await page.getByTestId('continue-add').click();
   await page.getByTestId('reading-list').waitFor();
   check((await page.getByTestId('last-read').count()) === 0, 'last read: adding it puts it on the reading list');
-  check((await page.getByTestId('recent-all').count()) === 0 && (await page.getByTestId('recent-row').count()) === 0, 'last read: with a reading list, Reading shows only the list');
+  check((await page.getByTestId('recent-row').count()) === 0, 'last read: with a reading list, Reading shows only the list');
   // Read to the very end: 100 %, though on a phone the last page never reaches the reading line; still so when opened again.
   await page.getByTestId('reading-list').getByText('Orderly Notes').first().click();
   await page.getByTestId('reader').waitFor();

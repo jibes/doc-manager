@@ -445,7 +445,6 @@ export const de: Strings = {
   inboxWaiting: (n) => `${n} im Eingang`,
   foldersView: 'Ordner',
   allView: 'Alle',
-  recentAll: 'Alle zuletzt geöffneten',
   keepAsk: 'In Tessel behalten?',
   keepAskBody: (title: string, inPlace: boolean) =>
     `„${title}“ wird nur angesehen. Um das zu speichern, behält Tessel es: ${inPlace ? 'Die Datei bleibt, wo sie ist, und Tessel merkt sie sich' : 'Eine Kopie kommt in den Tessel-Ordner'}, und die Änderung wird dort gespeichert.`,

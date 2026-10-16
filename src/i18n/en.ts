@@ -472,7 +472,6 @@ export const en = {
   inboxWaiting: (n: number) => (n === 1 ? '1 in the inbox' : `${n} in the inbox`),
   foldersView: 'Folders',
   allView: 'All',
-  recentAll: 'All recently opened',
   keepAsk: 'Keep in Tessel?',
   keepAskBody: (title: string, inPlace: boolean) =>
     `“${title}” is only being viewed. To save this, Tessel keeps it: ${inPlace ? 'the file stays where it is, and Tessel remembers it' : 'a copy goes to the Tessel folder'}, and the change is saved there.`,

@@ -218,10 +218,6 @@ export default function Home() {
                       {t.recentTitle}
                     </T>
                   )}
-                  {/* The whole history: Documents, last opened first. */}
-                  {!reading.length && (lastRead || recent.length > 0) && (
-                    <Button testID="recent-all" kind="quiet" label={t.recentAll} onPress={() => router.push({ pathname: '/documents', params: { sort: 'opened' } })} />
-                  )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, marginLeft: 'auto' }}>
                     <Button testID="add" kind="quiet" icon="plus" label={t.openFile} onPress={async () => add(await pickPdfs())} />
                   </View>
