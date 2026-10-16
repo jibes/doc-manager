@@ -31,7 +31,7 @@ const RECENT = 3;
 /** AGPL §13: offer the source to network users. */
 const SOURCE_URL = 'https://github.com/jibes/doc-reader';
 
-const progressOf = (d: DocRecord) => (d.position && d.pageCount > 1 ? (d.position.page + d.position.offset) / d.pageCount : 0);
+const progressOf = (d: DocRecord) => (d.position?.end ? 1 : d.position && d.pageCount > 1 ? (d.position.page + d.position.offset) / d.pageCount : 0);
 const pctOf = (d: DocRecord) => Math.round(progressOf(d) * 100);
 
 function open(doc: DocRecord) {
@@ -185,6 +185,7 @@ export default function Home() {
                     <View style={{ marginTop: space.lg }}>
                       <Pressable
                         accessibilityRole="button"
+                        testID="finished-toggle"
                         aria-expanded={showFinished}
                         onPress={() => setShowFinished((v) => !v)}
                         style={styles.finishedHead}

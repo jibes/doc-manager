@@ -71,7 +71,6 @@ export const en = {
   inPlace: 'In place',
   // Files and settings
   files: 'Files',
-  otherLocation: 'Open file…',
   back: 'Back',
   settings: 'Settings',
   addFolder: 'Add folder',

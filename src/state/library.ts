@@ -186,7 +186,7 @@ const byRecent = (a: DocRecord, b: DocRecord) => (b.openedAt ?? b.addedAt) - (a.
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 const dirty = new Set<string>();
 // Positions reported while reading, not yet in the store.
-const positions = new Map<string, { position: ReadingPosition; atEnd?: boolean }>();
+const positions = new Map<string, { position: ReadingPosition; atEnd?: boolean; end?: boolean }>();
 let positionTimer: ReturnType<typeof setTimeout> | undefined;
 const POSITION_MS = 400;
 
@@ -535,7 +535,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
     savePosition: (id, position, atEnd) => {
       // A finish seen while scrolling is kept even if the next report (still at the bottom) says otherwise.
       const was = positions.get(id);
-      positions.set(id, { position, atEnd: atEnd || was?.atEnd ? true : atEnd });
+      // `end`: where the reader is now (scrolling back up from the end is no longer 100 %).
+      positions.set(id, { position, atEnd: atEnd || was?.atEnd ? true : atEnd, end: atEnd });
       positionTimer ??= setTimeout(() => get().flushPositions(), POSITION_MS);
     },
 
@@ -544,10 +545,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
       positionTimer = undefined;
       const pending = [...positions];
       positions.clear();
-      for (const [id, { position, atEnd }] of pending)
+      for (const [id, { position: at, atEnd, end }] of pending)
         patch(
           id,
           (d) => {
+            const position: ReadingPosition = end ? { page: at.page, offset: at.offset, end: true } : { page: at.page, offset: at.offset };
             // Reaching the end finishes a reading-list document; it moves to "Finished".
             const done = d.reading && !d.reading.finishedAt && (atEnd ?? position.page >= d.pageCount - 1);
             return { ...d, position, reading: done ? { ...d.reading!, finishedAt: Date.now() } : d.reading };

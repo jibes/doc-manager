@@ -65,6 +65,8 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
 
   const [vp, setVp] = useState<{ w: number; h: number } | null>(null);
   const [page, setPage] = useState(doc.position?.page ?? 0);
+  // Scrolled to the very end (opened there again, too).
+  const [atBottom, setAtBottom] = useState(!!doc.position?.end);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
   // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
@@ -88,6 +90,7 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const onPosition = useCallback(
     (pg: number, y: number, atEnd: boolean) => {
       savePosition(doc.id, { page: pg, offset: y }, atEnd);
+      setAtBottom(atEnd);
       setPage((old) => (old === pg ? old : pg));
     },
     [doc.id, savePosition],
@@ -272,7 +275,8 @@ export function BookReader({ doc, book, image }: { doc: DocRecord; book: Book; i
   const outline = useMemo(() => book.toc.map((e) => ({ title: e.title, page: e.page, depth: e.depth })), [book.toc]);
   const chapters = useMemo(() => outline.filter((o) => o.depth === 0), [outline]);
   // 0% on the first page, 100% on the last (a one-page book is read once it is open).
-  const pct = book.pageCount <= 1 ? 100 : Math.round((page / (book.pageCount - 1)) * 100);
+  // Scrolled to the very end is all of it.
+  const pct = book.pageCount <= 1 || atBottom ? 100 : Math.round((page / (book.pageCount - 1)) * 100);
 
   const menuItems: MenuItem[] = [
     { key: 'reading', icon: readingMode ? 'readingOn' : 'readingAdd', label: readingMode ? t.removeFromReadingList : t.addToReadingList, onPress: () => toggleReading(doc.id) },

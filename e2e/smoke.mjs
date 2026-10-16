@@ -2434,6 +2434,26 @@ async function lastRead() {
   await page.getByTestId('reading-list').waitFor();
   check((await page.getByTestId('last-read').count()) === 0, 'last read: adding it puts it on the reading list');
   check((await page.getByTestId('recent-all').count()) === 0 && (await page.getByTestId('recent-row').count()) === 0, 'last read: with a reading list, Reading shows only the list');
+  // Read to the very end: 100 %, though on a phone the last page never reaches the reading line; still so when opened again.
+  await page.getByTestId('reading-list').getByText('Orderly Notes').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(1500);
+  await page.mouse.move(195, 420);
+  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 800).then(() => page.waitForTimeout(150));
+  await page.waitForTimeout(600);
+  const label = () => page.getByTestId('page-label').innerText();
+  check(/100%/.test(await label()), `last read: scrolled to the end reads 100% (${await label()})`);
+  await page.mouse.wheel(0, -400);
+  await page.waitForTimeout(600);
+  check(!/100%/.test(await label()), `last read: …and less again once scrolled back up (${await label()})`);
+  await page.mouse.wheel(0, 1200);
+  await page.waitForTimeout(1500);
+  await page.getByTestId('back').click();
+  await page.getByTestId('finished-toggle').click().catch(() => {});
+  await page.getByText('Orderly Notes').locator('visible=true').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(800);
+  check(/100%/.test(await label()), `last read: opened again at the end, still 100% (${await label()})`);
   await ctx.close();
 }
 
@@ -2624,12 +2644,12 @@ async function tabs() {
     }
     await vis('docs-folders').click();
     await vis('add-folder').first().waitFor();
-    check((await vis('open-other').count()) === 1, `tabs (${name}): Folders offers adding folders and other locations`);
+    check((await vis('add-folder').count()) === 1 && (await page.getByTestId('open-other').count()) === 0, `tabs (${name}): Folders offers adding folders (Open file is on Reading only)`);
     if (name === 'wide') check((await vis('side-folders').getAttribute('aria-current')) === 'page', 'tabs (wide): a sidebar has the places, Folders the current one');
     await vis('tab-reading').click();
     await page.getByText('Open sample').waitFor();
     // Switching back returns to Reading rather than stacking it over Documents (stacked screens stay mounted).
-    check((await page.getByTestId('open-other').count()) === 0, `tabs (${name}): switching places does not stack screens`);
+    check((await page.getByTestId('add-folder').count()) === 0, `tabs (${name}): switching places does not stack screens`);
     await vis('scan').click();
     await page.waitForURL(/\/scan/);
     check(true, `tabs (${name}): Scan opens the camera`);

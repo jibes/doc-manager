@@ -17,7 +17,6 @@ import { elevation, fonts, radius, space } from '@/design/tokens';
 import { errorText, opError, t } from '@/i18n';
 import { folders, type FolderEntry, type FolderRoot, type Place } from '@/lib/folders';
 import { PartlyDone } from '@/lib/folderTypes';
-import { pickPdfs } from '@/lib/pick';
 import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { setArchive } from '@/archive/views';
 import { allDocs, renamed, schedule } from '@/archive/indexer';
@@ -125,13 +124,6 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
     await addFolder(setError);
     refresh();
   };
-  // A single file from anywhere the system picker reaches (cloud drives, mail attachments…), to look at.
-  const view = useLibrary((s) => s.view);
-  const openOther = async () => {
-    const [item] = await pickPdfs();
-    const doc = item && (await view(item));
-    if (doc) router.push({ pathname: '/read/[id]', params: { id: doc.id } });
-  };
   // The archive is chosen once, from the folders added (not a button beside each one: names need the room).
   const candidates = (roots ?? []).filter((r) => r.kind === 'folder' && !r.locked);
   const chooseArchive = () => {
@@ -167,7 +159,6 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
             {t.foldersEmptyBody}
           </T>
           <Button testID="add-folder" icon="folderAdd" label={t.addFolder} onPress={add} style={{ marginTop: space.md }} />
-          <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />
         </View>
       ) : (
         <View style={{ gap: space.lg, paddingBottom: bottom + space.xl + (pasting ? BAR_ROOM : 0) }}>
@@ -241,7 +232,6 @@ export function Roots({ bottom, onError: setError }: { bottom: number; onError: 
           )}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
             <Button testID="add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={add} />
-            <Button testID="open-other" kind="quiet" icon="documents" label={t.otherLocation} onPress={openOther} />
             {!archive && candidates.length > 0 && (
               <Button
                 testID="use-archive"

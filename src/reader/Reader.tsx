@@ -298,6 +298,8 @@ export function Reader({
   const [zoomed, setZoomed] = useState<{ zoom: number; at: { x: number; y: number } | null }>({ zoom: 1, at: null });
   const zoom = zoomed.zoom;
   const [page, setPage] = useState(start?.page ?? 0);
+  // Scrolled to the very end (opened there again, too).
+  const [atBottom, setAtBottom] = useState(!!start?.end);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
   // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
@@ -449,8 +451,10 @@ export function Reader({
       posRef.current = positionAt(layout, y);
       // The saved position is the top of the viewport, which never reaches a last page shorter than
       // the screen: the end counts as reached once scrolled to the bottom (by reading, not by a jump there).
-      const atEnd = y > 0 && y + layoutMeasurement.height >= contentSize.height - 8 && Date.now() - jumpedAt.current > JUMP_MS;
+      const bottom = y > 0 && y + layoutMeasurement.height >= contentSize.height - 8;
+      const atEnd = bottom && Date.now() - jumpedAt.current > JUMP_MS;
       savePosition(doc.id, posRef.current, atEnd);
+      setAtBottom(bottom);
       const rp = readingPage(layout, y, vp.h);
       cache.setFocus(rp);
       setPage((old) => (old === rp ? old : rp));
@@ -464,6 +468,7 @@ export function Reader({
     (pg: number, y: number, atEnd: boolean) => {
       posRef.current = { page: pg, offset: y };
       savePosition(doc.id, posRef.current, atEnd);
+      setAtBottom(atEnd);
       cache.setFocus(pg);
       setPage((old) => (old === pg ? old : pg));
     },
@@ -845,7 +850,8 @@ export function Reader({
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
   const bookmarked = doc.bookmarks.includes(page);
   // A one-page document is read once it is open.
-  const pct = handle.pageCount <= 1 ? 100 : Math.round((page / (handle.pageCount - 1)) * 100);
+  // Scrolled to the very end is all of it, even where the last page never comes up as the one being read.
+  const pct = handle.pageCount <= 1 || atBottom ? 100 : Math.round((page / (handle.pageCount - 1)) * 100);
   const chapters = useMemo(() => (outline ?? []).filter((o) => o.depth === 0 && o.page >= 0), [outline]);
   const wide = isWide(winW);
   const onPagePress = useCallback(() => {

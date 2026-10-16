@@ -6,6 +6,8 @@ export type ReadingPosition = {
   page: number;
   /** Scroll offset within the page, 0..1 of its height. */
   offset: number;
+  /** Scrolled to the very end: read to 100 % (the top of the screen never reaches a last page shorter than it). */
+  end?: true;
 };
 
 export type DocRecord = {

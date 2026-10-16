@@ -187,6 +187,8 @@ export function BlockList({
   // `atEnd` additionally needs the reader to have scrolled there (not a jump): only that finishes a book.
   const bottomRef = useRef(false);
   const atEndRef = useRef(false);
+  // Whether the end was the last thing reported.
+  const endRef = useRef(false);
   const locate = () => {
     const line = padTop + space.xl;
     const cells = [...cellsRef.current].sort((a, b) => a[0] - b[0]);
@@ -196,8 +198,10 @@ export function BlockList({
       if (best < 0 && tops.length) best = tops[0][0];
       const atEnd = atEndRef.current;
       if (bottomRef.current) best = blocks.length - 1;
-      if (best >= 0 && (best !== currentRef.current || atEnd)) {
+      // Also when the end is left again (on the same block): the reader then no longer shows 100 %.
+      if (best >= 0 && (best !== currentRef.current || atEnd || endRef.current)) {
         currentRef.current = best;
+        endRef.current = atEnd;
         onPosition(blocks[best].page, blocks[best].y, atEnd);
       }
     });
