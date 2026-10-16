@@ -991,7 +991,7 @@ async function tesselFolder() {
     }, dir);
   // No sources: the one Tessel folder, shown in Settings.
   await vis('home-settings').click();
-  check(/^Tessel \d+\.\d+\.\d+$/.test(await vis('app-version').innerText()), `settings: says which version this is (${await vis('app-version').innerText()})`);
+  check((await vis('app-version').innerText()) === `Tessel ${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}`, `settings: says which version this is (${await vis('app-version').innerText()})`);
   check(/This browser/.test(await vis('tessel-folder').innerText()) && (await vis('settings-add-folder').count()) === 0 && (await vis('remove-folder').count()) === 0, 'tessel folder: Settings shows the one Tessel folder, no sources to add');
   // Import a folder: its PDFs (in its folders too) are copied in, once; the folder stays as it was.
   await vis('import-folder').click();
@@ -1574,8 +1574,21 @@ async function searchArchive() {
   await page.goto(BASE);
   await openDocs(page);
   let moved = [];
-  for (let i = 0; i < 30 && !moved.some((x) => /2027/.test(x)); i++) moved = await hits('Orderly');
-  check(moved.length === 1 && /2027/.test(moved[0]), `search: a moved document is found where it is now (${moved.map((x) => x.replace(/\n/g, ' / '))})`);
+  // Found once, and (once the folder is read again) it opens from where it is now: rows don't say where.
+  let opened = false;
+  for (let i = 0; i < 15 && !opened; i++) {
+    for (let j = 0; j < 30 && moved.length !== 1; j++) moved = await hits('Orderly');
+    await vis('archive-hit').first().click();
+    opened = await page.getByTestId('reader').waitFor({ timeout: 4000 }).then(async () => (await page.getByTestId('open-error').count()) === 0, () => false);
+    if (!opened) {
+      await page.goto(BASE);
+      await openDocs(page);
+      moved = [];
+    }
+  }
+  check(moved.length === 1 && opened, `search: a moved document is found where it is now (${moved.map((x) => x.replace(/\n/g, ' / '))})`);
+  await page.goto(BASE);
+  await openDocs(page);
 
   // Opening a hit: at its page, with the query highlighted.
   await hits('Orderly');

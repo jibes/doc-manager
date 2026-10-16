@@ -1,7 +1,8 @@
-import Constants from 'expo-constants';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { version } from '../../package.json';
 
 import { Icon } from '@/paper/components/Icon';
 import { Button, T } from '@/paper/components/primitives';
@@ -266,7 +267,7 @@ export default function Settings() {
           </>
         )}
         <T testID="app-version" v="caption" color={p.muted} style={{ marginTop: space.xxl }}>
-          {t.appVersion(Constants.expoConfig?.version ?? '')}
+          {t.appVersion(version)}
         </T>
       </View>
     </ScrollView>

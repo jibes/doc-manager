@@ -115,11 +115,11 @@ export function sortDocs<T>(items: T[], sort: Sort, docOf: (item: T) => IndexedD
 export type Where = 'tessel' | 'sources';
 export const WHERES: Where[] = ['tessel', 'sources'];
 /**
- * The Tessel folder is everything Tessel keeps: the folder chosen for it (synced, often), Documents/Tessel on
- * Android, the browser's own storage. Sources are the folders it reads (added in Settings).
+ * The Tessel folder is everything Tessel keeps: the folder chosen for it (synced, often), else this device's own
+ * (Documents/Tessel on Android, the browser's own storage). Anything else (what the folder before it left, being
+ * forgotten) isn't listed.
  */
-export const placeOf = (d: IndexedDoc, tessel: string | null): Where =>
-  d.place.kind === 'library' || d.place.root === APP_ROOT_ID || d.place.root === tessel ? 'tessel' : 'sources';
+export const placeOf = (d: IndexedDoc, tessel: string | null): Where => (d.place.kind === 'library' || d.place.root === (tessel ?? APP_ROOT_ID) ? 'tessel' : 'sources');
 /** Saved views from before the two places: the archive and this device were Tessel's, other folders sources. */
 const OLD_PLACES: Record<string, Where> = { archive: 'tessel', device: 'tessel', folders: 'sources' };
 

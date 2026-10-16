@@ -30,7 +30,8 @@ export function errorText(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
   if (m === t.passwordCancelled) return m;
   if (/password/i.test(m)) return t.passwordProtected;
-  if (/missing from storage/i.test(m)) return t.fileMissing;
+  // A file gone from where it was listed (moved, deleted elsewhere).
+  if (/missing from storage/i.test(m) || (e instanceof Error && e.name === 'NotFoundError')) return t.fileMissing;
   return t.openFailed;
 }
 
