@@ -288,7 +288,6 @@ async function run(name, viewport, isMobile) {
   check(scrubbed >= 5, `${name}: scrubber seek → page ${scrubbed}`);
 
   await reveal();
-  await page.getByTestId('bookmark').click();
 
   // Reading list: the toggle switches to reading behaviour (progress in the page pill).
   // It lives in the More menu (a document action).
@@ -2139,8 +2138,7 @@ async function syncSafety() {
   await ctx.close();
 }
 
-// Reading shared between devices: this device's state goes to .tessel/state/<device>.json; another device's file
-// (written here by hand) brings its newer bookmarks and a document from its reading list.
+// Reading isn't shared between devices any more: nothing goes to .tessel/state, and Settings has no switch for it.
 async function sharedReading() {
   const ctx = await newContext({ viewport: { width: 1280, height: 900 } }, { fsa: true });
   await ctx.addInitScript(() => {
@@ -2165,73 +2163,28 @@ async function sharedReading() {
   await page.goto(BASE);
   await vis('home-settings').click();
   await vis('archive-root').click();
-  check((await vis('share-reading-switch').getAttribute('aria-checked')) === 'true', 'shared: reading is shared once there is an archive');
+  check((await vis('share-reading-switch').count()) === 0, 'shared: no switch for sharing reading');
   await vis('screen-back').click();
-
-  // A document here: on the reading list, with a bookmark.
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
   await fc.setFiles(new URL('./fixtures/scan.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-reading').click();
-  await vis('bookmark').click();
-  // Saved before the page goes away (a reload right after the tap can lose it).
-  await page.waitForFunction(() => document.querySelector('[data-testid=bookmark][aria-pressed=true]'), null, { timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1500);
   await page.goto(BASE);
-  const states = () =>
-    page.evaluate(async () => {
-      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
-      const out = {};
-      try {
-        const dir = await (await root.getDirectoryHandle('.tessel')).getDirectoryHandle('state');
-        for await (const [name, h] of dir.entries()) out[name] = JSON.parse(await (await h.getFile()).text());
-      } catch {}
-      return out;
-    });
-  const nudge = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  // Written once a pass has seen both the list and the bookmark.
-  const complete = (m) => !!m && Object.values(m[1].docs).some((d) => d.reading?.v?.since && d.bookmarks?.v?.length === 1);
-  let mine = null;
-  for (let i = 0; i < 40 && !complete(mine); i++) {
-    await nudge();
-    await page.waitForTimeout(500);
-    mine = Object.entries(await states()).find(([n]) => n !== 'other.json');
-  }
-  const [mineName, mineState] = mine ?? ['', { docs: {} }];
-  const [key, entry] = Object.entries(mineState.docs)[0] ?? [];
-  check(!!entry?.reading?.v?.since && entry?.bookmarks?.v?.length === 1, `shared: this device's reading is written to the archive (${mineName})`);
-
-  // Another device: the bookmark removed later there, and a document of the archive on its reading list.
-  const later = Date.now() + 60_000;
-  await page.evaluate(
-    async ({ key, later, b64 }) => {
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).subarray(0, 65536);
-      let end = bytes.length;
-      for (let i = 0; i + 5 <= bytes.length; i++) if (String.fromCharCode(...bytes.subarray(i, i + 5)) === '%%EOF') { end = i + 5; break; }
-      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.slice(0, end)));
-      const notes = Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
-      const state = { version: 1, device: 'other', docs: { [key]: { title: 'Scan', bookmarks: { v: [], at: later } }, [notes]: { title: 'Notes', reading: { v: { since: later }, at: later }, position: { v: { page: 0, offset: 0.4 }, at: later } } } };
-      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
-      const dir = await (await root.getDirectoryHandle('.tessel')).getDirectoryHandle('state');
-      const w = await (await dir.getFileHandle('other.json', { create: true })).createWritable();
-      await w.write(JSON.stringify(state));
-      await w.close();
-    },
-    { key, later, b64: fixture('columns.pdf') },
-  );
-  let listed = '';
-  for (let i = 0; i < 60 && !/Orderly Notes/.test(listed); i++) {
-    await nudge();
-    await page.waitForTimeout(1000);
-    listed = await vis('reading-list').innerText().catch(() => '');
-  }
-  check(/Orderly Notes/.test(listed), 'shared: a document on another device’s reading list comes onto this one’s, from the archive');
-  const after = (await states())[mineName]?.docs?.[key];
-  check(after?.bookmarks?.v?.length === 0 && after?.bookmarks?.at === later, 'shared: a newer change from another device wins (bookmark removed there)');
-  await vis('home-settings').click();
-  check(/Shared with 1 other device/.test(await vis('share-reading-note').innerText()), 'shared: Settings says with how many devices');
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForTimeout(3000);
+  const written = await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Archive');
+    try {
+      await (await root.getDirectoryHandle('.tessel')).getDirectoryHandle('state');
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  check(!written, 'shared: nothing about reading is written to the Tessel folder');
   await ctx.close();
 }
 
@@ -2417,6 +2370,63 @@ async function manyDocs() {
     await page.waitForTimeout(300);
   }
   check((await rows()) === 130 && (await vis('docs-more').count()) === 0, `many: scrolling near the end lists the rest (${await rows()})`);
+  await ctx.close();
+}
+
+// Notes on a page (what bookmarks were): the ribbon adds one, saved into the file; bookmarks from before become notes.
+async function pageNotes() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`page notes: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Read again');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('save').click();
+  await page.waitForTimeout(1500);
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('tab-notes').click();
+  const rows = page.getByTestId('note-row');
+  await rows.first().waitFor({ timeout: 5000 }).catch(() => {});
+  check(/Read again/.test(await rows.first().innerText().catch(() => '')), 'page notes: the ribbon adds a note on the page, listed with the notes');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  // A bookmark from before (as 2.x kept it, in the library): it becomes a note in the file, once.
+  const records = () =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const req = indexedDB.open('quire-meta');
+          req.onsuccess = () => {
+            const all = req.result.transaction('docs').objectStore('docs').getAll();
+            all.onsuccess = () => resolve(all.result);
+          };
+        }),
+    );
+  const [rec] = await records();
+  await page.evaluate(
+    (rec) =>
+      new Promise((resolve) => {
+        const req = indexedDB.open('quire-meta');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('docs', 'readwrite');
+          tx.objectStore('docs').put({ ...rec, bookmarks: [1] }, rec.id);
+          tx.oncomplete = () => resolve(null);
+        };
+      }),
+    rec,
+  );
+  await page.goto(BASE);
+  let after = [1];
+  for (let i = 0; i < 30 && after.length; i++) after = await page.waitForTimeout(500).then(async () => (await records())[0]?.bookmarks ?? []);
+  check(after.length === 0, 'page notes: a bookmark from before is gone from the library');
+  await opened(page).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('tab-notes').click();
+  await rows.nth(1).waitFor({ timeout: 5000 }).catch(() => {});
+  const texts = await rows.allInnerTexts();
+  check(texts.some((r) => /Bookmark/.test(r) && /2/.test(r)) && texts.some((r) => /Read again/.test(r)), `page notes: …and is a note on its page, in the file (${texts.map((r) => r.replace(/\n/g, ' '))})`);
   await ctx.close();
 }
 
@@ -2883,17 +2893,20 @@ async function viewed() {
   await page.waitForTimeout(1200);
   const again = (await page.getByTestId('page-label').innerText()).replace(/\s+/g, ' ').trim();
   check(left.startsWith('2') && again === left, `viewed: opened again, it is where it was left (${left} → ${again})`);
-  // A bookmark is saved about it: asked first; Cancel leaves it viewed.
-  await vis('bookmark').click();
+  // A note is saved into it: asked to keep it first; Cancel leaves it viewed.
+  await vis('page-note').click();
+  await page.getByTestId('note-input').fill('Check');
+  await page.getByTestId('note-save').click();
+  await vis('save').click();
   await page.getByText('Keep in Tessel?').waitFor({ timeout: 5000 });
-  check(/copy goes to the Tessel folder|stays where it is/.test(await page.getByTestId('ask-dialog').innerText()), 'viewed: a bookmark asks to keep it first, saying where it goes');
+  check(/copy goes to the Tessel folder|stays where it is/.test(await page.getByTestId('ask-dialog').innerText()), 'viewed: saving a note asks to keep it first, saying where it goes');
   await page.getByTestId('ask-cancel').click();
   await page.waitForTimeout(300);
-  check((await vis('bookmark').getAttribute('aria-pressed')) !== 'true', 'viewed: Cancel leaves it viewed, without the bookmark');
-  await vis('bookmark').click();
+  check((await vis('save').count()) === 1, 'viewed: Cancel leaves it viewed, the note not saved yet');
+  await vis('save').click();
   await page.getByTestId('ask-confirm').click();
-  await page.waitForTimeout(500);
-  check((await vis('bookmark').getAttribute('aria-pressed')) === 'true', 'viewed: Keep keeps it, and the bookmark is saved');
+  await page.waitForTimeout(1000);
+  check((await vis('save').count()) === 0, 'viewed: Keep keeps it, and the note is saved');
   await page.getByTestId('back').click();
   await page.getByTestId('last-read').waitFor({ timeout: 10000 }).then(
     () => check(true, 'viewed: kept, it is the library’s'),
@@ -2940,6 +2953,7 @@ await step('books', books);
 await step('shell', shellBridge);
 await step('forms', forms);
 await step('annotations', annotations);
+await step('page-notes', pageNotes);
 await step('linked', linked);
 await step('folders', foldersDesktop);
 await step('folders-shell', foldersShell);

@@ -33,6 +33,7 @@ export const engine: DocumentEngine = {
       fields: async () => [],
       annotations: async () => [],
       addHighlight: async () => {},
+      addNote: async () => {},
       updateAnnotation: async () => {},
       removeAnnotation: async () => {},
       setField: async () => [],

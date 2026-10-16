@@ -9,7 +9,7 @@ import type { FolderEntry } from '@/lib/folderTypes';
 import { usePrefs } from '@/state/prefs';
 import { repo } from '@/storage';
 import { parseTags, real, realTitle } from './pdfInfo';
-import { docKey } from './shared';
+import { docKey } from './docKey';
 import type { Hit, Indexable, IndexedDoc, Place } from './search';
 import type { Match, SearchRequest, SearchResponse } from './searchProtocol';
 import { duplicates, parseConflict, syncTemporary, type ConflictName } from './sync';

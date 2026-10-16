@@ -10,7 +10,7 @@ import { usePrefs } from '@/state/prefs';
 import { localDate } from './facets';
 import { allDocs, contentHash, schedule } from './indexer';
 import { readSettings } from './settingsFile';
-import { docKey } from './shared';
+import { docKey } from './docKey';
 import type { IndexedDoc } from './search';
 import { infoFor, parseTags, readTrailer, real, realTitle, withInfo, type Details } from './pdfInfo';
 import { makeSearchable, pagesWithoutText, readPages, textOf } from './searchable';

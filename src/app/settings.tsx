@@ -14,7 +14,6 @@ import { nestingNote } from './files';
 import { forget, viewedCount } from '@/state/viewed';
 import { useLibrary } from '@/state/library';
 import { downloadDoc } from '@/lib/fileActions';
-import { shareNow, useSharing } from '@/archive/sharing';
 import { schedule } from '@/archive/indexer';
 import { setArchive } from '@/archive/views';
 import { AppearancePicker } from '@/reader/AppearancePanel';
@@ -288,12 +287,10 @@ export default function Settings() {
   );
 }
 
-/** With an archive: whether this device sorts its inbox, and whether reading is shared through it. */
+/** With an archive: whether this device sorts its inbox. */
 function SyncSection() {
   const p = usePalette();
   const inboxHere = usePrefs((s) => s.inboxHere);
-  const shareReading = usePrefs((s) => s.shareReading);
-  const sharedWith = useSharing((s) => s.devices);
   const setPrefs = usePrefs((s) => s.set);
   return (
     <>
@@ -323,31 +320,6 @@ function SyncSection() {
           </Pressable>
           <T v="caption" color={p.muted} style={styles.note}>
             {t.inboxHereNote} {t.inboxOtherDevice}
-          </T>
-          <Pressable
-            testID="share-reading-switch"
-            accessibilityRole="switch"
-            accessibilityLabel={t.shareReading}
-            aria-checked={shareReading}
-            onPress={() => {
-              setPrefs({ shareReading: !shareReading });
-              if (!shareReading) void shareNow();
-            }}
-            style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-              styles.card,
-              styles.row,
-              { marginTop: space.lg, backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg },
-            ]}
-          >
-            <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
-              {t.shareReading}
-            </T>
-            <View style={[styles.track, { backgroundColor: shareReading ? p.accent : p.hairline }]}>
-              <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: shareReading ? 18 : 0 }] }]} />
-            </View>
-          </Pressable>
-          <T v="caption" color={p.muted} style={styles.note} testID="share-reading-note">
-            {t.shareReadingNote} {shareReading && sharedWith > 0 ? t.shareReadingWith(sharedWith) : ''}
           </T>
         </>
       )}

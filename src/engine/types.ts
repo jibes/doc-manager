@@ -166,6 +166,8 @@ export interface DocHandle {
   annotations(): Promise<Annotation[]>;
   /** Highlights text covering `rects` (one per line) on a page, with an optional comment. */
   addHighlight(page: number, rects: NormRect[], color: string, contents?: string): Promise<void>;
+  /** A note on the page itself, its top-left corner at `at` (0..1 across and down). */
+  addNote(page: number, at: { x: number; y: number }, color: string, contents: string): Promise<void>;
   updateAnnotation(page: number, index: number, patch: { contents?: string; color?: string }): Promise<void>;
   removeAnnotation(page: number, index: number): Promise<void>;
   /** The document with all edits, as PDF bytes. */

@@ -23,7 +23,6 @@ import { shell } from '@/lib/shell';
 import { useAmbientLight } from '@/state/ambient';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { schedule, startIndexing } from '@/archive/indexer';
-import { startSharing } from '@/archive/sharing';
 import { refreshInboxCount } from '@/archive/inbox';
 import { useLibrary, type ImportItem } from '@/state/library';
 
@@ -60,7 +59,6 @@ export default function RootLayout() {
     // Every screen works with the library (opening, deleting, the reading list), whichever the app starts on.
     void useLibrary.getState().load();
     startIndexing();
-    startSharing();
     void refreshInboxCount();
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void refreshInboxCount());
     return useLibrary.subscribe((s, prev) => {

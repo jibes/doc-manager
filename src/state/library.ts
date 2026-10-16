@@ -13,7 +13,7 @@ import { folders } from '@/lib/folders';
 import { sameOrRenamed } from '@/lib/names';
 import { startsWith } from '@/lib/bytes';
 import { readStored, writeStored } from '@/lib/stored';
-import { docKey } from '@/archive/shared';
+import { docKey } from '@/archive/docKey';
 import { inboxDir } from '@/archive/dirs';
 import type { DocSource } from '@/engine/types';
 import { FILE_MOVED, repo, type DocRecord, type ReadingPosition } from '@/storage';
@@ -78,7 +78,6 @@ type LibraryState = {
   savePosition(id: string, position: ReadingPosition, atEnd?: boolean): void;
   /** `now`: written to storage at once too (the reader closes, the page goes away). */
   flushPositions(now?: boolean): void;
-  toggleBookmark(id: string, page: number): void;
   toggleReading(id: string): void;
   setView(id: string, view: 'page' | 'text'): void;
   toggleInvert(id: string): void;
@@ -148,6 +147,9 @@ function isEpub(name: string, source: DocSource): boolean {
   const head = new TextDecoder('latin1').decode(new Uint8Array(source.bytes, 0, Math.min(64, source.bytes.byteLength)));
   return head.startsWith('PK') && head.includes('mimetypeapplication/epub+zip');
 }
+
+/** The colour of a note on a page (the first highlight colour). */
+const NOTE_COLOR = '#ffd54f';
 
 /** When moving copies into the Tessel folder last failed; tried again after a day. */
 const MOVE_FAILED = 'tessel.moveCopiesFailed';
@@ -222,6 +224,31 @@ export const useLibrary = create<LibraryState>((set, get) => {
       }
     }
     if (failed) writeStored(MOVE_FAILED, String(Date.now()));
+  };
+
+  /**
+   * Once, from before bookmarks were notes: each bookmarked page gets a note in its file ("Bookmark"), and the
+   * document forgets its bookmarks. A file that can't be written keeps them, and says how many are left.
+   */
+  const bookmarksToNotes = async () => {
+    let left = 0;
+    for (const d of get().docs) {
+      if (!d.bookmarks?.length || d.viewed) continue;
+      let handle;
+      try {
+        const src = await repo.source(d.id);
+        handle = await engine.open(src, passwordFor(d.id));
+        for (const page of d.bookmarks) if (page < handle.pageCount) await handle.addNote(page, { x: 0.03, y: 0.02 }, NOTE_COLOR, t.pageNoteDefault);
+        await repo.writeFile(d.id, await handle.save());
+        patch(d.id, (x) => ({ ...x, bookmarks: [] }));
+        void import('@/archive/indexer').then((m) => m.invalidate(d.id));
+      } catch {
+        left += d.bookmarks.length;
+      } finally {
+        handle?.close();
+      }
+    }
+    if (left) set({ error: t.bookmarksLeft(left) });
   };
 
   let loading: Promise<void> | null = null;
@@ -316,7 +343,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
         set((s) => ({ docs: [...s.docs.filter((d) => !docs.some((x) => x.id === d.id)), ...docs], books, loaded: true }));
         const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
         set((s) => ({ covers: { ...Object.fromEntries(entries), ...s.covers } }));
-        void moveCopies();
+        void moveCopies().then(bookmarksToNotes);
       })();
       return loading;
     },
@@ -486,10 +513,6 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const gone = get().docs.find((d) => d.id === id);
       if (gone?.viewed) return get().closeViewed(id);
       set((s) => ({ docs: s.docs.filter((d) => d.id !== id) }));
-      // Off the reading list shared with the other devices too (else it would come back from there).
-      const { archive, shareReading, unshared, set: setPrefs } = usePrefs.getState();
-      if (archive && shareReading && gone?.shareKey && gone.reading && !gone.reading.finishedAt)
-        setPrefs({ unshared: [...unshared.filter((u) => u.key !== gone.shareKey), { key: gone.shareKey, at: Date.now() }] });
       await repo.remove(id);
     },
 
@@ -530,18 +553,6 @@ export const useLibrary = create<LibraryState>((set, get) => {
       void get()
         .ensureKept(id)
         .then((ok) => ok && patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } }))),
-
-    toggleBookmark: (id, page) =>
-      void get()
-        .ensureKept(id)
-        .then(
-          (ok) =>
-            ok &&
-            patch(id, (d) => ({
-              ...d,
-              bookmarks: d.bookmarks.includes(page) ? d.bookmarks.filter((p) => p !== page) : [...d.bookmarks, page].sort((a, b) => a - b),
-            })),
-        ),
 
     async linkTo(id, item) {
       await repo.saveFile(id, fileData(item));

@@ -16,6 +16,7 @@ export type Request =
   | { id: number; type: 'ocrLayer'; doc: number; page: number }
   | { id: number; type: 'annots'; doc: number; from?: number; to?: number }
   | { id: number; type: 'addHighlight'; doc: number; page: number; rects: NormRect[]; color: string; contents?: string }
+  | { id: number; type: 'addNote'; doc: number; page: number; at: { x: number; y: number }; color: string; contents: string }
   | { id: number; type: 'updateAnnot'; doc: number; page: number; index: number; contents?: string; color?: string }
   | { id: number; type: 'removeAnnot'; doc: number; page: number; index: number }
   | { id: number; type: 'search'; doc: number; query: string }
@@ -45,6 +46,7 @@ export type ResultMap = {
   ocrLayer: OcrLayer;
   annots: Annotation[];
   addHighlight: null;
+  addNote: null;
   updateAnnot: null;
   removeAnnot: null;
   search: null;

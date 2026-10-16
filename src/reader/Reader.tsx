@@ -35,7 +35,7 @@ import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/archiv
 import type { IndexedDoc } from '@/archive/search';
 import { useThrottled } from '@/lib/useThrottled';
 import { inboxDir, refreshInboxCount } from '@/archive/inbox';
-import { docKey } from '@/archive/shared';
+import { docKey } from '@/archive/docKey';
 import { folders } from '@/lib/folders';
 import { anyPageWithoutText, makeSearchable, pagesWithoutText } from '@/archive/searchable';
 import { improveWithAi } from '@/archive/improve';
@@ -50,6 +50,7 @@ import { anchorAt, computeLayout, contentWidth, positionAt, readingPage, scrollF
 import { PageView } from './PageView';
 import { ReflowView, type ReflowApi } from './ReflowView';
 import { NoteDialog, type NoteRequest } from './NoteDialog';
+import { HIGHLIGHT_COLORS } from './selection';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
 import { discardDetails, useDrafts } from './drafts';
@@ -157,7 +158,7 @@ export function Reader({
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
-  const { savePosition, flushPositions, toggleBookmark, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
+  const { savePosition, flushPositions, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
   // Where it was left: in the library at once when the reader closes.
   useEffect(() => () => flushPositions(true), [flushPositions]);
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
@@ -541,6 +542,16 @@ export function Reader({
     },
     [askNote, handle, annotated],
   );
+  // A note on the page itself (what a bookmark was): in the corner, saved into the file like any note.
+  const onPageNote = useCallback(
+    async (pg: number) => {
+      const contents = await askNote('', '');
+      if (contents == null) return;
+      await handle.addNote(pg, { x: 0.03, y: 0.02 }, HIGHLIGHT_COLORS[0].hex, contents.trim() || t.pageNoteDefault);
+      annotated([pg]);
+    },
+    [askNote, handle, annotated],
+  );
   // Notes are addressed by their place on the page: one change at a time, and the list kept right meanwhile.
   const noteBusy = useRef(false);
   const onEditNote = useCallback(
@@ -756,7 +767,7 @@ export function Reader({
           if (view === 'text') goToPage(handle.pageCount - 1);
           else scrollTo(Number.MAX_SAFE_INTEGER, false);
         },
-        b: () => toggleBookmark(doc.id, page),
+        b: () => void onPageNote(page),
         v: () => switchView(view === 'page' ? 'text' : 'page'),
         t: () => (panel === 'find' ? setPanel(null) : openFind(false)),
       };
@@ -800,7 +811,7 @@ export function Reader({
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, toggleBookmark, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs]);
+  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, onPageNote, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs]);
 
   // ---------- pinch (native) ----------
   // The pages scale about where the fingers started; on release the zoom keeps that point there.
@@ -848,7 +859,8 @@ export function Reader({
   const bottomStyle = useAnimatedStyle(() => ({ opacity: pillsV.value, transform: [{ translateY: (1 - pillsV.value) * 10 }] }));
 
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
-  const bookmarked = doc.bookmarks.includes(page);
+  // Pages with notes: marked on the scrubber and among the pages.
+  const noted = useMemo(() => [...new Set((annots ?? []).filter((a) => a.contents.trim()).map((a) => a.page))], [annots]);
   // A one-page document is read once it is open.
   // Scrolled to the very end is all of it, even where the last page never comes up as the one being read.
   const pct = handle.pageCount <= 1 || atBottom ? 100 : Math.round((page / (handle.pageCount - 1)) * 100);
@@ -1060,14 +1072,7 @@ export function Reader({
                 <IconButton icon="zoomIn" label={withShortcut(t.larger, '+')} size={34} onPress={() => setPrefs({ textScale: clampText(textScale + 0.1) })} />
               </>
             )}
-            <IconButton
-              icon={bookmarked ? 'bookmarkFill' : 'bookmark'}
-              label={bookmarked ? t.removeBookmark : t.bookmarkPage}
-              size={34}
-              active={bookmarked}
-              onPress={() => toggleBookmark(doc.id, page)}
-              testID="bookmark"
-            />
+            <IconButton icon="bookmark" label={withShortcut(t.pageNote, 'B')} size={34} onPress={() => void onPageNote(page)} testID="page-note" />
           </View>
         </Animated.View>
         <View style={{ paddingHorizontal: wide ? space.xxl : space.lg }}>
@@ -1078,7 +1083,7 @@ export function Reader({
             cache={cache}
             palette={p}
             chapters={chapters}
-            bookmarks={doc.bookmarks}
+            bookmarks={noted}
             expanded={chromeShown}
             onSeek={goToPage}
           />
@@ -1110,7 +1115,7 @@ export function Reader({
             page,
             sizes: handle.pageSizes,
             cache,
-            bookmarks: doc.bookmarks,
+            bookmarks: noted,
             annotations: annots,
             onShowNotes: showNotes,
             onEditNote,

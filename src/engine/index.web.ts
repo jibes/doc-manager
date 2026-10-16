@@ -116,6 +116,7 @@ function handleFrom(r: OpenResult): DocHandle {
       return out;
     },
     addHighlight: (page, rects, color, contents) => client.call('addHighlight', { doc: r.doc, page, rects, color, contents }).then(() => {}),
+    addNote: (page, at, color, contents) => client.call('addNote', { doc: r.doc, page, at, color, contents }).then(() => {}),
     updateAnnotation: (page, index, patch) => client.call('updateAnnot', { doc: r.doc, page, index, ...patch }).then(() => {}),
     removeAnnotation: (page, index) => client.call('removeAnnot', { doc: r.doc, page, index }).then(() => {}),
     close: () => void client.call('close', { doc: r.doc }).catch(() => {}),

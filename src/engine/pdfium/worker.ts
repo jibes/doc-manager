@@ -37,6 +37,7 @@ const FF_MULTILINE = 1 << 12;
 const FF_PASSWORD = 1 << 13;
 const FF_MULTISELECT = 1 << 21;
 const FPDF_ANNOT_HIGHLIGHT = 9;
+const FPDF_ANNOT_TEXT = 1;
 const ANNOT_KINDS: Record<number, Annotation['kind']> = {
   1: 'note',
   3: 'freetext',
@@ -1014,6 +1015,31 @@ function addHighlight(docId: number, pageIndex: number, rects: NormRect[], color
   d.edited = true;
 }
 
+/** A note on the page itself (a sticky note at `at`, its top-left corner); PDFium draws its icon. */
+function addNote(docId: number, pageIndex: number, at: { x: number; y: number }, color: string, contents: string) {
+  const d = getDoc(docId);
+  withPage(d, pageIndex, (page) => {
+    const { toPage } = pageTransform(d, pageIndex, page);
+    const annot = M.FPDFPage_CreateAnnot(page, FPDF_ANNOT_TEXT);
+    if (!annot) throw new Error('Could not create the note');
+    try {
+      setColor(annot, color);
+      const [x, y] = toPage(at.x, at.y);
+      const SIZE = 20;
+      withScratch(16, (s) => {
+        [x, y, x + SIZE, y - SIZE].forEach((v, k) => M.pdfium.setValue(s + k * 4, v, 'float'));
+        M.FPDFAnnot_SetRect(annot, s);
+      });
+      setWide(annot, 'Contents', contents);
+      setWide(annot, 'M', pdfDate());
+      setWide(annot, 'NM', `tessel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    } finally {
+      M.FPDFPage_CloseAnnot(annot);
+    }
+  });
+  d.edited = true;
+}
+
 function updateAnnot(docId: number, pageIndex: number, index: number, contents?: string, color?: string) {
   const d = getDoc(docId);
   withPage(d, pageIndex, (page) => {
@@ -1169,6 +1195,9 @@ async function run(job: Job) {
       return post({ id: job.id, ok: true, result: annotations(job.doc, job.from, job.to) });
     case 'addHighlight':
       addHighlight(job.doc, job.page, job.rects, job.color, job.contents);
+      return post({ id: job.id, ok: true, result: null });
+    case 'addNote':
+      addNote(job.doc, job.page, job.at, job.color, job.contents);
       return post({ id: job.id, ok: true, result: null });
     case 'updateAnnot':
       updateAnnot(job.doc, job.page, job.index, job.contents, job.color);

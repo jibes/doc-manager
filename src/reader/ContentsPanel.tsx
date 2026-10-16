@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { t } from '@/i18n';
-import { Icon } from '@/components/Icon';
 import { IconButton, T } from '@/components/primitives';
 import { fonts, radius, space, type Palette } from '@/design/tokens';
 import type { Annotation, OutlineItem, Size } from '@/engine/types';
@@ -19,7 +18,7 @@ export function flattenOutline(items: OutlineItem[], depth = 0, out: FlatOutline
   return out;
 }
 
-export type ContentsTab = 'contents' | 'pages' | 'bookmarks' | 'notes';
+export type ContentsTab = 'contents' | 'pages' | 'notes';
 type Tab = ContentsTab;
 
 type Props = {
@@ -41,11 +40,11 @@ type Props = {
   onGo: (page: number) => void;
 };
 
-/** Contents, pages, bookmarks and notes: the lower part of Find while nothing is searched. */
+/** Contents, pages and notes: the lower part of Find while nothing is searched. */
 export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmarks, tabs: only, annotations, onShowNotes, onEditNote, onDeleteNote, onGo }: Props) {
   const [picked, setTab] = useState<Tab>('contents');
   // No outline → open on Pages instead of an empty Contents tab.
-  const offered = only ?? (['contents', 'pages', 'bookmarks', 'notes'] as Tab[]).filter((k) => k !== 'pages' || (cache && sizes));
+  const offered = only ?? (['contents', 'pages', 'notes'] as Tab[]).filter((k) => k !== 'pages' || (cache && sizes));
   const tab = picked === 'contents' && outline?.length === 0 && offered.includes('pages') ? 'pages' : picked;
   useEffect(() => {
     if (tab === 'notes') onShowNotes?.();
@@ -61,8 +60,6 @@ export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmark
   const allTabs: [Tab, string][] = [
     ['contents', t.contents],
     ['pages', t.pagesTab],
-    // Four tabs leave no room for counts (German labels are long); each list shows its own items.
-    ['bookmarks', t.bookmarks],
     ['notes', t.notesTab],
   ];
   const tabs = allTabs.filter(([k]) => offered.includes(k));
@@ -132,41 +129,6 @@ export function ContentsBody({ palette: p, outline, page, sizes, cache, bookmark
       {tab === 'pages' && cache && sizes && (
         <PagesGrid p={p} sizes={sizes} cache={cache} page={page} onGo={onGo} bookmarks={bookmarks} />
       )}
-
-      {tab === 'bookmarks' &&
-        (bookmarks.length === 0 ? (
-          <Empty p={p} text={t.noBookmarks} />
-        ) : (
-          <FlatList
-            data={bookmarks}
-            keyExtractor={(b) => String(b)}
-            contentContainerStyle={{ paddingBottom: space.xl }}
-            renderItem={({ item }) => {
-              const chapter = outline ? [...outline].reverse().find((o) => o.page >= 0 && o.page <= item) : undefined;
-              return (
-                <Pressable accessibilityRole="button"
-                  onPress={() => onGo(item)}
-                  style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.bmRow, { backgroundColor: hovered ? p.hairline : 'transparent' }]}
-                >
-                  {cache && sizes?.[item] ? (
-                    <Thumb cache={cache} page={item} size={sizes[item]} width={44} palette={p} />
-                  ) : (
-                    <Icon name="bookmark" size={18} color={p.muted} />
-                  )}
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <T v="headline">{t.pageN(item + 1)}</T>
-                    {chapter && (
-                      <T v="caption" color={p.muted} numberOfLines={1}>
-                        {chapter.title}
-                      </T>
-                    )}
-                  </View>
-                  <Icon name="bookmarkFill" size={16} color={p.accent} />
-                </Pressable>
-              );
-            }}
-          />
-        ))}
 
       {tab === 'notes' &&
         (annotations == null ? null : annotations.length === 0 ? (
@@ -279,5 +241,4 @@ const styles = StyleSheet.create({
   segActive: { boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } as object,
   tocRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingRight: space.xl - 4, paddingVertical: 10, minHeight: 44 },
   tocBar: { position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderTopRightRadius: 2, borderBottomRightRadius: 2 },
-  bmRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.xl - 4, paddingVertical: space.sm },
 });
