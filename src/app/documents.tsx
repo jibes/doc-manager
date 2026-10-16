@@ -26,6 +26,7 @@ import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { folders } from '@/lib/folders';
 import { useLibrary } from '@/state/library';
+import { useCache } from '@/state/cache';
 import { APP_ROOT_ID } from '@/lib/nesting';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
 import { addFolder, PasteBar, Roots } from './files';
@@ -96,6 +97,7 @@ export default function Documents() {
   }
   // When this device last opened (or added) each document: the library knows (files don't say), by document or file.
   const library = useLibrary((s) => s.docs);
+  const cached = useCache((s) => s.docs);
   const openedAt = useMemo(() => {
     const byKey = new Map<string, number>();
     for (const d of library) {
@@ -106,8 +108,9 @@ export default function Documents() {
       if (d.shareKey) byKey.set(`share:${d.shareKey}`, Math.max(at, byKey.get(`share:${d.shareKey}`) ?? 0));
       byKey.set(`file:${d.fileName}|${d.bytes}`, Math.max(at, byKey.get(`file:${d.fileName}|${d.bytes}`) ?? 0));
     }
-    return (d: IndexedDoc) => byKey.get(d.key) ?? (d.share ? byKey.get(`share:${d.share}`) : undefined) ?? byKey.get(`file:${d.name}|${d.size}`);
-  }, [library]);
+    // This device's cache first (by content, wherever the file is); then the library's records.
+    return (d: IndexedDoc) => (d.share ? cached.get(d.share)?.openedAt : undefined) ?? byKey.get(d.key) ?? (d.share ? byKey.get(`share:${d.share}`) : undefined) ?? byKey.get(`file:${d.name}|${d.size}`);
+  }, [library, cached]);
   // Search results come best match first, until another order is chosen for them.
   const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);

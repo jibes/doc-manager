@@ -8,6 +8,7 @@ import { usePrefs } from '@/state/prefs';
 import { isFileHandle, type FileHandle } from '@/lib/fsa';
 import { ask } from '@/state/ask';
 import { forget, recall, remember, viewedKey } from '@/state/viewed';
+import { loadCache, remember as cache } from '@/state/cache';
 import type { FolderEntry } from '@/lib/folderTypes';
 import { folders } from '@/lib/folders';
 import { sameOrRenamed } from '@/lib/names';
@@ -184,6 +185,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
     if (!rec) return;
     // Viewed: where it was left and how it looked go to the viewed history, nothing to the library.
     if (rec.viewed) return void remember(viewedKey(rec.shareKey!, rec.bytes), rec.fileName, { position: rec.position, view: rec.view, invert: rec.invert, openedAt: rec.openedAt });
+    // What this device remembers about it goes to the cache, by its content (the library's record is going away).
+    if (rec.shareKey) cache(rec.shareKey, { openedAt: rec.openedAt, position: rec.position, view: rec.view, invert: rec.invert ? true : undefined });
     if (!debounce) return void repo.put(rec);
     dirty.add(id);
     clearTimeout(persistTimer);
@@ -250,6 +253,18 @@ export const useLibrary = create<LibraryState>((set, get) => {
       }
     }
     if (left) set({ error: t.bookmarksLeft(left) });
+  };
+
+  /** Documents from before content keys: each gets its key (once: it reads the file), so the cache can know it. */
+  const withKeys = async () => {
+    for (const d of get().docs) {
+      if (d.shareKey || d.viewed) continue;
+      const src = await repo.source(d.id).catch(() => null);
+      if (src?.kind === 'bytes') {
+        const key = await docKey(src.bytes);
+        patch(d.id, (x) => ({ ...x, shareKey: key }));
+      }
+    }
   };
 
   let loading: Promise<void> | null = null;
@@ -337,14 +352,16 @@ export const useLibrary = create<LibraryState>((set, get) => {
     load() {
       // Once, however many ask at the same time (a later answer would drop documents added meanwhile).
       loading ??= (async () => {
-        const all = (await repo.list()).sort(byRecent);
+        const [stored, cached] = await Promise.all([repo.list(), loadCache()]);
+        // The cache knows best where a document was left (it is what is kept from now on).
+        const all = stored.map((d) => (d.shareKey && cached.has(d.shareKey) ? { ...d, ...cached.get(d.shareKey) } : d)).sort(byRecent);
         // Books from before Tessel was PDFs only: not listed; kept until saved or removed in Settings.
         const books = all.filter((d) => d.format === 'epub');
         const docs = all.filter((d) => d.format !== 'epub');
         set((s) => ({ docs: [...s.docs.filter((d) => !docs.some((x) => x.id === d.id)), ...docs], books, loaded: true }));
         const entries = await Promise.all(docs.map(async (d) => [d.id, await repo.coverUri(d.id)] as const));
         set((s) => ({ covers: { ...Object.fromEntries(entries), ...s.covers } }));
-        void moveCopies().then(bookmarksToNotes);
+        void moveCopies().then(bookmarksToNotes).then(withKeys);
       })();
       return loading;
     },
@@ -369,6 +386,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
             set({ error: t.booksNotHere(item.name) });
             continue;
           }
+          // Before the engine takes the bytes (they move to its worker).
+          const share = source.kind === 'bytes' ? await docKey(source.bytes) : undefined;
           const opened = await openWithPassword(item.name, (pw) => engine.renderCover(source, COVER_WIDTH, pw));
           if (!opened) continue; // password prompt dismissed
           const { cover, handle } = opened.value;
@@ -385,6 +404,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
             addedAt: Date.now(),
             bookmarks: [],
             linked: isLinked(item),
+            ...(share ? { shareKey: share } : {}),
           };
           handle.close();
           if (opened.password) rememberPassword(id, opened.password);

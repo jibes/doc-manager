@@ -2430,6 +2430,63 @@ async function pageNotes() {
   await ctx.close();
 }
 
+// A browser library from 2.x (a copy in IndexedDB, where it was left on the record): the copy becomes a file in the
+// browser's own Tessel folder, and where it was left is in this device's cache, by its content.
+async function upgrade() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`upgrade: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByTestId('add').locator('visible=true').first().waitFor();
+  const b64 = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url)).toString('base64');
+  await page.evaluate(async (b64) => {
+    const put = (db, store, key, value) =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open(db);
+        open.onupgradeneeded = () => open.result.createObjectStore(store);
+        open.onsuccess = () => {
+          const tx = open.result.transaction(store, 'readwrite');
+          tx.objectStore(store).put(value, key);
+          tx.oncomplete = () => resolve(null);
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    await put('quire-files', 'files', 'old1', new Blob([bytes], { type: 'application/pdf' }));
+    await put('quire-meta', 'docs', 'old1', { id: 'old1', title: 'Orderly Notes', fileName: 'columns.pdf', bytes: bytes.length, pageCount: 2, coverAspect: 1.29, addedAt: Date.now() - 1000, openedAt: Date.now() - 500, bookmarks: [], position: { page: 1, offset: 0.1 } });
+  }, b64);
+  await page.goto(BASE);
+  const state = () =>
+    page.evaluate(async () => {
+      let file = false;
+      try {
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Tessel');
+        for await (const [n] of dir.entries()) if (n === 'columns.pdf') file = true;
+      } catch {}
+      const cached = await new Promise((resolve) => {
+        const open = indexedDB.open('tessel-cache');
+        open.onupgradeneeded = () => open.result.createObjectStore('docs');
+        open.onsuccess = () => {
+          const all = open.result.transaction('docs').objectStore('docs').getAll();
+          all.onsuccess = () => resolve(all.result);
+          all.onerror = () => resolve([]);
+        };
+        open.onerror = () => resolve([]);
+      });
+      return { file, cached };
+    });
+  let now = { file: false, cached: [] };
+  for (let i = 0; i < 40 && !(now.file && now.cached.length); i++) now = await page.waitForTimeout(500).then(state);
+  check(now.file, 'upgrade: the copy kept in the browser is a file in the browser’s own Tessel folder');
+  check(now.cached.some((c) => c.position?.page === 1), `upgrade: where it was left is in this device’s cache (${JSON.stringify(now.cached)})`);
+  await page.goto(BASE);
+  await opened(page).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(800);
+  check(/^2/.test((await page.getByTestId('page-label').innerText()).trim()), `upgrade: it opens where it was left (${await page.getByTestId('page-label').innerText()})`);
+  await ctx.close();
+}
+
 // ONLY=linked,scan runs a subset while iterating.
 const only = process.env.ONLY?.split(',');
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
@@ -2954,6 +3011,7 @@ await step('shell', shellBridge);
 await step('forms', forms);
 await step('annotations', annotations);
 await step('page-notes', pageNotes);
+await step('upgrade', upgrade);
 await step('linked', linked);
 await step('folders', foldersDesktop);
 await step('folders-shell', foldersShell);
