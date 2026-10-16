@@ -60,9 +60,9 @@ CHAPTERS = [
             'every document; the filter narrows by tag, sender, type and year, and a search or filter can be '
             'saved as a view. Details (title, sender, type, date, tags) are written into the PDF itself.',
         ]),
-        ('Sources and duplicates', [
-            'Folders you add in Settings are sources: their PDFs are listed on the Sources side, searched too, '
-            'and can be kept in Tessel. A search on one side says what the other has.',
+        ('One folder, and duplicates', [
+            'Every document is a file in the Tessel folder: this device’s own, or a folder you choose in Settings '
+            '(one that syncs, say). Import a folder there copies the PDFs you already have in, once.',
             'Documents there twice, or older versions of one, are listed under More → Duplicates, with the '
             'space removing the others frees.',
         ]),

@@ -6,7 +6,7 @@ Expo SDK 57 / React Native 0.86 app. Expo APIs change every SDK: verify against 
 - Routes live in `src/app/`. `src/core/` (engine, reflow, ocr, storage, lib, design, i18n) is what any document app would share; `src/paper/` (archive, scan, reader, components, state) is Tessel's document management on top. core never imports paper or app (ESLint enforces it).
 - Never hand-edit `ios/` or `android/` (Continuous Native Generation). Native engine code lives in `modules/pdf-engine`.
 - UI must depend only on `src/core/engine/types.ts`, never on PDFium or native module internals.
-- Product: Tessel, a PDF-only document manager. One screen (Documents, Tessel | Sources); no folders in the Tessel folder (tags and filters instead); the file is the truth (details, text, notes live in the PDF). No reading list, no EPUB.
+- Product: Tessel, a PDF-only document manager. One screen (Documents); one Tessel folder, chosen in Settings (no sources); no folders in the Tessel folder (tags and filters instead); the file is the truth (details, text, notes live in the PDF). No reading list, no EPUB.
 - Web storage keys still say `quire` on purpose (renaming would orphan existing libraries).
 - UI strings live in `src/core/i18n/en.ts` + `de.ts` (German is type-checked against English); never hard-code user-facing text.
 - React Compiler is on: keep `npx eslint .` clean (no refs or setState during render or effect bodies).
