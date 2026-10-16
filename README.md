@@ -4,7 +4,7 @@
 
 Live web app: https://jibes.github.io/doc-manager/
 
-(The repository was called `doc-reader` until 3.2: a web app installed from `jibes.github.io/doc-reader/` has to be installed again from the address above. Links to the old repository, and Obtainium, follow the rename by themselves.)
+(The repository was called `doc-reader` until 3.2: a web app installed from `jibes.github.io/doc-reader/` has to be installed again from the address above (same site, so its documents are still there). Links to the old repository, and Obtainium, follow the rename by themselves.)
 
 ## Principles
 
