@@ -63,7 +63,8 @@ export default function Settings() {
   const refresh = useCallback(() => {
     folders
       .roots(false)
-      .then(setPicked)
+      // The folders added (Tessel's own folder isn't one: it is where things go without a chosen one).
+      .then((rs) => setPicked(rs.filter((r) => r.kind === 'folder')))
       .catch(() => setError(t.opFailed));
     if (folders.allFilesSupported) folders.allFiles().then(setGranted, () => setGranted(false));
   }, []);

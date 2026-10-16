@@ -300,10 +300,18 @@ async function candidates(): Promise<{ list: Candidate[]; unlisted: Unlisted[]; 
   // Library documents that aren't files in those folders already (a document opened from a folder is linked to it).
   const uris = list.map((c) => (c.place.kind === 'folder' ? c.place.entry.uri : undefined)).filter((u): u is string => !!u);
   const linked = new Set([...(await repo.linkedTo(uris).catch(() => new Map<string, string[]>())).values()].flat());
-  // In a browser, folder files have no URI: a linked document is matched to its file by name and size.
+  // In a browser, folder files have no URI: a linked document is matched to its file by its handle (the same entry),
+  // else by name and size.
   const inFolders = new Set(list.map((c) => `${c.name}|${c.size}`));
+  const handles = list.flatMap((c) => (c.place.kind === 'folder' && c.place.entry.handle ? [c.place.entry.handle] : []));
+  const sameFile = async (id: string) => {
+    const h = await repo.handleOf(id).catch(() => undefined);
+    if (!h) return false;
+    for (const other of handles) if (other.name === h.name && (await h.isSameEntry(other).catch(() => false))) return true;
+    return false;
+  };
   for (const d of await repo.list().catch(() => [])) {
-    if (linked.has(d.id) || (d.linked && inFolders.has(`${d.fileName}|${d.bytes}`))) continue;
+    if (linked.has(d.id) || (d.linked && (inFolders.has(`${d.fileName}|${d.bytes}`) || (await sameFile(d.id))))) continue;
     list.push({ key: `lib:${d.id}`, place: { kind: 'library', id: d.id }, name: d.fileName, size: d.bytes, modified: d.addedAt });
   }
   return { list, unlisted, conflicts };
