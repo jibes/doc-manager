@@ -478,7 +478,7 @@ async function forms() {
   await page.getByRole('button', { name: 'Cancel', exact: true }).last().click().catch(() => {});
   check(asked && (await page.getByTestId('reader').count()) === 1, 'forms: leaving with unsaved edits asks first');
   await page.getByTestId('save').click();
-  await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
+  await page.getByText(/^Saved (in Tessel|to “)/).first().waitFor({ timeout: 5000 });
   await page.getByTestId('back').click();
   await page.getByTestId('continue').waitFor();
   await page.reload();
@@ -547,7 +547,7 @@ async function annotations() {
   await rows.nth(0).getByTestId('note-delete').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid=note-row]').length === 1, null, { timeout: 3000 });
   await page.getByTestId('save').click();
-  await page.getByText('Saved in Tessel').waitFor({ timeout: 5000 });
+  await page.getByText(/^Saved (in Tessel|to “)/).first().waitFor({ timeout: 5000 });
   // Details written after a save were added to the file as it was opened, losing the saved notes.
   await page.keyboard.press('Escape');
   await page.getByTestId('open-more').click();

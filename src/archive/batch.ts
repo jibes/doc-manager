@@ -1,11 +1,9 @@
-import { t } from '@/i18n';
 import { folders, type FolderEntry, type Place as FolderPlace } from '@/lib/folders';
 import { PartlyDone } from '@/lib/folderTypes';
 import { shareDocs } from '@/lib/fileActions';
 import { useLibrary } from '@/state/library';
 import type { DocRecord } from '@/storage';
 import { forget, renamed, schedule } from './indexer';
-import { importFromFolder } from './Results';
 import type { IndexedDoc, Place } from './search';
 import type { Trashed } from './sync';
 import { moveToTrash, restore, trashes } from './trash';
@@ -46,29 +44,6 @@ export const filesAsDocs = (root: string, dir: string | undefined, entries: Fold
     date: '',
   }));
 
-/** Puts them on the reading list (files come into the library for it); returns how many were added. */
-export type ReadingAdded = { added: number; already: number; failed: number };
-
-export async function addToReading(docs: IndexedDoc[]): Promise<ReadingAdded> {
-  const r: ReadingAdded = { added: 0, already: 0, failed: 0 };
-  for (const d of docs) {
-    const rec: DocRecord | undefined = inFolder(d) ? await importFromFolder(d.place).catch(() => undefined) : libraryDoc(d);
-    const now = rec && useLibrary.getState().docs.find((x) => x.id === rec.id);
-    if (!now) r.failed++;
-    else if (now.reading) r.already++;
-    else {
-      useLibrary.getState().toggleReading(now.id);
-      r.added++;
-    }
-  }
-  return r;
-}
-
-/** What adding to the reading list did, in words (the same on every screen). */
-export function readingAddedText({ added, already, failed }: ReadingAdded): string {
-  const done = added ? t.readingAddedN(added) : already ? t.readingAlready : '';
-  return failed ? `${done} ${t.readingFailedN(failed)}`.trim() : done;
-}
 
 /** One share sheet for the files, one for library copies. */
 export async function shareAll(docs: IndexedDoc[]) {

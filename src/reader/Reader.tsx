@@ -158,14 +158,12 @@ export function Reader({
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
-  const { savePosition, flushPositions, toggleReading, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
+  const { savePosition, flushPositions, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
   // Where it was left: in the library at once when the reader closes.
   useEffect(() => () => flushPositions(true), [flushPositions]);
   // Page view shows the PDF as authored; text view reflows it (remembered per document).
   const view = doc.view ?? 'page';
   const textApiRef = useRef<ReflowApi | null>(null);
-  // Reading-list documents get reading behaviour (immersive chrome, progress); everything else is a plain viewer.
-  const readingMode = !!doc.reading;
   // Only the reader in front takes keys and Back: another one opened over it (a file dropped) leaves this one mounted underneath.
   const focused = useIsFocused();
   const edits = useEdits(doc, handle, focused);
@@ -299,8 +297,6 @@ export function Reader({
   const [zoomed, setZoomed] = useState<{ zoom: number; at: { x: number; y: number } | null }>({ zoom: 1, at: null });
   const zoom = zoomed.zoom;
   const [page, setPage] = useState(start?.page ?? 0);
-  // Scrolled to the very end (opened there again, too).
-  const [atBottom, setAtBottom] = useState(!!start?.end);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<PanelName>(null);
   // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
@@ -332,7 +328,6 @@ export function Reader({
   const placed = useRef<{ layout: PageLayout; zoomed: typeof zoomed } | null>(null);
   const restored = useRef(false);
   const jumpedAt = useRef(0);
-  const lastDir = useRef({ y: 0, acc: 0 });
   const { moving, moved } = useMoving(!isWide(winW));
 
   const layout = useMemo(
@@ -428,20 +423,8 @@ export function Reader({
     [layout, handle.pageCount, scrollTo, cache, view],
   );
 
-  // Immersive (reading list only): hide chrome reading forward, reveal on a deliberate scroll back.
-  const trackDirection = useCallback(
-    (y: number) => {
-      moved();
-      if (!readingMode) return;
-      const d = lastDir.current;
-      const delta = y - d.y;
-      d.acc = Math.sign(delta) === Math.sign(d.acc) ? d.acc + delta : delta;
-      d.y = y;
-      if (d.acc > 48 && y > 120) setChrome(false);
-      else if (d.acc < -64) setChrome(true);
-    },
-    [readingMode, moved],
-  );
+  // Scrolling hides the page pills for a moment (they come back when it stops).
+  const trackDirection = useCallback((_y: number) => moved(), [moved]);
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -455,7 +438,6 @@ export function Reader({
       const bottom = y > 0 && y + layoutMeasurement.height >= contentSize.height - 8;
       const atEnd = bottom && Date.now() - jumpedAt.current > JUMP_MS;
       savePosition(doc.id, posRef.current, atEnd);
-      setAtBottom(bottom);
       const rp = readingPage(layout, y, vp.h);
       cache.setFocus(rp);
       setPage((old) => (old === rp ? old : rp));
@@ -469,7 +451,6 @@ export function Reader({
     (pg: number, y: number, atEnd: boolean) => {
       posRef.current = { page: pg, offset: y };
       savePosition(doc.id, posRef.current, atEnd);
-      setAtBottom(atEnd);
       cache.setFocus(pg);
       setPage((old) => (old === pg ? old : pg));
     },
@@ -845,7 +826,7 @@ export function Reader({
   });
 
   // ---------- chrome animation ----------
-  const chromeShown = chrome || panel != null || !readingMode;
+  const chromeShown = chrome || panel != null;
   const chromeV = useSharedValue(1);
   useEffect(() => {
     chromeV.set(withTiming(chromeShown ? 1 : 0, { duration: 240 }));
@@ -861,28 +842,17 @@ export function Reader({
   const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
   // Pages with notes: marked on the scrubber and among the pages.
   const noted = useMemo(() => [...new Set((annots ?? []).filter((a) => a.contents.trim()).map((a) => a.page))], [annots]);
-  // A one-page document is read once it is open.
-  // Scrolled to the very end is all of it, even where the last page never comes up as the one being read.
-  const pct = handle.pageCount <= 1 || atBottom ? 100 : Math.round((page / (handle.pageCount - 1)) * 100);
   const chapters = useMemo(() => (outline ?? []).filter((o) => o.depth === 0 && o.page >= 0), [outline]);
   const wide = isWide(winW);
   const onPagePress = useCallback(() => {
     // Finishing a text selection is a click too; don't treat it as a tap on the page.
     if (Platform.OS === 'web' && window.getSelection()?.toString()) return;
-    if (panel && !wide) return setPanel(null);
-    if (readingMode) setChrome((c) => !c);
-  }, [panel, wide, readingMode]);
+    if (panel && !wide) setPanel(null);
+  }, [panel, wide]);
 
-  const readingItem: MenuItem = {
-    key: 'reading',
-    icon: readingMode ? 'readingOn' : 'readingAdd',
-    label: readingMode ? t.removeFromReadingList : t.addToReadingList,
-    onPress: () => toggleReading(doc.id),
-  };
   // Document actions; how it looks lives in Aa, how to find things in the bar.
   const menuItems: MenuItem[] = [
     // Most used first.
-    readingItem,
     ...(doc.viewed ? [{ key: 'keep', icon: 'inbox' as const, label: t.keepInTessel, onPress: () => void keepViewed() }] : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
@@ -1033,7 +1003,7 @@ export function Reader({
             ) : (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${t.pageOf(page + 1, handle.pageCount)}${readingMode ? ` · ${t.percentRead(pct)}` : ''}`}
+                accessibilityLabel={`${t.pageOf(page + 1, handle.pageCount)}`}
                 accessibilityHint={t.goToPage}
                 onPress={() => setEditingPage(true)}
                 testID="page-label"
@@ -1043,7 +1013,6 @@ export function Reader({
                   <T v="numeral" color={p.muted} style={{ fontSize: 13 }}>
                     {'  /  '}
                     {handle.pageCount}
-                    {readingMode ? `  ·  ${t.percentRead(pct)}` : ''}
                   </T>
                 </T>
               </Pressable>

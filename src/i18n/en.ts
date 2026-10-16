@@ -26,6 +26,9 @@ export function ago(ts: number, w: AgoWords): string {
 export const en = {
   // Library
   add: 'Open',
+  addTitle: 'Add',
+  addCamera: 'Camera',
+  addFiles: 'Files',
   addPdf: 'Open file',
   tagline: 'PDF Viewer',
   install: 'Install',
@@ -119,7 +122,7 @@ export const en = {
   showAsList: 'Show as list',
   showAsGrid: 'Show as grid',
   selectedCount: (n: number) => `${n} selected`,
-  filesAddedN: (n: number) => `${n} documents added: they are under Recent on Reading.`,
+  filesAddedN: (n: number) => `${n} documents added to the Tessel folder.`,
   readingAddedN: (n: number) => (n === 1 ? 'Added to the reading list.' : `Added ${n} documents to the reading list.`),
   readingAlready: 'Already on the reading list.',
   readingFailedN: (n: number) => (n === 1 ? 'One couldn’t be added.' : `${n} couldn’t be added.`),

@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ascending, FACETS, facetCounts, matches, SORTS, sortDocs, WHERES, type Facet, type Filter, type SavedView, type Sort, type Where } from '@/archive/facets';
@@ -10,11 +10,11 @@ import type { Hit, IndexedDoc } from '@/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/archive/views';
 import { Icon, type IconName } from '@/components/Icon';
 import { Button, IconButton, T } from '@/components/primitives';
-import { AppFrame, AppHeader, columnWidth, TAB_BAR_H, useDocsView, useMainWidth, useTabBar, useWide } from '@/components/AppNav';
+import { AppFrame, AppHeader, columnWidth, scanSupported, TAB_BAR_H, useDocsView, useMainWidth, useTabBar, useWide } from '@/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/components/DocItems';
 import { SortChip } from '@/components/SortChip';
 import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/components/Selection';
-import { addToReading, allInFolders, byFolder, deleteAll, deletesForGood, readingAddedText, renameDoc, shareAll, undoDelete } from '@/archive/batch';
+import { allInFolders, byFolder, deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/archive/batch';
 import { useClipboard } from '@/state/clipboard';
 import { Toast } from '@/components/Toast';
 import { useNotice } from '@/components/useNotice';
@@ -25,11 +25,26 @@ import { showActions } from '@/state/actions';
 import { ask } from '@/state/ask';
 import { usePalette, usePrefs } from '@/state/prefs';
 import { folders } from '@/lib/folders';
-import { useLibrary } from '@/state/library';
+import { useLibrary, type ImportItem } from '@/state/library';
+import { EmptyLibrary } from '@/components/EmptyLibrary';
+import { pickPdfs, sampleItem } from '@/lib/pick';
+import { useInstall } from '@/lib/install';
+import { repo, type DocRecord } from '@/storage';
 import { useCache } from '@/state/cache';
 import { APP_ROOT_ID } from '@/lib/nesting';
 import { refreshInboxCount, useInboxCount } from '@/archive/inbox';
 import { addFolder, PasteBar, Roots } from './files';
+
+const newViewId = () => `v-${Date.now().toString(36)}`;
+
+/** AGPL §13: offer the source to network users. */
+const SOURCE_URL = 'https://github.com/jibes/doc-reader';
+
+function openRecord(doc: DocRecord) {
+  // A linked file may need the browser's OK again (after a restart); ask while the tap still counts as a gesture.
+  const ready = doc.linked ? repo.requestAccess(doc.id).catch(() => false) : Promise.resolve(true);
+  ready.then(() => router.push({ pathname: '/read/[id]', params: { id: doc.id } }));
+}
 
 /** Rows shown at first, and added each time the list is scrolled near its end. */
 const PAGE = 100;
@@ -77,13 +92,41 @@ export default function Documents() {
   // Opened on Folders (from an old Files link), then counted and remembered as the place last used.
   useEffect(() => {
     if (params.view === 'folders') useDocsView.setState({ view: 'folders' });
-    usePrefs.getState().set({ lastTab: 'documents' });
     void refreshInboxCount();
   }, [params.view]);
+  const { view: viewFile, importFiles } = useLibrary();
+  const { kind: installKind, install } = useInstall();
+  // Open file: one file is opened to look at (kept when something about it is saved); several, and the guide, are kept.
+  const openFiles = async (items: ImportItem[]) => {
+    const one = items.length === 1 && !items[0].bundled ? await viewFile(items[0]) : null;
+    if (one) return openRecord(one);
+    const added = items.length === 1 && !items[0].bundled ? [] : await importFiles(items);
+    if (added.length === 1) openRecord(added[0]);
+  };
+  // Add → Files: kept in the Tessel folder (its Inbox, where there is one).
+  const addFiles = async () => {
+    const added = await importFiles(await pickPdfs());
+    if (added.length === 1) openRecord(added[0]);
+    else if (added.length) say(t.filesAddedN(added.length));
+  };
+  // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
+  const moreMenu = () =>
+    showActions(t.more, [
+      ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
+      ...(archive ? [{ key: 'more-trash', icon: 'trash' as IconName, label: t.trashTitle, onPress: () => router.push('/trash') }] : []),
+      ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'copy' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
+      ...(archive ? [{ key: 'more-rules', icon: 'tag' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
+      ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
+    ]);
+  const addMenu = () =>
+    showActions(t.addTitle, [
+      ...(scanSupported ? [{ key: 'add-camera', icon: 'camera' as IconName, label: t.addCamera, onPress: () => router.push('/scan') }] : []),
+      { key: 'add-files', icon: 'documents' as IconName, label: t.addFiles, onPress: () => void addFiles() },
+    ]);
   const [query, setQuery] = useState(params.q ?? '');
   const [filter, setFilter] = useState<Filter>({});
-  // Phones open on what was opened lately (what Reading's recent list was); wide windows on the newest.
-  const [sort, setSort] = useState<Sort>(() => (SORTS.includes(params.sort as Sort) ? (params.sort as Sort) : wide ? 'date' : 'opened'));
+  // Opens on what was opened lately: where you were, first.
+  const [sort, setSort] = useState<Sort>(() => (SORTS.includes(params.sort as Sort) ? (params.sort as Sort) : 'opened'));
   // Asked for from Reading ("All recently opened") while the screen was already open.
   // Each order its usual way round (names A–Z, the rest newest or largest first) unless turned.
   const [reverse, setReverse] = useState(false);
@@ -254,7 +297,7 @@ export default function Documents() {
     const suggested = [place ? placeName(place) : '', ...FACETS.map((f) => filter[f]), q].filter(Boolean).join(' · ');
     const name = (await ask({ title: t.saveView, input: suggested, placeholder: t.viewName, confirm: t.saveView }))?.trim();
     if (!name) return;
-    const view: SavedView = { id: `v-${Date.now().toString(36)}`, name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(place ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
+    const view: SavedView = { id: newViewId(), name, query: q, filter, sort, ...(reverse ? { reverse } : {}), ...(place ? { place } : {}), ...(q ? { relevance: byRelevance } : {}) };
     saveView(view).then(() => say(t.viewSaved(name)), viewFailed);
   };
   const viewActions = (v: SavedView) =>
@@ -376,7 +419,9 @@ export default function Documents() {
             <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
           ) : (
             <AppHeader tab="documents">
+              <IconButton testID="add" icon="documents" label={t.openFile} onPress={async () => void openFiles(await pickPdfs())} />
               <LayoutToggle />
+              <IconButton testID="docs-more" icon="more" label={t.more} onPress={moreMenu} />
             </AppHeader>
           )}
 
@@ -438,7 +483,14 @@ export default function Documents() {
           </View>
 
           {nothing ? (
-            <Empty reading={running ? t.readingDocs(done, total) : null} onAdd={folders.canAdd ? () => void addFolder(say) : undefined} />
+            running ? (
+              <Empty reading={t.readingDocs(done, total)} />
+            ) : (
+              <View style={{ gap: space.lg, alignItems: 'center' }}>
+                <EmptyLibrary onAdd={async () => void openFiles(await pickPdfs())} onSample={async () => void openFiles([await sampleItem()])} />
+                {folders.canAdd && <Button testID="docs-add-folder" kind="quiet" icon="folderAdd" label={t.addFolder} onPress={() => void addFolder(say)} />}
+              </View>
+            )
           ) : !ready && !searching ? (
             <ActivityIndicator color={p.muted} style={{ marginTop: space.xl }} />
           ) : (
@@ -518,22 +570,21 @@ export default function Documents() {
           )}
           </>
           )}
+          {/* AGPL §13: where the source is. */}
+          <Pressable
+            accessibilityRole="link"
+            onPress={() => Linking.openURL(SOURCE_URL)}
+            style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.colophon, { opacity: hovered ? 1 : 0.7 }]}
+          >
+            <T v="caption" color={p.muted}>
+              {t.colophon}
+            </T>
+          </Pressable>
         </View>
       </ScrollView>
       {selected && view === 'all' && (
         <ActionBar bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4}>
           {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void batch(() => shareAll(picked))} />}
-          <Action
-            testID="act-reading"
-            icon="readingAdd"
-            label={t.readingList}
-            disabled={!picked.length}
-            onPress={() =>
-              void batch(async () => {
-                return readingAddedText(await addToReading(picked));
-              })
-            }
-          />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!allInFolders(picked)} onPress={() => clip(false)} />
           <Action testID="act-move" icon="move" label={t.move} disabled={!allInFolders(picked) || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => clip(true)} />
           <Action
@@ -547,6 +598,18 @@ export default function Documents() {
         </ActionBar>
       )}
       {view === 'folders' && <PasteBar here={null} bottom={insets.bottom + (tabBar ? TAB_BAR_H : 0)} side={space.xl - 4} onDone={() => {}} onError={say} />}
+      {/* Add: the camera or files, into the Tessel folder. */}
+      {!selected && view === 'all' && (
+        <Pressable
+          testID="add-menu"
+          accessibilityRole="button"
+          accessibilityLabel={t.addTitle}
+          onPress={addMenu}
+          style={[styles.fab, { backgroundColor: p.accent, bottom: insets.bottom + space.xl, right: space.xl }]}
+        >
+          <Icon name="plus" size={26} color={p.canvas} />
+        </Pressable>
+      )}
       <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} above={(tabBar ? TAB_BAR_H : 0) + ((pasting && view === 'folders') || selected ? BAR_ROOM : 0)} />
     </AppFrame>
   );
@@ -600,6 +663,8 @@ const placeOf = (d: IndexedDoc, tessel: string | null): Where =>
   d.place.kind === 'library' || d.place.root === APP_ROOT_ID || d.place.root === tessel ? 'tessel' : 'sources';
 
 const styles = StyleSheet.create({
+  fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  colophon: { alignSelf: 'center', marginTop: space.xxl, paddingVertical: space.sm },
   segments: { flexDirection: 'row', alignSelf: 'flex-start', padding: 3, borderRadius: radius.pill, gap: 2, marginBottom: space.lg },
   segment: { height: 34, justifyContent: 'center', paddingHorizontal: space.lg, borderRadius: radius.pill },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.md, paddingLeft: space.md, minHeight: 44 },

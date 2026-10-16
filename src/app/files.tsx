@@ -21,7 +21,6 @@ import { moveToTrash, restore, trashes } from '@/archive/trash';
 import { setArchive } from '@/archive/views';
 import { allDocs, renamed, schedule } from '@/archive/indexer';
 import { sameOrRenamed } from '@/lib/names';
-import { addToReading, filesAsDocs, readingAddedText } from '@/archive/batch';
 import { cancelThumbs } from '@/lib/thumbs';
 import { ask } from '@/state/ask';
 import { clipCount, useClipboard } from '@/state/clipboard';
@@ -513,13 +512,6 @@ function FolderView({ root, rootName, dir, name, width, bottom }: { root: string
       {selected ? (
         <ActionBar bottom={bottom}>
           {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length || picked.some((e) => e.kind === 'dir')} onPress={share} />}
-          <Action
-            testID="act-reading"
-            icon="readingAdd"
-            label={t.readingList}
-            disabled={!picked.length || picked.some((e) => e.kind === 'dir')}
-            onPress={() => void run(async () => readingAddedText(await addToReading(filesAsDocs(root, dir, picked))))}
-          />
           <Action testID="act-copy" icon="copy" label={t.copy} disabled={!picked.length} onPress={() => clip(false)} />
           <Action testID="act-move" icon="move" label={t.move} disabled={!pickedEditable || !picked.length} onPress={() => clip(true)} />
           <Action testID="act-rename" icon="pencil" label={t.rename} disabled={!pickedEditable || picked.length !== 1} onPress={rename} />

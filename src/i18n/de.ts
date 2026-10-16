@@ -5,6 +5,9 @@ const AGO_DE: AgoWords = { now: 'gerade eben', min: (n) => `vor ${n} Min.`, h: (
 
 export const de: Strings = {
   add: 'Öffnen',
+  addTitle: 'Hinzufügen',
+  addCamera: 'Kamera',
+  addFiles: 'Dateien',
   addPdf: 'Datei öffnen',
   tagline: 'PDF-Viewer',
   install: 'Installieren',
@@ -93,7 +96,7 @@ export const de: Strings = {
   showAsList: 'Als Liste zeigen',
   showAsGrid: 'Als Raster zeigen',
   selectedCount: (n) => `${n} ausgewählt`,
-  filesAddedN: (n) => `${n} Dokumente hinzugefügt: Sie stehen unter „Zuletzt geöffnet“ in Lesen.`,
+  filesAddedN: (n: number) => `${n} Dokumente zum Tessel-Ordner hinzugefügt.`,
   readingAddedN: (n) => (n === 1 ? 'Zur Leseliste hinzugefügt.' : `${n} Dokumente zur Leseliste hinzugefügt.`),
   readingAlready: 'Schon auf der Leseliste.',
   readingFailedN: (n) => (n === 1 ? 'Eines ließ sich nicht hinzufügen.' : `${n} ließen sich nicht hinzufügen.`),

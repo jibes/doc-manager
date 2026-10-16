@@ -65,11 +65,11 @@ export function ShellOpen() {
           if (bare) router.replace(to);
           else router.push(to);
         } else if (done && !bare && where.current.startsWith('/read/')) sayRoot(t.filesAddedN(done.added));
-        else if (done || bare) goTab('reading');
+        else if (done || bare) goTab('documents');
       };
       await shown().catch(() => {
         // Nothing opened: the screen under the cover is where the app is (or the app's first, from the bare one).
-        if (startedBare.current) goTab('reading');
+        if (startedBare.current) goTab('documents');
         startedBare.current = false;
       });
       setTimeout(() => setOpening(false), SETTLE_MS);

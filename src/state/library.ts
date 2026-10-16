@@ -78,7 +78,6 @@ type LibraryState = {
   savePosition(id: string, position: ReadingPosition, atEnd?: boolean): void;
   /** `now`: written to storage at once too (the reader closes, the page goes away). */
   flushPositions(now?: boolean): void;
-  toggleReading(id: string): void;
   setView(id: string, view: 'page' | 'text'): void;
   toggleInvert(id: string): void;
   /** The details written into the file changed: the library shows its new title and sender. */
@@ -550,14 +549,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
       positionTimer = undefined;
       const pending = [...positions];
       positions.clear();
-      for (const [id, { position: at, atEnd, end }] of pending)
+      for (const [id, { position: at, end }] of pending)
         patch(
           id,
           (d) => {
             const position: ReadingPosition = end ? { page: at.page, offset: at.offset, end: true } : { page: at.page, offset: at.offset };
-            // Reaching the end finishes a reading-list document; it moves to "Finished".
-            const done = d.reading && !d.reading.finishedAt && (atEnd ?? position.page >= d.pageCount - 1);
-            return { ...d, position, reading: done ? { ...d.reading!, finishedAt: Date.now() } : d.reading };
+            return { ...d, position };
           },
           !now,
         );
@@ -568,12 +565,6 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
     toggleInvert: (id) => patch(id, (d) => ({ ...d, invert: d.invert ? undefined : true })),
     setDetails: (id, { title, author }) => patch(id, (d) => ({ ...d, title: title.trim() || d.title, author: author || undefined })),
-
-    // Saved about the document: a viewed one is kept first.
-    toggleReading: (id) =>
-      void get()
-        .ensureKept(id)
-        .then((ok) => ok && patch(id, (d) => ({ ...d, reading: d.reading ? undefined : { since: Date.now() } }))),
 
     async linkTo(id, item) {
       await repo.saveFile(id, fileData(item));

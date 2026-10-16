@@ -1,29 +1,23 @@
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { create } from 'zustand';
 
-import { useInboxCount } from '@/archive/inbox';
-import { fonts, radius, space } from '@/design/tokens';
+import { fonts, space } from '@/design/tokens';
 import { t } from '@/i18n';
-import { folders } from '@/lib/folders';
-import { usePalette, usePrefs } from '@/state/prefs';
-import { Icon, type IconName } from './Icon';
+import { usePalette } from '@/state/prefs';
 import { Mark } from './Mark';
 import { IconButton, T } from './primitives';
 
 /**
- * Two places and one action: Reading (what you are reading: time), Documents (finding and managing: content and
- * folders), and Scan (making new ones). Phones get them along the bottom edge; wider windows a sidebar.
+ * One place: Documents, with Add (camera or files) on it and everything else (inbox, trash, sync issues, rules,
+ * settings) one step away. No tab bar and no sidebar: wide windows show the same screen, wider.
  */
-export type Tab = 'reading' | 'documents';
+export type Tab = 'documents';
 
-/** Phones get a bar at the bottom; wider windows a sidebar. */
 export const WIDE = 760;
-/** Height of the bottom bar above the safe area: screens keep this much free at the bottom. */
-export const TAB_BAR_H = 64;
-const SIDEBAR_W = 232;
+/** Kept for the screens' bottom room; there is no bar along the bottom any more. */
+export const TAB_BAR_H = 0;
 
 /** Scanning runs in the web app (and the Android app, which is the web app). */
 export const scanSupported = Platform.OS === 'web';
@@ -32,17 +26,12 @@ export const scanSupported = Platform.OS === 'web';
 export type DocsView = 'all' | 'folders';
 export const useDocsView = create<{ view: DocsView }>(() => ({ view: 'all' }));
 
-/**
- * Switching places never stacks screens: the place is brought back if it is open underneath. `from`: the place
- * shown now; going to it only changes its view (it keeps its search and filters).
- */
-export function goTab(tab: Tab, view?: DocsView, from?: Tab) {
+/** Back to Documents (its view chosen): brought back if it is open underneath, never stacked. */
+export function goTab(_tab: Tab, view?: DocsView, from?: Tab) {
   if (view) useDocsView.setState({ view });
-  if (from === tab) return;
-  const href = tab === 'documents' ? '/documents' : '/';
-  // Back to it when it is open underneath; else in place of the current screen (never one over the other).
-  if (router.canDismiss()) router.dismissTo(href);
-  else router.replace(href);
+  if (from) return;
+  if (router.canDismiss()) router.dismissTo('/');
+  else router.replace('/');
 }
 
 export const useWide = () => useWindowDimensions().width >= WIDE;
@@ -50,223 +39,61 @@ export const useWide = () => useWindowDimensions().width >= WIDE;
 /** Widest column of content (lists, settings) on any screen. */
 const COLUMN_W = 780;
 /**
- * A screen's column of content in `avail` (the window, or beside the sidebar): the same on every screen. Its
- * margins grow with the room (20 → 48), never so fast that a wider window gives a narrower column.
+ * A screen's column of content in `avail`: the same on every screen. Its margins grow with the room (20 → 48),
+ * never so fast that a wider window gives a narrower column.
  */
 export const columnWidth = (avail: number) => {
   const margin = Math.min(space.xxxl, Math.max(space.xl - 4, space.xl - 4 + ((avail - 560) * 28) / 200));
   return Math.min(avail - 2 * margin, COLUMN_W);
 };
 
-/** This screen's column of content (beside the sidebar on wide windows). */
+/** This screen's column of content. */
 export const useColumnWidth = () => columnWidth(useMainWidth());
 
-/** The width beside the sidebar (wide windows) or the window's (phones). */
+/** The window's width (there is no sidebar beside the screens). */
 export function useMainWidth(): number {
-  const { width } = useWindowDimensions();
-  return width >= WIDE ? width - SIDEBAR_W : width;
+  return useWindowDimensions().width;
 }
 
-/** Whether this screen shows the bottom bar (phones). */
+/** No bar along the bottom any more. */
 export function useTabBar(): boolean {
-  return !useWide();
+  return false;
 }
 
-const tabIcon: Record<Tab, IconName> = { reading: 'pages', documents: 'documents' };
-const tabLabel = (tab: Tab) => (tab === 'reading' ? t.readingTab : t.documentsTitle);
-
-/** The inbox's count, when this device sorts it (else nothing to show). */
-function useInboxBadge(): number {
-  const shown = usePrefs((s) => !!s.archive && s.inboxHere);
-  const count = useInboxCount((s) => s.count);
-  return shown ? count : 0;
-}
-
-/** A place's title, with its actions (and, on phones, Settings) on the right. */
-export function AppHeader({ tab, children }: { tab: Tab; children?: ReactNode }) {
-  const wide = useWide();
+/** The screen's title, with its actions and Settings on the right. */
+export function AppHeader({ children }: { tab?: Tab; children?: ReactNode }) {
   return (
     <View style={styles.masthead}>
       <View style={styles.brand}>
-        {!wide && <Mark size={24} />}
+        <Mark size={24} />
         <T accessibilityRole="header" style={{ fontFamily: fonts.sansSemi, fontSize: 22, letterSpacing: -0.5 }}>
-          {tabLabel(tab)}
+          {t.documentsTitle}
         </T>
       </View>
       <View style={styles.actions}>
         {children}
-        {!wide && <IconButton testID="home-settings" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />}
+        <IconButton testID="home-settings" icon="settings" label={t.settings} onPress={() => router.push('/settings')} />
       </View>
     </View>
   );
 }
 
-/** A screen opened from a place or the sidebar: which sidebar item it is (or belongs to). */
+/** A screen opened from Documents (Inbox, Trash, Settings, a folder…). */
 export type Sub = 'inbox' | 'trash' | 'settings' | 'sync' | 'rules' | 'folder';
 
-/**
- * A screen of its own (Inbox, Trash, Settings, a folder…): beside the sidebar on wide windows, as the places are,
- * so the way to everything else stays in view; full screen with its Back button on phones.
- */
-export function SubFrame({ sub, children }: { sub: Sub; children: ReactNode }) {
+export function SubFrame({ children }: { sub: Sub; children: ReactNode }) {
   const p = usePalette();
-  const wide = useWide();
-  if (!wide) return <View style={{ flex: 1, backgroundColor: p.canvas }}>{children}</View>;
-  return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: p.canvas }}>
-      <Sidebar current={null} sub={sub} />
-      <View style={{ flex: 1 }}>{children}</View>
-    </View>
-  );
+  return <View style={{ flex: 1, backgroundColor: p.canvas }}>{children}</View>;
 }
 
-/** A place's screen: with the sidebar beside it on wide windows, the bottom bar under it on phones. */
-export function AppFrame({ tab, children }: { tab: Tab; children: ReactNode }) {
+/** Documents' frame. */
+export function AppFrame({ children }: { tab: Tab; children: ReactNode }) {
   const p = usePalette();
-  const wide = useWide();
-  if (!wide)
-    return (
-      <View style={{ flex: 1, backgroundColor: p.canvas }}>
-        {children}
-        <TabBar current={tab} />
-      </View>
-    );
-  return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: p.canvas }}>
-      <Sidebar current={tab} />
-      <View style={{ flex: 1 }}>{children}</View>
-    </View>
-  );
-}
-
-/** Phones: Reading · Scan · Documents along the bottom edge. */
-function TabBar({ current }: { current: Tab }) {
-  const p = usePalette();
-  const insets = useSafeAreaInsets();
-  const badge = useInboxBadge();
-  return (
-    <View role="navigation" aria-label={t.places} style={[styles.bar, { paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
-      <BarItem tab="reading" current={current} />
-      {scanSupported && (
-        <Pressable testID="scan" accessibilityRole="button" accessibilityLabel={t.scan} onPress={() => router.push('/scan')} style={styles.barItem}>
-          <View style={[styles.scan, { backgroundColor: p.ink }]}>
-            <Icon name="camera" size={22} color={p.canvas} />
-          </View>
-        </Pressable>
-      )}
-      <BarItem tab="documents" current={current} badge={badge} />
-    </View>
-  );
-}
-
-function BarItem({ tab, current, badge = 0 }: { tab: Tab; current: Tab; badge?: number }) {
-  const p = usePalette();
-  const on = tab === current;
-  return (
-    <Pressable
-      testID={`tab-${tab}`}
-      accessibilityRole="button"
-      aria-current={on ? 'page' : undefined}
-      aria-label={badge ? `${tabLabel(tab)}, ${t.inboxWaiting(badge)}` : tabLabel(tab)}
-      onPress={() => goTab(tab, tab === 'documents' && on ? 'all' : undefined, current)}
-      style={styles.barItem}
-    >
-      <View>
-        <Icon name={tabIcon[tab]} size={22} color={on ? p.accent : p.muted} strokeWidth={on ? 1.9 : 1.6} />
-        {badge > 0 && <Badge n={badge} />}
-      </View>
-      <T v="caption" color={on ? p.accent : p.muted} style={{ fontFamily: on ? fonts.sansSemi : fonts.sans }}>
-        {tabLabel(tab)}
-      </T>
-    </Pressable>
-  );
-}
-
-function Badge({ n, inline }: { n: number; inline?: boolean }) {
-  const p = usePalette();
-  return (
-    <View testID="inbox-badge" style={[styles.badge, inline ? null : styles.badgeOver, { backgroundColor: p.accent }]}>
-      <T v="caption" color={p.canvas} style={{ fontFamily: fonts.sansSemi, fontSize: 11, lineHeight: 14 }}>
-        {n > 99 ? '99+' : n}
-      </T>
-    </View>
-  );
-}
-
-/**
- * Wide windows: the places, Documents' parts under it, Scan and Settings. `current`: the place shown; `sub`: the
- * screen of its own shown instead (another one opened from here takes its place, not stacked over it).
- */
-function Sidebar({ current, sub }: { current: Tab | null; sub?: Sub }) {
-  const p = usePalette();
-  const insets = useSafeAreaInsets();
-  const archive = usePrefs((s) => s.archive);
-  const inboxShown = usePrefs((s) => !!s.archive && s.inboxHere);
-  const badge = useInboxBadge();
-  const view = useDocsView((s) => s.view);
-  const docs = current === 'documents';
-  const from = current ?? undefined;
-  const open = (href: '/inbox' | '/trash' | '/settings', of: Sub) => {
-    if (sub === of) return;
-    if (sub) router.replace(href);
-    else router.push(href);
-  };
-  return (
-    <View role="navigation" aria-label={t.places} style={[styles.sidebar, { paddingTop: insets.top + space.lg, borderColor: p.hairline, backgroundColor: p.surface }]}>
-      <View style={[styles.brand, { paddingHorizontal: space.md, marginBottom: space.lg }]}>
-        <Mark size={26} />
-        <T style={{ fontFamily: fonts.sansSemi, fontSize: 21, letterSpacing: -0.5 }}>Tessel</T>
-      </View>
-      <View style={{ gap: 2 }}>
-        <SideItem testID="tab-reading" icon="pages" label={t.readingTab} on={current === 'reading'} onPress={() => goTab('reading', undefined, from)} />
-        <SideItem testID="tab-documents" icon="documents" label={t.documentsTitle} on={docs && view === 'all'} onPress={() => goTab('documents', 'all', from)} />
-        {inboxShown && <SideItem testID="side-inbox" icon="inbox" label={t.inboxTitle} sub badge={badge} on={sub === 'inbox'} onPress={() => open('/inbox', 'inbox')} />}
-        {folders.supported && <SideItem testID="side-folders" icon="folder" label={t.foldersView} sub on={(docs && view === 'folders') || sub === 'folder'} onPress={() => goTab('documents', 'folders', from)} />}
-        {archive && <SideItem testID="side-trash" icon="trash" label={t.trashTitle} sub on={sub === 'trash'} onPress={() => open('/trash', 'trash')} />}
-      </View>
-      <View style={{ flex: 1 }} />
-      <View style={{ gap: 2, paddingBottom: insets.bottom + space.lg }}>
-        {scanSupported && <SideItem testID="scan" icon="camera" label={t.scan} strong onPress={() => router.push('/scan')} />}
-        <SideItem testID="home-settings" icon="settings" label={t.settings} on={sub === 'settings'} onPress={() => open('/settings', 'settings')} />
-      </View>
-    </View>
-  );
-}
-
-function SideItem(props: { testID: string; icon: IconName; label: string; on?: boolean; sub?: boolean; strong?: boolean; badge?: number; onPress: () => void }) {
-  const p = usePalette();
-  const { on, sub, strong } = props;
-  return (
-    <Pressable
-      testID={props.testID}
-      accessibilityRole="button"
-      aria-current={on ? 'page' : undefined}
-      accessibilityLabel={props.badge ? `${props.label}, ${t.inboxWaiting(props.badge)}` : props.label}
-      onPress={props.onPress}
-      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
-        styles.sideItem,
-        sub && { paddingLeft: space.xl + space.sm },
-        { backgroundColor: strong ? p.ink : on ? p.hairline : hovered ? p.raised : 'transparent' },
-      ]}
-    >
-      <Icon name={props.icon} size={sub ? 18 : 20} color={strong ? p.canvas : on ? p.ink : p.muted} />
-      <T v="label" color={strong ? p.canvas : on ? p.ink : p.inkSoft} style={{ flex: 1, fontFamily: on || strong ? fonts.sansSemi : fonts.sansMedium }}>
-        {props.label}
-      </T>
-      {!!props.badge && <Badge n={props.badge} inline />}
-    </Pressable>
-  );
+  return <View style={{ flex: 1, backgroundColor: p.canvas }}>{children}</View>;
 }
 
 const styles = StyleSheet.create({
   masthead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md, height: 52, marginBottom: space.lg },
   brand: { flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, flexShrink: 0 },
   actions: { flexDirection: 'row', gap: space.sm, alignItems: 'center', flexShrink: 1, justifyContent: 'flex-end' },
-  bar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth },
-  barItem: { flex: 1, height: TAB_BAR_H, alignItems: 'center', justifyContent: 'center', gap: 2 },
-  scan: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  badge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-  badgeOver: { position: 'absolute', top: -6, right: -12 },
-  sidebar: { width: SIDEBAR_W, borderRightWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.md },
-  sideItem: { flexDirection: 'row', alignItems: 'center', gap: space.md, height: 40, paddingHorizontal: space.md, borderRadius: radius.md },
 });
