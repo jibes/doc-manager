@@ -1306,7 +1306,12 @@ async function foldersShell() {
       return !!bar && [...bar.querySelectorAll('*')].every((e) => e.getBoundingClientRect().right <= innerWidth + 0.5);
     }, id);
   check(await fits('action-bar'), 'folders-shell: the selection actions fit on a phone');
-  await vis('select-cancel').click();
+  // ✕ ends picking, with a touch as on a phone (it ends the touch press on the row too).
+  const x = await vis('select-cancel').boundingBox();
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x.x + x.width / 2, y: x.y + x.height / 2 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(400);
+  check((await page.getByText(/selected$/).locator('visible=true').count()) === 0, 'folders-shell: ✕ ends picking');
 
   // Edits to a document opened from a folder are written back to it.
   await text('Papers').click();
