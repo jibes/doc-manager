@@ -2419,9 +2419,16 @@ async function lastRead() {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`last-read: ${e.message}`));
   await openFixture(page, 'columns.pdf');
-  await page.getByTestId('back').click();
+  // Read to the very end: Continue says 100 % (the top of the screen is still partway down the last page).
+  await page.waitForTimeout(800);
+  await page.mouse.move(195, 420);
+  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 800).then(() => page.waitForTimeout(150));
+  await page.waitForTimeout(1500);
+  await page.keyboard.press('Escape');
   await page.getByTestId('last-read').waitFor({ timeout: 10000 });
-  check(/Orderly Notes[\s\S]*Page \d of 2/.test(await page.getByTestId('last-read').innerText()), 'last read: Continue shows the document last read');
+  const cont = await page.getByTestId('last-read').innerText();
+  check(/Orderly Notes[\s\S]*Page \d of 2/.test(cont), 'last read: Continue shows the document last read');
+  check(/Page 2 of 2 · 100%/.test(cont), `last read: read to the end, Continue says the last page and 100% (${cont.replace(/\n/g, ' / ')})`);
   check((await page.getByTestId('recent-row').count()) === 0, 'last read: …and Recently opened doesn’t list it again');
   // The whole history is Documents, last opened first.
   await page.getByTestId('recent-all').click();
@@ -2448,8 +2455,9 @@ async function lastRead() {
   check(!/100%/.test(await label()), `last read: …and less again once scrolled back up (${await label()})`);
   await page.mouse.wheel(0, 1200);
   await page.waitForTimeout(1500);
-  await page.getByTestId('back').click();
-  await page.getByTestId('finished-toggle').click().catch(() => {});
+  // The bars are hidden after scrolling down: Esc leaves.
+  await page.keyboard.press('Escape');
+  await page.getByTestId('finished-toggle').click();
   await page.getByText('Orderly Notes').locator('visible=true').first().click();
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(800);

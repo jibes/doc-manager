@@ -295,7 +295,8 @@ const pickable = (doc: DocRecord, { selected, onSelect, onToggle }: Picking) => 
 
 function ContinueCard({ doc, cover, wide, ...picking }: { doc: DocRecord; cover?: string | null; wide: boolean } & Picking) {
   const p = usePalette();
-  const page = (doc.position?.page ?? 0) + 1;
+  // Read to the end: the last page (the top of the screen may still have been on the one before).
+  const page = doc.position?.end ? doc.pageCount : (doc.position?.page ?? 0) + 1;
   const pct = pctOf(doc);
   return (
     <Pressable
