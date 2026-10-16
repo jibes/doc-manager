@@ -15,12 +15,22 @@ import { IconButton, spoken, T } from './primitives';
  * bottom acts on them.
  */
 
-/** The item a long press selected, and when: its follow-up events (context menu, release) don't toggle it back. */
-let holdAt = { id: '', at: 0 };
-export const justSelected = (id: string) => holdAt.id === id && Date.now() - holdAt.at < 800;
+/**
+ * The item a long press selected, and when: its follow-up events (context menu, release) don't toggle it back.
+ * The time counts from when the finger lifts, however long it was held.
+ */
+let holdAt = { id: '', at: 0, down: false };
+export const justSelected = (id: string) => holdAt.id === id && (holdAt.down || Date.now() - holdAt.at < 800);
 export const heldNow = (id: string) => {
-  holdAt = { id, at: Date.now() };
+  holdAt = { id, at: Date.now(), down: true };
 };
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  const lifted = () => {
+    if (holdAt.down) holdAt = { ...holdAt, at: Date.now(), down: false };
+  };
+  // A touch's menu event comes while the finger is still down: only the release counts.
+  for (const type of ['pointerup', 'pointercancel', 'touchend', 'touchcancel', 'mouseup']) window.addEventListener(type, lifted, true);
+}
 
 /** A set with `id` added or taken out. */
 export function toggled(set: Set<string> | null, id: string): Set<string> {

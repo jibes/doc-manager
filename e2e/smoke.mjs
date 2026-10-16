@@ -1285,6 +1285,20 @@ async function foldersShell() {
   await text('columns.pdf').click();
   await page.waitForTimeout(200);
   check((await page.getByText('1 selected').locator('visible=true').count()) === 1, 'folders-shell: a long press selects the item and it stays selected');
+  // Held longer (a slow finger, the emulator): the menu event and the release still don't take it back.
+  await vis('select-cancel').click();
+  await page.waitForTimeout(900);
+  const box = await text('columns.pdf').boundingBox();
+  const cdp = await page.context().newCDPSession(page);
+  const at = [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at });
+  await page.waitForTimeout(700);
+  await text('columns.pdf').dispatchEvent('contextmenu');
+  await page.waitForTimeout(900);
+  await text('columns.pdf').dispatchEvent('contextmenu');
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(300);
+  check((await page.getByText('1 selected').locator('visible=true').count()) === 1, `folders-shell: held for 1.6 s, the item is still selected (${await page.getByText(/selected$/).locator('visible=true').innerText().catch(() => 'not picking')})`);
   // The bars fit on a phone: nothing sticks out past the screen.
   const fits = (id) =>
     page.evaluate((id) => {
