@@ -131,9 +131,12 @@ if ui | grep -q 'text="Folders"'; then echo "Documents still has a Folders view"
 tap "Orderly Notes"
 wait_for "Appearance"
 adb exec-out screencap -p > "$OUT/5-from-tessel-folder.png"
-adb shell input keyevent KEYCODE_BACK
-wait_for "Orderly Notes"
+# The reader's own back button (the title "Orderly Notes" is on both screens: wait for Documents' sort chip).
+tap "Back\""
+wait_for "Sort by"
+sleep 2
 hold "Orderly Notes"
+echo "--- screen (picking) ---"; screen | head -30
 tap_until "Delete" "Delete this item" 1
 tap_last "Delete"
 sleep 2
