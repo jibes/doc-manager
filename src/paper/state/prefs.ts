@@ -24,7 +24,8 @@ type Prefs = {
   textScale: number;
   textLeading: TextLeading;
   textWidth: TextWidth;
-  /** Android app: browse the whole device (needs all files access). */
+  /** Android app: the system's file picker shows all of internal storage, with previews (needs All files access). */
+  pickerDevice: boolean;
   /** Added documents' pages without text read by the model (when one is set up), unless switched off on the add. */
   improveAdded: boolean;
   /** Scanner: filter, auto-capture, resolution, text recognition. */
@@ -45,7 +46,7 @@ type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, layout: 'list' };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, pickerDevice: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, layout: 'list' };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -56,8 +57,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, layout } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, scan, ai, archive, views, inboxHere, layout });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout });
   },
 }));
 

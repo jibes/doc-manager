@@ -123,13 +123,17 @@ export async function dropSources(): Promise<void> {
 
 /**
  * In the Android app: the system's file picker shows the Tessel folder as "Tessel", with the first page of each PDF
- * as its picture. Told which folder that is now and whenever it changes.
+ * as its picture, and (Settings, with All files access) all of internal storage, with previews. Told which folder
+ * that is, and whether to show the storage, now and whenever it changes.
  */
 export function showInPicker(): () => void {
   if (!shell) return () => {};
   const tell = (archive: string | null) => void shellRequest('tesselRoot', { root: archive ?? APP_ROOT_ID }).catch(() => {});
+  const device = (on: boolean) => void shellRequest('pickerDevice', { on }).catch(() => {});
   tell(usePrefs.getState().archive);
+  device(usePrefs.getState().pickerDevice);
   return usePrefs.subscribe((s, before) => {
     if (s.archive !== before.archive) tell(s.archive);
+    if (s.pickerDevice !== before.pickerDevice) device(s.pickerDevice);
   });
 }

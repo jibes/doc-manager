@@ -35,6 +35,15 @@ export default function Settings() {
   const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const archive = usePrefs((s) => s.archive);
+  const pickerDevice = usePrefs((s) => s.pickerDevice);
+  const setPrefs = usePrefs((s) => s.set);
+  // The system's file picker: all of internal storage with previews, once All files access is granted.
+  const togglePicker = async () => {
+    if (pickerDevice) return setPrefs({ pickerDevice: false });
+    const granted = (await folders.allFiles().catch(() => false)) || ((await folders.requestAllFiles().catch(() => false)) && (await folders.allFiles().catch(() => false)));
+    if (granted) setPrefs({ pickerDevice: true });
+    else setError(t.pickerDenied);
+  };
   const scroller = useRef<ScrollView>(null);
   // Where each section starts, for the index at the top.
   const [at, setAt] = useState<Record<string, number>>({});
@@ -225,6 +234,31 @@ export default function Settings() {
                 </View>
                 <T v="caption" color={p.muted} style={styles.note}>
                   {t.importFolderNote}
+                </T>
+              </>
+            )}
+            {!!shell && folders.allFilesSupported && (
+              <>
+                <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+                  {t.pickerTitle}
+                </T>
+                <Pressable
+                  testID="picker-device"
+                  accessibilityRole="switch"
+                  accessibilityLabel={t.pickerDevice}
+                  aria-checked={pickerDevice}
+                  onPress={() => void togglePicker()}
+                  style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.card, styles.row, { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg }]}
+                >
+                  <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+                    {t.pickerDevice}
+                  </T>
+                  <View style={[styles.track, { backgroundColor: pickerDevice ? p.accent : p.hairline }]}>
+                    <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: pickerDevice ? 18 : 0 }] }]} />
+                  </View>
+                </Pressable>
+                <T v="caption" color={p.muted} style={styles.note}>
+                  {t.pickerNote}
                 </T>
               </>
             )}

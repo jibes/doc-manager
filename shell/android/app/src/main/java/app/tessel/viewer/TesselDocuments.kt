@@ -5,6 +5,7 @@ import android.content.res.AssetFileDescriptor
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Point
 import android.graphics.pdf.PdfRenderer
@@ -16,6 +17,7 @@ import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.provider.DocumentsContract.Root
 import android.provider.DocumentsProvider
+import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileNotFoundException
 
@@ -45,11 +47,24 @@ class TesselDocuments : DocumentsProvider() {
             add(Root.COLUMN_ICON, R.mipmap.ic_launcher)
             add(Root.COLUMN_MIME_TYPES, "${Document.MIME_TYPE_DIR}\n${Folders.PDF}")
         }
+        // With All files access and the setting on: the whole of internal storage, every file, with previews.
+        if (deviceShown()) c.newRow().apply {
+            add(Root.COLUMN_ROOT_ID, DEVICE_ROOT)
+            add(Root.COLUMN_DOCUMENT_ID, "d/")
+            add(Root.COLUMN_TITLE, ctx.getString(R.string.picker_device))
+            add(Root.COLUMN_SUMMARY, ctx.getString(R.string.picker_device_summary))
+            add(Root.COLUMN_FLAGS, Root.FLAG_LOCAL_ONLY or Root.FLAG_SUPPORTS_IS_CHILD)
+            add(Root.COLUMN_ICON, R.mipmap.ic_launcher)
+        }
         return c
     }
 
     override fun queryDocument(documentId: String, projection: Array<out String>?): Cursor {
         val c = MatrixCursor(projection ?: DOC_COLUMNS)
+        if (documentId == "d/") {
+            row(c, documentId, ctx.getString(R.string.picker_device), true, 0, 0)
+            return c
+        }
         if (documentId == home()) {
             row(c, documentId, ctx.getString(R.string.app_name), true, 0, 0)
             return c
@@ -58,6 +73,10 @@ class TesselDocuments : DocumentsProvider() {
             documentId.startsWith("a/") -> appFile(documentId).let { f ->
                 if (!f.exists()) throw FileNotFoundException(documentId)
                 row(c, documentId, f.name, f.isDirectory, if (f.isDirectory) 0 else f.length(), f.lastModified())
+            }
+            documentId.startsWith("d/") -> deviceFile(documentId).let { f ->
+                if (!f.exists()) throw FileNotFoundException(documentId)
+                anyRow(c, documentId, f)
             }
             documentId.startsWith("t/") -> {
                 val tree = tree() ?: throw FileNotFoundException(documentId)
@@ -81,6 +100,13 @@ class TesselDocuments : DocumentsProvider() {
                     row(c, "a/" + f.relativeTo(appDir()).path, f.name, f.isDirectory, if (f.isDirectory) 0 else f.length(), f.lastModified())
                 }
             }
+            parentDocumentId.startsWith("d/") -> {
+                val dir = deviceFile(parentDocumentId)
+                val base = storage().canonicalFile
+                // Folders first, then files, each by name; hidden ones and app-private data left out.
+                val list = dir.listFiles().orEmpty().filter { !it.name.startsWith('.') && !(dir.canonicalFile == base && it.name == "Android") }
+                for (f in list.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))) anyRow(c, "d/" + f.relativeTo(base).path, f)
+            }
             parentDocumentId.startsWith("t/") -> {
                 val tree = tree() ?: return c
                 val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentDocumentId.removePrefix("t/"))
@@ -98,6 +124,10 @@ class TesselDocuments : DocumentsProvider() {
         parentDocumentId.startsWith("a/") && documentId.startsWith("a/") -> {
             val parent = appFile(parentDocumentId).canonicalPath
             appFile(documentId).canonicalPath.startsWith(parent + File.separator)
+        }
+        parentDocumentId.startsWith("d/") && documentId.startsWith("d/") -> {
+            val parent = deviceFile(parentDocumentId).canonicalPath
+            deviceFile(documentId).canonicalPath.startsWith(parent + File.separator)
         }
         parentDocumentId.startsWith("t/") && documentId.startsWith("t/") -> {
             val tree = tree()
@@ -117,6 +147,7 @@ class TesselDocuments : DocumentsProvider() {
         if (mode != "r") throw SecurityException("Tessel's folder is read-only here")
         return when {
             documentId.startsWith("a/") -> ParcelFileDescriptor.open(appFile(documentId), ParcelFileDescriptor.MODE_READ_ONLY)
+            documentId.startsWith("d/") -> ParcelFileDescriptor.open(deviceFile(documentId), ParcelFileDescriptor.MODE_READ_ONLY)
             documentId.startsWith("t/") -> {
                 val tree = tree() ?: throw FileNotFoundException(documentId)
                 ctx.contentResolver.openFileDescriptor(DocumentsContract.buildDocumentUriUsingTree(tree, documentId.removePrefix("t/")), "r", signal)
@@ -129,7 +160,9 @@ class TesselDocuments : DocumentsProvider() {
     /** The first page, drawn once per file version and kept in the cache (Android may clear it). */
     override fun openDocumentThumbnail(documentId: String, sizeHint: Point, signal: CancellationSignal?): AssetFileDescriptor {
         val (stamp, open) = when {
-            documentId.startsWith("a/") -> appFile(documentId).let { f -> "${f.length()}-${f.lastModified()}" to { ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY) } }
+            documentId.startsWith("a/") || documentId.startsWith("d/") -> (if (documentId.startsWith("a/")) appFile(documentId) else deviceFile(documentId)).let { f ->
+                "${f.length()}-${f.lastModified()}" to { ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY) }
+            }
             else -> {
                 val tree = tree() ?: throw FileNotFoundException(documentId)
                 val uri = DocumentsContract.buildDocumentUriUsingTree(tree, documentId.removePrefix("t/"))
@@ -144,7 +177,7 @@ class TesselDocuments : DocumentsProvider() {
         val file = File(dir, "${documentId.hashCode().toUInt()}-$stamp-$edge.jpg")
         if (!file.exists()) {
             val tmp = File(dir, "${file.name}.tmp")
-            open().use { pfd ->
+            if (isImage(documentId)) image(open, edge, tmp) else open().use { pfd ->
                 PdfRenderer(pfd).use { pdf ->
                     if (pdf.pageCount == 0) throw FileNotFoundException(documentId)
                     pdf.openPage(0).use { page ->
@@ -165,6 +198,50 @@ class TesselDocuments : DocumentsProvider() {
         }
         return AssetFileDescriptor(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY), 0, AssetFileDescriptor.UNKNOWN_LENGTH)
     }
+
+    /** A photo or picture, scaled down while it is read (a 50-megapixel photo never sits whole in memory). */
+    private fun image(open: () -> ParcelFileDescriptor, edge: Int, out: File) {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        open().use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, bounds) }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
+        val bitmap = open().use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+            ?: throw FileNotFoundException("Not an image")
+        out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        bitmap.recycle()
+    }
+
+    // ---------- internal storage (All files access) ----------
+
+    private fun storage(): File = Environment.getExternalStorageDirectory()
+
+    private fun deviceShown(): Boolean = showDevice(ctx) && Folders(ctx).allFilesGranted()
+
+    /** A path on internal storage, never outside it, and only while All files access is granted. */
+    private fun deviceFile(id: String): File {
+        if (!deviceShown()) throw FileNotFoundException(id)
+        val base = storage().canonicalFile
+        val f = File(base, id.removePrefix("d/")).canonicalFile
+        if (f != base && !f.path.startsWith(base.path + File.separator)) throw FileNotFoundException(id)
+        return f
+    }
+
+    private fun anyRow(c: MatrixCursor, id: String, f: File) {
+        val mime = if (f.isDirectory) Document.MIME_TYPE_DIR else mimeOf(f.name)
+        c.newRow().apply {
+            add(Document.COLUMN_DOCUMENT_ID, id)
+            add(Document.COLUMN_DISPLAY_NAME, f.name)
+            add(Document.COLUMN_MIME_TYPE, mime)
+            add(Document.COLUMN_SIZE, if (f.isDirectory) 0 else f.length())
+            add(Document.COLUMN_LAST_MODIFIED, f.lastModified())
+            add(Document.COLUMN_FLAGS, if (f.isDirectory) Document.FLAG_DIR_PREFERS_GRID else if (mime == Folders.PDF || mime.startsWith("image/")) Document.FLAG_SUPPORTS_THUMBNAIL else 0)
+        }
+    }
+
+    private fun mimeOf(name: String): String =
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+
+    private fun isImage(id: String) = mimeOf(id).startsWith("image/")
 
     // ---------- the folder ----------
 
@@ -224,6 +301,8 @@ class TesselDocuments : DocumentsProvider() {
 
     companion object {
         private const val ROOT = "tessel"
+        private const val DEVICE_ROOT = "device"
+        private const val DEVICE_KEY = "device"
         private const val MAX_EDGE = 768
         private const val PREFS = "documents"
         private const val KEY = "root"
@@ -235,6 +314,14 @@ class TesselDocuments : DocumentsProvider() {
 
         /** The picked folder Tessel uses (a tree URI), or null for Documents/Tessel. */
         private fun chosen(ctx: Context): String? = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)?.takeIf { it != "app" }
+
+        private fun showDevice(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(DEVICE_KEY, false)
+
+        /** Settings → Show all files in the file picker (with All files access): the second entry, on or off. */
+        fun device(ctx: Context, on: Boolean) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(DEVICE_KEY, on).apply()
+            ctx.contentResolver.notifyChange(DocumentsContract.buildRootsUri(authority(ctx)), null)
+        }
 
         /** Tessel told which folder it uses: the picker shows that one from now on. */
         fun choose(ctx: Context, root: String) {

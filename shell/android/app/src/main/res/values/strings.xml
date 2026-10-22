@@ -5,4 +5,6 @@
     <string name="print_job">Tessel document</string>
     <string name="save_failed">The file couldn’t be saved there.</string>
     <string name="save_busy">Another file is being saved. Try again in a moment.</string>
+    <string name="picker_device">Internal storage</string>
+    <string name="picker_device_summary">With previews, by Tessel</string>
 </resources>

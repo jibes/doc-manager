@@ -116,6 +116,8 @@ export default function Documents() {
     showActions(t.addTitle, [
       ...(scanSupported ? [{ key: 'add-camera', icon: 'camera' as IconName, label: t.addCamera, onPress: () => router.push('/scan') }] : []),
       { key: 'add-files', icon: 'documents' as IconName, label: t.addFiles, onPress: () => void addFiles(aiSet && ai) },
+      // A file only to look at (kept when something is saved into it).
+      { key: 'add-open', icon: 'pageView' as IconName, label: t.addOpen, onPress: async () => void openFiles(await pickPdfs()) },
       ...(aiSet ? [{ key: 'add-ai', icon: (ai ? 'check' : 'textView') as IconName, label: ai ? t.addAiOn : t.addAiOff, onPress: () => addMenu(!ai) }] : []),
     ]);
   const [query, setQuery] = useState(params.q ?? '');
@@ -415,20 +417,15 @@ export default function Documents() {
         contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: bottom }}
       >
         <View style={{ width: column }}>
-          {selected ? (
-            <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
-          ) : (
-            <AppHeader tab="documents">
-              <IconButton testID="add" icon="documents" label={t.openFile} onPress={async () => void openFiles(await pickPdfs())} />
-              <LayoutToggle />
-              {onlyMore ? (
-                <IconButton testID={onlyMore.key} icon={onlyMore.icon} label={onlyMore.label} onPress={onlyMore.onPress} />
-              ) : (
-                moreItems.length > 1 && <IconButton testID="docs-more" icon="more" label={t.more} onPress={() => showActions(t.more, moreItems)} />
-              )}
-            </AppHeader>
-          )}
-
+          {/* While picking, the bar with the count stays over the top (below); the header stays in its place under it. */}
+          <AppHeader tab="documents">
+            <LayoutToggle />
+            {onlyMore ? (
+              <IconButton testID={onlyMore.key} icon={onlyMore.icon} label={onlyMore.label} onPress={onlyMore.onPress} />
+            ) : (
+              moreItems.length > 1 && <IconButton testID="docs-more" icon="more" label={t.more} onPress={() => showActions(t.more, moreItems)} />
+            )}
+          </AppHeader>
 
           <View style={[styles.search, { backgroundColor: p.hairline }]}>
             <Icon name="search" size={16} color={p.muted} />
@@ -575,6 +572,13 @@ export default function Documents() {
         </View>
       </ScrollView>
       {selected && (
+        <View style={[styles.stickyBar, { paddingTop: insets.top + space.lg, backgroundColor: p.canvas, borderColor: p.hairline }]}>
+          <View style={{ width: column }}>
+            <SelectBar count={picked.length} onCancel={() => setSelected(null)} onAll={() => setSelected(new Set(shown.map((h) => h.doc.key)))} />
+          </View>
+        </View>
+      )}
+      {selected && (
         <ActionBar bottom={insets.bottom} side={space.xl - 4}>
           {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void batch(() => shareAll(picked))} />}
           <Action
@@ -644,6 +648,8 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
 
 
 const styles = StyleSheet.create({
+  // The select bar over the top of the list while picking, wherever it is scrolled to.
+  stickyBar: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', paddingBottom: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   // Clear of + on either side, wherever the list ends.
   colophon: { alignSelf: 'center', marginTop: space.xxl, marginHorizontal: 56 + space.lg, paddingVertical: space.sm },

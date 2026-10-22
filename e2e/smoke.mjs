@@ -348,7 +348,7 @@ async function locked() {
   page.on('pageerror', (e) => errors.push(`locked: ${e.message}`));
   await page.goto(BASE);
   await page.getByText('Every document').waitFor();
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/locked.pdf', import.meta.url).pathname);
   await page.getByTestId('password-input').fill('nope');
   await page.getByTestId('password-submit').click();
@@ -375,7 +375,7 @@ async function tagged() {
   page.on('pageerror', (e) => errors.push(`tagged: ${e.message}`));
   await page.goto(BASE);
   await page.getByText('Every document').waitFor();
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
@@ -406,12 +406,17 @@ async function keepOpen(page) {
   await page.waitForTimeout(500);
 }
 
+/** + → Open file: the system's file picker (a file chosen there is opened to look at). */
+async function openFile(page) {
+  await page.getByTestId('add-menu').locator('visible=true').first().click();
+  await page.getByTestId('action-add-open').click();
+}
+
 /** A fixture through Open file, kept (as most suites read it again later); `view: true` leaves it viewed. */
 async function openFixture(page, file, { view = false } = {}) {
   await page.goto(BASE);
-  const add = page.getByTestId('add').locator('visible=true').first();
-  await add.waitFor();
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), add.click()]);
+  await page.getByTestId('add-menu').locator('visible=true').first().waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL(`./fixtures/${file}`, import.meta.url).pathname);
   await page.getByTestId('reader').or(page.getByTestId('text-view')).first().waitFor();
   if (!view) await keepOpen(page);
@@ -680,9 +685,8 @@ async function books() {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`books: ${e.message}`));
   await page.goto(BASE);
-  const add = page.getByTestId('add').locator('visible=true').first();
-  await add.waitFor();
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), add.click()]);
+  await page.getByTestId('add-menu').locator('visible=true').first().waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/book.epub', import.meta.url).pathname);
   const said = await page.getByText(/is a book\. Tessel opens PDFs/).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
   await page.waitForTimeout(500);
@@ -900,7 +904,7 @@ async function linked() {
         return null;
       }
     }, name);
-  await page.getByTestId('add').click();
+  await openFile(page);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
   check((await page.getByTestId('page-label').innerText()).includes('2'), 'linked: a picked file opens');
@@ -919,7 +923,7 @@ async function linked() {
   // Saving edits to a picked file: kept first (a copy), and the edits go into the copy.
   await put('form.pdf', 'form.pdf');
   await page.evaluate(() => window.localStorage.setItem('pick', 'form.pdf'));
-  await page.getByTestId('add').click();
+  await openFile(page);
   await page.getByTestId('field-name').click();
   await page.keyboard.type('Grace Hopper');
   await page.keyboard.press('Enter');
@@ -1121,6 +1125,7 @@ async function foldersShell() {
       share: ({ uris }) => ((log.shared = uris), null),
       // Which folder the system's file picker shows as "Tessel".
       tesselRoot: ({ root }) => ((log.pickerRoots = [...(log.pickerRoots ?? []), root]), null),
+      pickerDevice: ({ on }) => ((log.pickerDevice = on), null),
       // AI requests go through the app (the WebView's own host isn't an origin a server's CORS knows).
       http: ({ url, headers, body }) => {
         log.http = { url, headers, body: JSON.parse(body) };
@@ -1213,6 +1218,13 @@ async function foldersShell() {
   // The system's file picker is told which folder to show as "Tessel": this device's own first, then the chosen one.
   const pickerRoots = await page.evaluate(() => window.__shell.pickerRoots ?? []);
   check(pickerRoots[0] === 'app' && /^content:\/\/.+tree/.test(pickerRoots.at(-1) ?? ''), `folders-shell: the file picker shows the Tessel folder (${pickerRoots})`);
+  // Settings → File picker: all of internal storage too, once All files access is granted (asked for here).
+  await vis('home-settings').click();
+  await vis('picker-device').click();
+  for (let i = 0; i < 20 && (await vis('picker-device').getAttribute('aria-checked')) !== 'true'; i++) await page.waitForTimeout(150);
+  const device = await page.evaluate(() => [window.__shell.pickerDevice, window.__shell.calls.includes('requestAllFiles')]);
+  check((await vis('picker-device').getAttribute('aria-checked')) === 'true' && device[0] === true, `folders-shell: the file picker can show all files, after asking for All files access (${device})`);
+  await page.goBack();
   let listed = [];
   for (let i = 0; i < 40 && listed.length < 2; i++) listed = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts());
   check(listed.length === 2 && listed.some((r) => r.includes('Orderly Notes')) && listed.some((r) => r.includes('Visit request')) && !listed.some((r) => r.includes('Harbour Notes')), `folders-shell: the chosen Tessel folder's PDFs are listed, in its folders too, without the EPUB book (${listed.map((r) => r.split('\n')[0])})`);
@@ -1305,7 +1317,7 @@ async function foldersShell() {
   check(scans === 1, 'folders-shell: the saved scan is in the library');
 
   // A file opened from elsewhere (system picker) is only viewed; kept, it becomes a real file in Documents/Tessel.
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await chooser.setFiles(new URL('./fixtures/tagged.pdf', import.meta.url).pathname);
   await page.waitForURL(/\/read\//, { timeout: 30000 });
   await page.getByTestId('reader').waitFor();
@@ -1477,7 +1489,7 @@ async function details() {
   await page.getByText('Every document').waitFor();
   const open = async (fixture) => {
     await page.goto(BASE);
-    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
     await fc.setFiles(new URL(`./fixtures/${fixture}`, import.meta.url).pathname);
     await page.getByTestId('reader').waitFor();
     await keepOpen(page);
@@ -1538,7 +1550,7 @@ async function details() {
 
   // Protected PDF.
   await page.goto(BASE);
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/locked.pdf', import.meta.url).pathname);
   await page.getByTestId('password-input').fill('tessel');
   await page.getByTestId('password-submit').click();
@@ -1583,7 +1595,7 @@ async function searchArchive() {
   await chooseTessel(page);
   // One document in the library too.
   await page.goto(BASE);
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
@@ -1685,7 +1697,7 @@ async function documentsScreen() {
   await chooseTessel(page);
   // A library document with details.
   await page.goto(BASE);
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
@@ -1897,7 +1909,7 @@ async function searchable() {
 
   // Typed pages, then a scanned one: offered all the same (looked for once the first pages are drawn).
   await page.goto(BASE);
-  const [mixed] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [mixed] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await mixed.setFiles(new URL('./fixtures/mixed.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
@@ -2129,7 +2141,7 @@ async function sharedReading() {
   await chooseTessel(page, { stay: true });
   check((await vis('share-reading-switch').count()) === 0, 'shared: no switch for sharing reading');
   await vis('screen-back').click();
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/scan.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
@@ -2176,7 +2188,7 @@ async function places() {
 
   // A document from elsewhere: viewed, then kept, it goes into the Tessel folder's Inbox (and syncs).
   await page.goto(BASE);
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('add').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
   await fc.setFiles(new URL('./fixtures/xrefstream.pdf', import.meta.url).pathname);
   await page.getByTestId('reader').waitFor();
   await keepOpen(page);
@@ -2337,7 +2349,7 @@ async function upgrade() {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`upgrade: ${e.message}`));
   await page.goto(BASE);
-  await page.getByTestId('add').locator('visible=true').first().waitFor();
+  await page.getByTestId('add-menu').locator('visible=true').first().waitFor();
   const b64 = readFileSync(new URL('./fixtures/columns.pdf', import.meta.url)).toString('base64');
   await page.evaluate(async (b64) => {
     const put = (db, store, key, value) =>
@@ -2682,6 +2694,11 @@ async function batch() {
   check(/2 selected/.test(await page.getByText(/selected$/).locator('visible=true').innerText()), 'batch: documents are picked with a right click and a tap');
   check((await hit('Old title').getAttribute('aria-checked')) === 'true', 'batch: picked rows say so');
   check((await vis('act-move').count()) === 0 && (await vis('act-copy').count()) === 0, 'batch: no copy or move (Tessel has no folders)');
+  // The bar with the count stays at the top while the list scrolls.
+  await page.mouse.wheel(0, 1200);
+  await page.waitForTimeout(400);
+  const barTop = (await vis('select-cancel').boundingBox())?.y ?? -1;
+  check(barTop >= 0 && barTop < 120, `batch: the select bar stays at the top when the list scrolls (${barTop})`);
 
   // To the trash, and back.
   await page.goto(BASE);
