@@ -1119,6 +1119,8 @@ async function foldersShell() {
           return { from: uri, to: uriOf(reId(id)) };
         }),
       share: ({ uris }) => ((log.shared = uris), null),
+      // Which folder the system's file picker shows as "Tessel".
+      tesselRoot: ({ root }) => ((log.pickerRoots = [...(log.pickerRoots ?? []), root]), null),
       // AI requests go through the app (the WebView's own host isn't an origin a server's CORS knows).
       http: ({ url, headers, body }) => {
         log.http = { url, headers, body: JSON.parse(body) };
@@ -1208,6 +1210,9 @@ async function foldersShell() {
   await page.getByText('Every document').waitFor();
   // A folder picked through the system's folder picker is the Tessel folder.
   await chooseTessel(page);
+  // The system's file picker is told which folder to show as "Tessel": this device's own first, then the chosen one.
+  const pickerRoots = await page.evaluate(() => window.__shell.pickerRoots ?? []);
+  check(pickerRoots[0] === 'app' && /^content:\/\/.+tree/.test(pickerRoots.at(-1) ?? ''), `folders-shell: the file picker shows the Tessel folder (${pickerRoots})`);
   let listed = [];
   for (let i = 0; i < 40 && listed.length < 2; i++) listed = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts());
   check(listed.length === 2 && listed.some((r) => r.includes('Orderly Notes')) && listed.some((r) => r.includes('Visit request')) && !listed.some((r) => r.includes('Harbour Notes')), `folders-shell: the chosen Tessel folder's PDFs are listed, in its folders too, without the EPUB book (${listed.map((r) => r.split('\n')[0])})`);

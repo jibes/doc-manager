@@ -25,6 +25,7 @@ import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { schedule, startIndexing } from '@/paper/archive/indexer';
 import { refreshInboxCount } from '@/paper/archive/inbox';
 import { resumeReading } from '@/paper/archive/intake';
+import { showInPicker } from '@/paper/archive/tessel';
 import { useLibrary, type ImportItem } from '@/paper/state/library';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -61,11 +62,13 @@ export default function RootLayout() {
     // Text left to read when the app last closed is read now, whichever screen it opens on.
     void useLibrary.getState().load().then(resumeReading);
     startIndexing();
+    const unpicker = showInPicker();
     void refreshInboxCount();
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void refreshInboxCount());
-    return useLibrary.subscribe((s, prev) => {
+    const unlibrary = useLibrary.subscribe((s, prev) => {
       if (s.docs.length !== prev.docs.length) schedule();
     });
+    return () => (unpicker(), unlibrary());
   }, []);
 
   useEffect(() => {

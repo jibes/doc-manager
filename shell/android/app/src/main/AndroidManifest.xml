@@ -57,6 +57,18 @@
             </intent-filter>
         </activity>
 
+        <!-- The Tessel folder in the system's file picker, with the first page of each PDF as its picture. -->
+        <provider
+            android:name=".TesselDocuments"
+            android:authorities="${applicationId}.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

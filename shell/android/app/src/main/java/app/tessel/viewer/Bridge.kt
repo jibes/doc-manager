@@ -190,6 +190,7 @@ class Bridge(private val activity: MainActivity) {
                 runCatching<Any?> {
                     when (method) {
                         "folders" -> folders.folders()
+                        "tesselRoot" -> TesselDocuments.choose(activity, a.getString("root")).let { null }
                         "forgetFolder" -> folders.forget(Uri.parse(a.getString("uri"))).let { null }
                         "list" -> folders.list(a.getString("root"), a.optString("dir").ifEmpty { null })
                         "access" -> JSONObject().put("allFiles", folders.allFilesGranted()).put("app", folders.appFolderUsable())

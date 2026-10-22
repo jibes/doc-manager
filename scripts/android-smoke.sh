@@ -241,6 +241,19 @@ adb shell ls /sdcard/Documents/Tessel/ | grep -q '^Scan .*\.pdf' || { echo "The 
 adb logcat -d -s TesselWeb:* | grep -Eo 'Scanner: (cross-origin isolated [a-z]+|text recognition with [0-9]+ thread)' | sort -u || true
 echo "--- scanner passed ---"
 
+# The system's file picker lists the Tessel folder as "Tessel" (TesselDocuments), with the saved scan in it.
+adb shell am start -a android.intent.action.OPEN_DOCUMENT -c android.intent.category.OPENABLE -t application/pdf >/dev/null
+sleep 3
+ui | grep -q 'text="Tessel"' || tap "Show roots" || true
+wait_for "Tessel\""
+tap "Tessel\""
+wait_for "Scan 2"
+sleep 3
+adb exec-out screencap -p > "$OUT/13-picker.png"
+echo "--- screen (system picker) ---"; screen | head -20 || true
+adb shell input keyevent KEYCODE_BACK
+echo "--- picker passed ---"
+
 adb logcat -d -s TesselWeb:* > "$OUT/web-console.txt" || true
 echo "--- web console ---"; cat "$OUT/web-console.txt"
 if grep -q '^E/TesselWeb\|^E TesselWeb\| E TesselWeb' "$OUT/web-console.txt"; then echo "The web app logged errors"; exit 1; fi

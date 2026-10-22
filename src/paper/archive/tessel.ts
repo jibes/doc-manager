@@ -1,5 +1,6 @@
 import { folders, type FolderEntry } from '@/core/lib/folders';
 import { APP_ROOT_ID } from '@/core/lib/nesting';
+import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
 import { repo } from '@/core/storage';
 import { useLibrary } from '@/paper/state/library';
@@ -118,4 +119,17 @@ export async function dropSources(): Promise<void> {
   }
   writeStored(done, '1');
   schedule(300);
+}
+
+/**
+ * In the Android app: the system's file picker shows the Tessel folder as "Tessel", with the first page of each PDF
+ * as its picture. Told which folder that is now and whenever it changes.
+ */
+export function showInPicker(): () => void {
+  if (!shell) return () => {};
+  const tell = (archive: string | null) => void shellRequest('tesselRoot', { root: archive ?? APP_ROOT_ID }).catch(() => {});
+  tell(usePrefs.getState().archive);
+  return usePrefs.subscribe((s, before) => {
+    if (s.archive !== before.archive) tell(s.archive);
+  });
 }
