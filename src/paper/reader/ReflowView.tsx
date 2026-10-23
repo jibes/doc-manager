@@ -121,13 +121,17 @@ function Centered({ children }: { children: ReactNode }) {
   return <View style={styles.centered}>{children}</View>;
 }
 
-/** Figure size in the column: natural size up to the column, tables wider than it scroll sideways at a readable scale. */
+/**
+ * Figure size in the column: natural size up to the column, tables wider than it scroll sideways at a readable
+ * scale. A page shown whole (a form, an invoice) fits the column: a tap opens the page itself, to zoom.
+ */
 function figureBox(b: Block, pg: { width: number; height: number }, column: number): FigureBox {
   const r = b.rect!;
   const natural = r.w * pg.width;
   const aspect = (r.h * pg.height) / (r.w * pg.width);
   const readable = natural * 1.2;
-  const width = Math.round(b.table && readable > column ? Math.min(readable, 1600) : Math.min(column, natural * 1.5));
+  const whole = r.w >= 0.75 && r.h >= 0.5;
+  const width = Math.round(b.table && !whole && readable > column ? Math.min(readable, 1600) : Math.min(column, natural * 1.5));
   return { width, height: Math.round(width * aspect), scroll: width > column };
 }
 

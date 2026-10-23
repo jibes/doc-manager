@@ -482,6 +482,7 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
       bold: c.bold,
       italic: c.italic,
       hyphen: c.hyphen || /[-\u00ad]$/.test(trimmed),
+      ...(c.ocr ? { ocr: true } : {}),
       role: c.role,
       sid: c.sid,
     });
@@ -528,7 +529,9 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
         M.FPDFText_GetFontInfo(text, i, nameBuf, 60, flags);
         const fontName = M.pdfium.UTF8ToString(nameBuf);
         const f = M.pdfium.getValue(flags, 'i32');
+        const obj = M.FPDFText_GetTextObject(text, i);
         cur = {
+          ocr: !!obj && M.FPDFTextObj_GetTextRenderMode(obj) === FPDF_TEXTRENDERMODE_INVISIBLE,
           text: ch,
           rect: rc,
           right: rc.x + rc.w,

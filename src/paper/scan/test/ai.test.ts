@@ -34,6 +34,26 @@ describe('AI reading', () => {
     expect(out[3].y0).toBe(900);
   });
 
+  it('doesn’t add a second time what the page already has on that row', () => {
+    const row = [
+      { text: 'Datum', x0: 100, y0: 440, x1: 140, y1: 450, page: 0 },
+      { text: 'Betrag', x0: 890, y0: 440, x1: 930, y1: 450, page: 0 },
+      { text: '85.45', x0: 890, y0: 460, x1: 930, y1: 470, page: 0 },
+    ];
+    const reading: AiResult['pages'][number] = {
+      lines: [],
+      added: [
+        // A row given again, squeezed into the wrong place.
+        { text: 'Datum Betrag', box: [100, 440, 500, 450] },
+        { text: '85.45', box: [460, 460, 510, 470] },
+        // Handwriting that really is missing.
+        { text: '29.11.24', box: [500, 900, 600, 920] },
+      ],
+    };
+    const out = applyReading(row, 0, reading, 1000, 1000);
+    expect(out.map((w) => w.text)).toEqual(['Datum', 'Betrag', '85.45', '29.11.24']);
+  });
+
   it('spreads a corrected line with a different word count over the line', () => {
     const out = spread('Zahlbar bis', { x0: 0, y0: 0, x1: 110, y1: 20 });
     expect(out.map((x) => [x.text, x.x0, x.x1])).toEqual([

@@ -84,44 +84,58 @@ function rows<L extends TextLine>(lines: L[]): Row<L>[] {
 const isMulti = <L extends TextLine>(r: Row<L>) =>
   r.items.length >= 2 && r.items.every((l, i) => i === 0 || l.rect.x >= r.items[i - 1].rect.x + r.items[i - 1].rect.w - 0.002);
 
+/** Prose: a long line, or a sentence. Text like this is read, not looked up. */
+const SENTENCE = /[.!?…]["”’»)]?$/;
+const isProse = (l: TextLine) => len(l) >= 60 || (len(l) >= 30 && SENTENCE.test(l.text.trim()));
+/** Figures in a row: "27.05.2024 312 7311 1 77.00 85.45", an amount, an account number. */
+const isNumeric = (l: TextLine) => {
+  const s = l.text.replace(/\s/g, '');
+  return s.length >= 6 && (s.match(/\d/g)?.length ?? 0) >= s.length * 0.45;
+};
+
+/** Share of a page's text in tables and forms from which the page is shown as it is, whole. */
+const MOSTLY = 0.55;
+/** A scanned page with less running text than this (a form: labels, ticked boxes, short entries) is shown whole too. */
+const SCAN_PROSE = 0.25;
+const SCAN_LINES = 12;
+
 /**
- * Untagged tables: runs of ≥3 rows split into several short cells whose left edges line up.
- * (Running text in two columns also splits rows in two, but its "cells" are long.)
+ * Tables and forms (untagged): runs of rows that are looked up rather than read: several short cells side by side,
+ * or figures. The labels and lines between them belong to them (a form's "AHV-Nr.", a table's description line);
+ * running text ends them. A run with at least three such rows is kept as drawn: on a scan the picture holds what
+ * its text can't (ticked boxes, handwriting, stamps), and cells flattened into text read as nonsense. A page that
+ * is mostly such runs (an invoice, a form) is kept whole, rather than as pieces with stray labels between them.
  */
-export function findTables<L extends TextLine>(lines: L[]): { tables: Figure[]; lines: L[] } {
-  const tables: Figure[] = [];
-  const taken = new Set<L>();
+export function findTables<L extends TextLine>(lines: L[], scanned = false): { tables: Figure[]; lines: L[] } {
+  const runs: Row<L>[][] = [];
   let run: Row<L>[] = [];
+  let between = 0;
+  const looked = (r: Row<L>) => (isMulti(r) && median(r.items.map(len)) < 28 && !r.items.some(isProse)) || r.items.every(isNumeric);
   const flush = () => {
-    while (run.length && !isMulti(run[run.length - 1])) run.pop();
-    const multi = run.filter(isMulti);
-    if (multi.length >= 3) {
-      const cells = multi.flatMap((r) => r.items);
-      const starts = new Map<number, number>();
-      for (const r of multi) for (const k of new Set(r.items.map((l) => Math.round(l.rect.x * 100)))) starts.set(k, (starts.get(k) ?? 0) + 1);
-      const aligned = [...starts].filter(([k, n]) => n + (starts.get(k - 1) ?? 0) + (starts.get(k + 1) ?? 0) >= multi.length * 0.6).length;
-      if (median(cells.map(len)) < 28 && aligned >= 2) {
-        const all = run.flatMap((r) => r.items);
-        all.forEach((l) => taken.add(l));
-        tables.push({ rect: pad(bounds(all.map((l) => l.rect))!, 0.006), alt: run.map((r) => r.items.map((l) => l.text.trim()).join(' · ')).join('\n'), table: true });
-      }
-    }
+    while (run.length && !looked(run[run.length - 1])) run.pop();
+    if (run.filter(looked).length >= 3) runs.push(run);
     run = [];
+    between = 0;
   };
-  let singles = 0;
   for (const row of rows(lines)) {
     const last = run[run.length - 1];
     if (last && row.cy - last.cy > Math.max(row.h, last.h) * 3) flush();
-    if (isMulti(row)) {
-      singles = 0;
+    if (looked(row)) {
+      between = 0;
       run.push(row);
-    } else if (run.length) {
-      // One single-cell row (a wrapped cell, a spanning label) may sit inside a table.
-      if (++singles > 1) flush();
-      else run.push(row);
-    }
+    } else if (run.length && !row.items.some(isProse) && ++between <= 4) run.push(row);
+    else flush();
   }
   flush();
+
+  const chars = (ls: L[]) => ls.reduce((n, l) => n + len(l), 0);
+  const alt = (rs: Row<L>[]) => rs.map((r) => r.items.map((l) => l.text.trim()).join(' · ')).join('\n');
+  const taken = new Set(runs.flat().flatMap((r) => r.items));
+  const form = scanned && lines.length >= SCAN_LINES && chars(lines.filter(isProse)) < chars(lines) * SCAN_PROSE;
+  if ((taken.size && chars([...taken]) >= chars(lines) * MOSTLY) || form) {
+    return { tables: [{ rect: pad(bounds(lines.map((l) => l.rect))!, 0.006), alt: alt(rows(lines)), table: true }], lines: [] };
+  }
+  const tables = runs.map((rs) => ({ rect: pad(bounds(rs.flatMap((r) => r.items.map((l) => l.rect)))!, 0.006), alt: alt(rs), table: true }));
   return { tables, lines: lines.filter((l) => !taken.has(l)) };
 }
 

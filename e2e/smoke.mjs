@@ -1471,8 +1471,15 @@ async function aiReading() {
   await vis('open-more').click();
   check((await page.getByTestId('menu-improve').count()) === 1, 'ai: a scan can be read with AI again');
   await page.keyboard.press('Escape');
-  await switchView(page);
-  await page.waitForFunction(() => /bez zum 30\.10\.2026/.test(document.body.innerText) && /ACME Instruments GmbH/.test(document.body.innerText), null, { timeout: 30000 }).then(
+  // In the page's text (its text view shows a scanned invoice as the picture it is).
+  await page.waitForFunction(
+    () => {
+      const text = [...document.querySelectorAll('[data-testid=text-layer] span')].map((e) => e.textContent).join(' ');
+      return /bez zum 30\.10\.2026/.test(text) && /ACME Instruments GmbH/.test(text);
+    },
+    null,
+    { timeout: 30000 },
+  ).then(
     () => check(true, 'ai: corrected and added text is in the PDF'),
     () => check(false, 'ai: corrected and added text is in the PDF'),
   );

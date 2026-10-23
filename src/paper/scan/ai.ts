@@ -119,8 +119,8 @@ export function prompt(pages: AiPage[]): string {
   return [
     `The images are the ${pages.length === 1 ? 'page' : `${pages.length} pages`} of one scanned document, in order. Below are the lines a small on-device text recogniser read on each page, each with an id.`,
     '',
-    '1. For every line, give its text exactly as it appears on the page: fix misread letters, umlauts and accents, missing or extra spaces. Keep the line’s id. Give "" for a line that is not text (a logo, a stamp, noise).',
-    '2. Under "added", give text the recogniser missed, such as handwriting, one entry per line of text, with its box as [x0, y0, x1, y1] in thousandths of the page’s width and height (0,0 is the top left).',
+    '1. For every line, give its text exactly as it appears on the page: fix misread letters, umlauts and accents, missing or extra spaces. Keep the line’s id. Give "" for a line that is not text (a logo, a stamp, noise), or that repeats another line where the page doesn’t show it again.',
+    '2. Under "added", give only text the recogniser missed entirely, such as handwriting (not lines it already read), one entry per line of text, with its box as [x0, y0, x1, y1] in thousandths of the page’s width and height (0,0 is the top left).',
     '3. Describe the document: title, date, sender, type and keywords.',
     'Give one entry in "pages" per page, in order, each with its page number (from 1), also for a page with nothing on it. Reply with the JSON object only.',
     '',
@@ -564,9 +564,28 @@ export function applyReading(words: PdfWord[], page: number, reading: AiResult['
   }
   for (const a of reading.added) {
     const [x0, y0, x1, y1] = a.box.map((v) => Math.min(1000, Math.max(0, v)) / 1000);
-    if (x1 > x0 && y1 > y0) out.push(...spread(a.text, { x0: x0 * width, y0: y0 * height, x1: x1 * width, y1: y1 * height }));
+    const box = { x0: x0 * width, y0: y0 * height, x1: x1 * width, y1: y1 * height };
+    if (x1 > x0 && y1 > y0 && !alreadyThere(a.text, box, out)) out.push(...spread(a.text, box));
   }
   return out;
+}
+
+const tokensOf = (s: string) =>
+  s
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.replace(/[^\p{L}\p{N}%]/gu, ''))
+    .filter(Boolean);
+
+/**
+ * Text the model "adds" that the page has already, on the same row (models give a whole table row again, often in
+ * the wrong place across the page): not written a second time. Text that really was missed (handwriting) isn't there.
+ */
+function alreadyThere(text: string, box: { y0: number; y1: number }, words: PdfWord[]): boolean {
+  const tokens = tokensOf(text);
+  if (!tokens.length) return true;
+  const row = new Set(words.filter((w) => Math.min(w.y1, box.y1) - Math.max(w.y0, box.y0) > 0.5 * Math.min(w.y1 - w.y0, box.y1 - box.y0)).flatMap((w) => tokensOf(w.text)));
+  return tokens.filter((t) => row.has(t)).length >= Math.ceil(tokens.length * 0.6);
 }
 
 /** A file name from what the model found: "2026-10-02 Musterwerke Zürich – Rechnung 40217". */

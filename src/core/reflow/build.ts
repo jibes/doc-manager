@@ -40,6 +40,8 @@ type Line = TextLine & { page: number; col: number };
 const BAND = 0.085;
 const SENTENCE_END = /[.!?:;…"”’»)\]]$/;
 const BULLET = /^((?:[•▪◦‣●○■□–—*-])|(?:\d{1,3}[.)])|(?:[a-z][.)])|(?:\(\w{1,3}\)))\s+/;
+/** "9. Dezember 2024", "3. Mai": a date, not a numbered item. */
+const DATE_START = /^\d{1,2}\.\s*(jan|feb|mär|mar|apr|mai|may|jun|jul|aug|sep|okt|oct|nov|dez|dec)/i;
 const PAGE_NUMBER = /^(?:(?:page|seite|p\.)\s*)?[-–—(]?\s*#\s*[-–—)]?(?:\s*(?:of|von|\/)\s*#)?$/i;
 const MIN_CHARS_PER_PAGE = 40;
 const HYPHEN_END = /[-\u00ad]$/;
@@ -102,6 +104,28 @@ function tagKind(role: string | undefined): BlockKind {
   return 'p';
 }
 
+/**
+ * Pieces of one line of text that came apart (a recogniser cuts a line at a wide space): next to each other on the
+ * same baseline, closer than a few characters. Table cells, further apart, stay apart.
+ */
+function rejoinRows(lines: Line[]): Line[] {
+  const out: Line[] = [];
+  for (const l of lines) {
+    const prev = out[out.length - 1];
+    const h = prev ? Math.min(l.rect.h, prev.rect.h) : 0;
+    const gap = prev ? l.rect.x - (prev.rect.x + prev.rect.w) : 0;
+    if (prev && !l.role && Math.abs(l.rect.y + l.rect.h / 2 - (prev.rect.y + prev.rect.h / 2)) < h * 0.5 && gap >= -h * 0.5 && gap < h * 2.5) {
+      const x1 = Math.max(prev.rect.x + prev.rect.w, l.rect.x + l.rect.w);
+      const y0 = Math.min(prev.rect.y, l.rect.y);
+      const y1 = Math.max(prev.rect.y + prev.rect.h, l.rect.y + l.rect.h);
+      // Its type is the longer piece's (not a dash's or a bullet's before it).
+      const main = l.text.trim().length > prev.text.trim().length ? l : prev;
+      out[out.length - 1] = { ...prev, size: main.size, bold: main.bold, text: `${prev.text} ${l.text}`, rect: { x: prev.rect.x, y: y0, w: x1 - prev.rect.x, h: y1 - y0 }, hyphen: l.hyphen };
+    } else out.push(l);
+  }
+  return out;
+}
+
 /** Joins wrapped lines, rejoining words split by a line-end hyphen. */
 function joinLines(lines: Line[]): string {
   // Linear: inspect only line ends (a regex on the growing string would rescan it every line).
@@ -119,8 +143,33 @@ function joinLines(lines: Line[]): string {
 
 type Draft = { kind: BlockKind; lines: Line[]; marker?: string; fig?: Figure & { page: number } };
 
+/** Line heights this close to a scanned page's usual one are its body text: what the recogniser measured is noise. */
+const SCAN_SAME = [0.75, 1.55];
+
+/**
+ * A scanned page's text (recognised, invisible over the picture of the page) says nothing reliable about its size
+ * or weight: sizes come from the height of its line boxes instead, relative to the page's usual line, in the
+ * document's body size (`body`); near the usual one counts as body text.
+ */
+const chars = (ls: TextLine[]) => ls.reduce((n, l) => n + l.text.length, 0);
+/** A page whose text is (nearly) all recognised from its picture. */
+const isScanned = (lines: TextLine[]) => lines.length > 0 && chars(lines.filter((l) => l.ocr)) >= chars(lines) * 0.8;
+
+function scannedTypography(lines: TextLine[], body: number): TextLine[] {
+  if (!isScanned(lines)) return lines;
+  const usual = median(lines.map((l) => l.rect.h)) || 1;
+  return lines.map((l) => {
+    const r = l.rect.h / usual;
+    return { ...l, size: r >= SCAN_SAME[0] && r < SCAN_SAME[1] ? body : roundSize(body * r), bold: false, italic: false };
+  });
+}
+
 export function buildReflow(input: PageLayout[]): Reflow {
-  const raw = input.map((page, i) => page.lines.map((l): Line => ({ ...l, page: i, col: 0 })));
+  // Typed pages set the body size scanned ones are measured in (10pt when all are scans).
+  const typed = input.flatMap((p) => p.lines.filter((l) => !l.ocr)) as Line[];
+  const typedBody = typed.length ? bodySize(typed) : 10;
+  const raw = input.map((page, i) => rejoinRows(scannedTypography(page.lines, typedBody).map((l): Line => ({ ...l, page: i, col: 0 }))));
+  const scanned = input.map((p) => isScanned(p.lines));
   const chars = raw.reduce((n, p) => n + p.reduce((m, l) => m + l.text.length, 0), 0);
   // Scanned PDFs have no text layer (or only stray OCR noise): nothing to reflow.
   if (chars / Math.max(1, input.length) < MIN_CHARS_PER_PAGE) return { blocks: [], tagged: false, status: 'no-text' };
@@ -133,7 +182,7 @@ export function buildReflow(input: PageLayout[]): Reflow {
   // tagged ones already carry their logical order).
   const seq = textPages.flatMap((lines, page) => {
     const f = findFigures(lines, graphics[page]);
-    const t = tagged ? taggedTables(f.lines) : findTables(f.lines);
+    const t = tagged ? taggedTables(f.lines) : findTables(f.lines, scanned[page]);
     return readingOrder(t.lines, mergeFigures([...f.figures, ...t.tables]), !tagged).map((it) =>
       'line' in it ? { line: Object.assign(it.line, { col: it.col }) } : { fig: { ...it.fig, page } },
     );
@@ -151,7 +200,7 @@ export function buildReflow(input: PageLayout[]): Reflow {
     // A short bold line at body size standing on its own reads as a minor heading.
     if (l.bold && Math.abs(l.size - body) <= 1 && text.length < 80 && !SENTENCE_END.test(text)) return 'h3';
     if (l.size < body * 0.9 && text.length < 40 && !SENTENCE_END.test(text)) return 'label';
-    return BULLET.test(text) ? 'li' : 'p';
+    return BULLET.test(text) && !DATE_START.test(text) ? 'li' : 'p';
   };
   const kindOf = (l: Line): BlockKind => (tagged ? tagKind(l.role) : sizeKind(l));
 
@@ -245,7 +294,9 @@ export function buildReflow(input: PageLayout[]): Reflow {
   const blocks: Block[] = drafts
     .map((d): Block => {
       if (d.fig) return { kind: 'figure', text: d.fig.alt, page: d.fig.page, y: d.fig.rect.y, rect: d.fig.rect, table: d.fig.table };
-      const text = joinLines(d.lines);
+      // Lines that are all short and stand alone (an address, a signature, a list of enclosures) keep their breaks.
+      const alone = !tagged && d.kind === 'p' && d.lines.length > 1 && d.lines.every((l) => l.rect.w < (edgeOf(l).right - edgeOf(l).left) * 0.6 && !/[,;]$/.test(l.text.trim()));
+      const text = alone ? d.lines.map((l) => l.text.trim()).join('\n') : joinLines(d.lines);
       // Large type alone doesn't make a heading: long or sentence-like blocks are intro/lead paragraphs.
       const lead = !tagged && d.kind.startsWith('h') && (text.split(/\s+/).length > 14 || (text.length > 60 && SENTENCE_END.test(text)));
       return { kind: lead ? 'p' : d.kind, marker: d.marker, text, page: d.lines[0].page, y: d.lines[0].rect.y };

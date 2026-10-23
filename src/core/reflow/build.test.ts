@@ -201,4 +201,68 @@ describe('buildReflow', () => {
     const { blocks } = reflow([page]);
     expect(blocks.map((b) => b.kind)).toEqual(['p', 'figure', 'p']);
   });
+
+  it('shows a page that is mostly a table or form whole, not as pieces with stray labels between them', () => {
+    const cell = (text: string, x: number, y: number) => line(text, y, { rect: { x, y, w: 0.12, h: 0.012 } });
+    const page = [
+      line('Rechnung 40217', 0.05, { size: 16 }),
+      ...[0, 1, 2, 3, 4, 5].flatMap((i) => [cell(`Feld ${i}`, 0.1, 0.12 + i * 0.02), cell(`Wert ${i}`, 0.3, 0.12 + i * 0.02)]),
+      line('AHV-Nr.', 0.26, { rect: { x: 0.1, y: 0.26, w: 0.08, h: 0.012 } }),
+      ...[0, 1, 2, 3].map((i) => line(`0${i}.05.2026 312 7311 1 77.00 85.45`, 0.32 + i * 0.03, { rect: { x: 0.1, y: 0.32 + i * 0.03, w: 0.8, h: 0.012 } })),
+      line('Bitte innert 30 Tagen bezahlen.', 0.5, { rect: { x: 0.1, y: 0.5, w: 0.3, h: 0.012 } }),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks.map((b) => b.kind)).toEqual(['figure']);
+    expect(blocks[0].table).toBe(true);
+    expect(blocks[0].text).toContain('Feld 2 · Wert 2');
+    expect(blocks[0].text).toContain('AHV-Nr.');
+  });
+
+  it('shows a scanned form whole, and reflows a scanned letter', () => {
+    const scan = { ocr: true };
+    const short = (text: string, y: number) => line(text, y, { ...scan, rect: { x: 0.1, y, w: 0.25, h: 0.012 } });
+    const form = Array.from({ length: 14 }, (_, i) => short(['Name', 'Vorname', 'Strasse', 'Diagnose:', 'Krankheit', 'Unfall', 'Verordnung: erste'][i % 7], 0.1 + i * 0.03));
+    const letter = [...para(0.1, [filler, filler, 'and so the letter ends.'], scan), ...para(0.3, [filler, 'Kind regards.'], scan)];
+    const { blocks } = reflow([form, letter]);
+    expect(blocks.filter((b) => b.page === 0).map((b) => b.kind)).toEqual(['figure']);
+    expect(blocks.filter((b) => b.page === 1).every((b) => b.kind === 'p')).toBe(true);
+  });
+
+  it('takes a scanned page’s headings from the height of its lines, not the noise in its recognised type', () => {
+    const scan = (text: string, y: number, h: number, size: number) => line(text, y, { ocr: true, size, bold: size > 6, rect: { x: 0.1, y, w: 0.76, h } });
+    const page = [
+      scan('Eingereichte Unterlagen', 0.1, 0.02, 5),
+      scan(filler, 0.15, 0.011, 4.9),
+      scan(filler, 0.17, 0.014, 7.8),
+      scan(filler, 0.19, 0.01, 5.3),
+      scan('and the paragraph ends here.', 0.21, 0.011, 3.7),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks.map((b) => b.kind)).toEqual(['h1', 'p']);
+  });
+
+  it('keeps the line breaks of an address and a signature, and reads a date as a date', () => {
+    const short = (text: string, y: number) => line(text, y, { rect: { x: 0.12, y, w: 0.2, h: 0.014 } });
+    const page = [
+      ...['Herr', 'Max Muster', 'Musterweg 1', '8000 Zürich'].map((t, i) => short(t, 0.1 + i * STEP)),
+      short('9. Dezember 2024', 0.25),
+      ...para(0.3, [filler, filler, 'the letter says.']),
+      ...['Freundliche Grüsse', 'Nordkorn AG'].map((t, i) => short(t, 0.4 + i * STEP)),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks[0]).toMatchObject({ kind: 'p', text: 'Herr\nMax Muster\nMusterweg 1\n8000 Zürich' });
+    expect(blocks[1]).toMatchObject({ kind: 'p', text: '9. Dezember 2024' });
+    expect(blocks[3].text).toBe('Freundliche Grüsse\nNordkorn AG');
+  });
+
+  it('joins a line the recogniser cut in two on the same baseline', () => {
+    const page = [
+      ...para(0.1, [filler, filler]),
+      line('Ihre Versichertennummer und senden Sie', 0.14, { rect: { x: 0.12, y: 0.14, w: 0.45, h: 0.014 } }),
+      line('uns diese erneut zu.', 0.14, { rect: { x: 0.59, y: 0.14, w: 0.2, h: 0.014 } }),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text.endsWith('senden Sie uns diese erneut zu.')).toBe(true);
+  });
 });

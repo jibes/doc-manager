@@ -63,6 +63,8 @@ export type TextLine = {
   italic: boolean;
   /** Ends in a hyphen that splits a word across lines. */
   hyphen: boolean;
+  /** Invisible text over a picture of the page (a scan's recognised text): its size and weight say little. */
+  ocr?: boolean;
   /** Tagged PDFs: structure type (P, H1, LI, …) and element id grouping lines into blocks. */
   role?: string;
   sid?: number;
