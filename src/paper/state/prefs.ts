@@ -40,13 +40,15 @@ type Prefs = {
   inboxHere: boolean;
   /** How every list of documents shows them: small pictures beside the text, or big ones above it. */
   layout: 'list' | 'grid';
+  /** Wide desktop windows: Find and Details kept open beside the pages. */
+  side: { find: boolean; details: boolean };
 };
 
 type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, pickerDevice: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, layout: 'list' };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, pickerDevice: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, layout: 'list', side: { find: true, details: true } };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -57,8 +59,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   appearance: loadPrefs<Prefs>().appearance ?? appearanceFrom(loadPrefs<{ theme?: string | null }>().theme),
   set(patch) {
     set(patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout, side } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout, side });
   },
 }));
 

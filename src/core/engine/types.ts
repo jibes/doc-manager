@@ -141,6 +141,9 @@ export type RenderOptions = {
   signal?: AbortSignal;
 };
 
+/** Changes that can be undone and redone. */
+export type History = { undo: number; redo: number };
+
 export interface DocHandle {
   readonly pageCount: number;
   /** Page sizes in PDF points, rotation applied. */
@@ -170,6 +173,11 @@ export interface DocHandle {
   addNote(page: number, at: { x: number; y: number }, color: string, contents: string): Promise<void>;
   updateAnnotation(page: number, index: number, patch: { contents?: string; color?: string }): Promise<void>;
   removeAnnotation(page: number, index: number): Promise<void>;
+  /** Before a change (an annotation, a field): undo comes back to the document as it is now. */
+  step(): Promise<History>;
+  /** One change back or forward; the pages are to be drawn again. */
+  undo(): Promise<History>;
+  redo(): Promise<History>;
   /** The document with all edits, as PDF bytes. */
   save(): Promise<ArrayBuffer>;
   /** The file as it is: the bytes it was opened from, or (with unsaved edits) as save() writes it. */

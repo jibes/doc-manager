@@ -4,13 +4,28 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { Icon } from '@/paper/components/Icon';
 import { Button, T } from '@/paper/components/primitives';
 import { fonts, radius, space, type Palette } from '@/core/design/tokens';
-import { t } from '@/core/i18n';
+import { aiMessage, t } from '@/core/i18n';
 import type { Details } from '@/paper/archive/pdfInfo';
 import { Panel } from './Panel';
 import { discardDetails, useDrafts } from './drafts';
 
 /** A document's details as kept in the PDF: title, sender, type, date and tags. */
-export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { palette: Palette; initial: Details; busy: boolean; onSave: (d: Details) => void; onClose: () => void }) {
+export function DetailsPanel({
+  palette: p,
+  initial,
+  busy,
+  onSave,
+  onClose,
+  onSuggest,
+}: {
+  palette: Palette;
+  initial: Details;
+  busy: boolean;
+  onSave: (d: Details) => void;
+  onClose: () => void;
+  /** With AI reading set up: the model's details for what is still empty (shown, saved only with Save). */
+  onSuggest?: (now: Details) => Promise<Details>;
+}) {
   const [d, setD] = useState(initial);
   const [tag, setTag] = useState('');
   const [bad, setBad] = useState(false);
@@ -29,6 +44,18 @@ export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { p
     const words = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (words.length) set({ tags: [...new Set([...d.tags, ...words])] });
     setTag('');
+  };
+  const [asking, setAsking] = useState(false);
+  const [askFailed, setAskFailed] = useState<string | null>(null);
+  const suggest = async () => {
+    if (!onSuggest || asking) return;
+    setAsking(true);
+    setAskFailed(null);
+    await onSuggest(d).then(
+      (next) => setD(next),
+      (e: unknown) => setAskFailed(aiMessage(e)),
+    );
+    setAsking(false);
   };
   const save = () => {
     const date = d.date.trim();
@@ -99,7 +126,13 @@ export function DetailsPanel({ palette: p, initial, busy, onSave, onClose }: { p
         <T v="caption" color={p.muted}>
           {t.detailsNote}
         </T>
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+        {askFailed && (
+          <T v="caption" color={p.markRing} testID="details-suggest-failed">
+            {t.detailsSuggestFailed(askFailed)}
+          </T>
+        )}
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, flexWrap: 'wrap' }}>
+          {onSuggest && <Button testID="details-suggest" kind="quiet" icon="textView" label={asking ? t.detailsSuggesting : t.inboxSuggest} onPress={asking ? undefined : () => void suggest()} />}
           <Button testID="details-save" label={t.save} icon="check" onPress={busy ? undefined : save} />
         </View>
       </ScrollView>

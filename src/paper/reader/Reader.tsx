@@ -1,4 +1,4 @@
-import { useIsFocused } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
@@ -18,7 +18,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { opError, t } from '@/core/i18n';
+import { opError, scanError, t } from '@/core/i18n';
 import { Button, IconButton, T } from '@/paper/components/primitives';
 import { Toast } from '@/paper/components/Toast';
 import { fonts, radius, space } from '@/core/design/tokens';
@@ -27,10 +27,12 @@ import { canDownload, downloadDoc, printDoc, shareDoc } from '@/core/lib/fileAct
 import { onBack } from '@/core/lib/backGuard';
 import { shortcut, withKey, withShortcut } from '@/core/lib/keys';
 import { ask, useAsk } from '@/paper/state/ask';
+import { scanAgain } from '@/paper/scan/again';
+import { useScan } from '@/paper/scan/session';
 import { libraryActions } from '@/paper/state/library';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { repo, type DocRecord } from '@/core/storage';
-import { detailsOf, saveDetails } from '@/paper/archive/details';
+import { detailsOf, saveDetails, suggestDetails } from '@/paper/archive/details';
 import { editing, readAdded, readText, useIntake } from '@/paper/archive/intake';
 import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/paper/archive/indexer';
 import type { IndexedDoc } from '@/paper/archive/search';
@@ -38,6 +40,7 @@ import { useThrottled } from '@/core/lib/useThrottled';
 import { inboxDir, refreshInboxCount } from '@/paper/archive/inbox';
 import { docKey } from '@/paper/archive/docKey';
 import { folders } from '@/core/lib/folders';
+import { anyImprovable } from '@/paper/archive/improve';
 import { anyPageWithoutText, pagesWithoutText } from '@/paper/archive/searchable';
 import { aiHost, aiReady } from '@/paper/scan/ai';
 import type { Details } from '@/paper/archive/pdfInfo';
@@ -56,7 +59,7 @@ import { useEdits } from './useEdits';
 import { discardDetails, useDrafts } from './drafts';
 import { useMoving } from './useMoving';
 import { MoreMenu, type MenuItem } from './MoreMenu';
-import { isWide } from './Panel';
+import { Docked, isDocked, isWide } from './Panel';
 import type { RasterCache } from './rasterCache';
 import { Scrubber } from './Scrubber';
 
@@ -120,6 +123,9 @@ export function Reader({
   const setPrefs = usePrefs((s) => s.set);
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
+  // Wide desktop windows: Find and Details stay open beside the pages (each closed and opened on its own).
+  const docked = isDocked(winW);
+  const side = usePrefs((s) => s.side);
   // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
   const { savePosition, flushPositions, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
   // Where it was left: in the library at once when the reader closes.
@@ -209,8 +215,29 @@ export function Reader({
     else setReloaded(t.keptInArchive);
   };
 
+  // A document scanned elsewhere, into the scanner (its filters, crops); saved there, back into this file.
+  const [preparing, setPreparing] = useState<{ done: number; total: number } | null>(null);
+  const cleanUp = async () => {
+    if (!(await libraryActions().ensureKept(doc.id))) return;
+    const scan = useScan.getState();
+    await scan.restore();
+    if (scan.pages.length) {
+      if ((await ask({ title: t.againBusyTitle, body: t.againBusy(scan.pages.length), confirm: t.scanDiscard, destructive: true })) === null) return;
+      scan.clear();
+    }
+    setPreparing({ done: 0, total: handle.pageCount });
+    const kept = libraryActions().docs.find((d) => d.id === doc.id) ?? doc;
+    const ok = await scanAgain(kept, handle, usePrefs.getState().scan.defaultFilter, (done, total) => setPreparing({ done, total })).then(
+      () => true,
+      (e: unknown) => (useScan.getState().clear(), setReloaded(scanError(e)), false),
+    );
+    setPreparing(null);
+    if (ok) router.push('/scan/review');
+  };
+
   // A PDF with pages without text (a scan, or scanned pages after typed ones) can get their text read and added.
   const [textless, setTextless] = useState(false);
+  const [improvable, setImprovable] = useState(false);
   // Reading text, in the background (Make searchable, Improve text with AI, or as it was added): shown while it
   // waits or is read; the document opens again with its text once it is in the file.
   const ai = usePrefs((s) => s.ai);
@@ -237,6 +264,10 @@ export function Reader({
     pagesWithoutText(handle, 1)
       .then((first) => first.length > 0 || new Promise<void>((r) => setTimeout(r, LOOK_LATER_MS)).then(() => anyPageWithoutText(handle, PAGES_LOOKED_AT, () => !alive)))
       .then((any) => alive && setTextless(any), () => {});
+    // Improve text with AI only where there are pictures of pages to read again (not on typed documents).
+    new Promise<void>((r) => setTimeout(r, LOOK_LATER_MS))
+      .then(() => anyImprovable(handle, PAGES_LOOKED_AT, () => !alive))
+      .then((any) => alive && setImprovable(any), () => {});
     return () => {
       alive = false;
     };
@@ -264,10 +295,19 @@ export function Reader({
   const [panel, setPanel] = useState<PanelName>(null);
   // Find opened to search (⌘F, the find bar) puts the keyboard in its field; opened for the contents it doesn't.
   const [findFocus, setFindFocus] = useState(false);
+  // Bumped to put the keyboard in the field of a Find that is open already (beside the pages).
+  const [findAsked, setFindAsked] = useState(0);
   const openFind = (focus: boolean) => {
     setFindFocus(focus);
-    setPanel('find');
+    if (!docked) return setPanel('find');
+    setPrefs({ side: { ...usePrefs.getState().side, find: true } });
+    if (focus) setFindAsked((n) => n + 1);
   };
+  const findOpen = docked ? side.find : panel === 'find';
+  const detailsOpen = docked ? side.details : panel === 'details';
+  const closeFind = () => (docked ? setPrefs({ side: { ...usePrefs.getState().side, find: false } }) : setPanel(null));
+  const openDetails = () => (docked ? setPrefs({ side: { ...usePrefs.getState().side, details: true } }) : setPanel('details'));
+  const closeDetails = () => (docked ? setPrefs({ side: { ...usePrefs.getState().side, details: false } }) : setPanel(null));
   const [outline, setOutline] = useState<FlatOutline | null>(null);
   const [editingPage, setEditingPage] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -481,20 +521,22 @@ export function Reader({
     async (groups: PageRects[], color: string, note: boolean, quote: string) => {
       const contents = note ? await askNote('', quote) : undefined;
       if (note && contents == null) return;
+      edits.step();
       for (const g of groups) await handle.addHighlight(g.page, g.rects, color, contents || undefined);
       annotated(groups.map((g) => g.page));
     },
-    [askNote, handle, annotated],
+    [askNote, handle, annotated, edits],
   );
   // A note on the page itself (what a bookmark was): in the corner, saved into the file like any note.
   const onPageNote = useCallback(
     async (pg: number) => {
       const contents = await askNote('', '');
       if (contents == null) return;
+      edits.step();
       await handle.addNote(pg, { x: 0.03, y: 0.02 }, HIGHLIGHT_COLORS[0].hex, contents.trim() || t.pageNoteDefault);
       annotated([pg]);
     },
-    [askNote, handle, annotated],
+    [askNote, handle, annotated, edits],
   );
   // Notes are addressed by their place on the page: one change at a time, and the list kept right meanwhile.
   const noteBusy = useRef(false);
@@ -504,6 +546,7 @@ export function Reader({
       const contents = await askNote(a.contents, a.quote);
       if (contents == null || contents === a.contents || noteBusy.current) return;
       noteBusy.current = true;
+      edits.step();
       await handle
         .updateAnnotation(a.page, a.index, { contents })
         .then(() => {
@@ -515,12 +558,13 @@ export function Reader({
           noteBusy.current = false;
         });
     },
-    [askNote, handle, annotated],
+    [askNote, handle, annotated, edits],
   );
   const onDeleteNote = useCallback(
     async (a: Annotation) => {
       if (noteBusy.current) return;
       noteBusy.current = true;
+      edits.step();
       await handle
         .removeAnnotation(a.page, a.index)
         .then(() => {
@@ -532,7 +576,16 @@ export function Reader({
           noteBusy.current = false;
         });
     },
-    [handle, annotated],
+    [handle, annotated, edits],
+  );
+  // Undo, redo: the document comes back as it was; every page is drawn again, the notes read again.
+  const travel = useCallback(
+    async (back: boolean) => {
+      if (noteBusy.current || !(await (back ? edits.undo() : edits.redo()))) return;
+      for (let pg = 0; pg < handle.pageCount; pg++) cache.invalidate(pg);
+      setAnnotVersion((v) => v + 1);
+    },
+    [edits, handle, cache],
   );
 
   // ---------- search ----------
@@ -637,10 +690,10 @@ export function Reader({
     if (noteRequest) return noteRequest.resolve(null), true;
     if (menu) return setMenu(false), true;
     // Details typed in and not saved are asked about first.
-    if (panel === 'details' && useDrafts.getState().details) return void discardDetails().then((yes) => yes && setPanel(null)), true;
-    if (panel) return setPanel(null), true;
+    if (panel === 'details' && !docked && useDrafts.getState().details) return void discardDetails().then((yes) => yes && setPanel(null)), true;
+    if (panel && (!docked || panel === 'appearance')) return setPanel(null), true;
     return false;
-  }, [noteRequest, menu, panel]);
+  }, [noteRequest, menu, panel, docked]);
   useEffect(() => {
     if (!focused) return;
     return onBack(() => {
@@ -662,6 +715,12 @@ export function Reader({
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (useAsk.getState().request || !(mod || key === 'F3')) return;
+      // ⌘Z, ⇧⌘Z (Ctrl+Y): the document's changes; a field being typed in has its own.
+      const field = e.target as HTMLElement | null;
+      if (mod && (key === 'z' || key === 'y') && !/^(INPUT|TEXTAREA|SELECT)$/.test(field?.tagName ?? '') && !field?.closest?.('.fl')) {
+        e.preventDefault();
+        return void travel(!(key === 'y' || e.shiftKey));
+      }
       if (mod && key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
       // ⌘S saves edits when there are any; otherwise it downloads, as before.
       if (mod && key === 's') return e.preventDefault(), void (edits.dirty || useDrafts.getState().field ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
@@ -713,7 +772,7 @@ export function Reader({
         },
         b: () => void onPageNote(page),
         v: () => switchView(view === 'page' ? 'text' : 'page'),
-        t: () => (panel === 'find' ? setPanel(null) : openFind(false)),
+        t: () => (findOpen ? closeFind() : openFind(false)),
       };
       const fn = keys[e.key];
       if (fn) {
@@ -818,10 +877,11 @@ export function Reader({
     // Most used first.
     ...(doc.viewed ? [{ key: 'keep', icon: 'inbox' as const, label: t.keepInTessel, onPress: () => void keepViewed() }] : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
-    { key: 'details', icon: 'tag', label: t.details, onPress: () => setPanel('details') },
+    { key: 'details', icon: 'tag', label: t.details, onPress: () => (docked && detailsOpen ? closeDetails() : openDetails()) },
     ...(outside && !doc.viewed && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty && !intakeBusy ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
-    ...(canImprove && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
+    ...(canImprove && (improvable || textless) && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
+    ...(Platform.OS === 'web' && (improvable || textless) && !edits.dirty && !intakeBusy && !preparing ? [{ key: 'again', icon: 'scan' as const, label: t.again, onPress: () => void cleanUp() }] : []),
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
@@ -834,13 +894,64 @@ export function Reader({
     [goToPage],
   );
 
+
+  const findPanel = findOpen && (
+        <FindPanel
+          key={findAsked}
+          palette={p}
+          contents={{
+            palette: pageP,
+            outline,
+            page,
+            sizes: handle.pageSizes,
+            cache,
+            bookmarks: noted,
+            annotations: annots,
+            onShowNotes: showNotes,
+            onEditNote,
+            onDeleteNote,
+            onGo: (n) => {
+              goToPage(n);
+              if (!wide) setPanel(null);
+            },
+          }}
+          query={query}
+          onQuery={onQuery}
+          hits={hits}
+          active={active}
+          searching={searching}
+          focus={findFocus}
+          onPick={(i) => {
+            goToHit(i);
+            if (!wide) setPanel(null);
+          }}
+          onStep={stepHit}
+          onClose={closeFind}
+          // Beside the pages Esc leaves the field (and the search), the panel stays.
+          onEscape={docked ? () => (onQuery(''), (document.activeElement as HTMLElement | null)?.blur()) : undefined}
+        />
+  );
+  const detailsPanel = detailsOpen && (
+        <DetailsPanel
+          // Read again once saved (beside the pages it stays open).
+          key={JSON.stringify(detailsOf(handle, doc.title))}
+          palette={p}
+          initial={detailsOf(handle, doc.title)}
+          busy={savingDetails}
+          onSave={(d) => void writeDetails(d)}
+          onClose={closeDetails}
+          onSuggest={canImprove ? (now) => suggestDetails(handle, doc.fileName, now, ai) : undefined}
+        />
+  );
+
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     setVp((v) => (v && Math.abs(v.w - width) < 1 && Math.abs(v.h - height) < 1 ? v : { w: width, h: height }));
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: p.canvas }} onLayout={onLayout} testID="reader">
+    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: p.canvas }} testID="reader">
+    <View style={{ flex: 1 }} onLayout={onLayout}>
       {vp && view === 'text' && (
         <ReflowView
           handle={handle}
@@ -896,6 +1007,7 @@ export function Reader({
                       activeHit={hits[active]}
                       onPress={onPagePress}
                       onLink={onLink}
+                      beforeEdit={edits.step}
                       onEdited={edits.markDirty}
                     />
                   </View>
@@ -926,11 +1038,13 @@ export function Reader({
           </T>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {edits.history.undo > 0 && <IconButton icon="undo" label={withShortcut(t.undo, 'Z')} onPress={() => void travel(true)} testID="undo" />}
+          {edits.history.redo > 0 && <IconButton icon="redo" label={withShortcut(t.redo, '⇧Z')} onPress={() => void travel(false)} testID="redo" />}
           {edits.dirty && (
-            <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginRight: space.sm }} />
+            <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginHorizontal: space.sm }} />
           )}
           {/* One button per kind: find your way, the form you read in, how it looks, the file itself. */}
-          <IconButton icon="search" label={withShortcut(t.findShortcut, 'F')} active={panel === 'find'} onPress={() => (panel === 'find' ? setPanel(null) : openFind(false))} testID="open-find" />
+          <IconButton icon="search" label={withShortcut(t.findShortcut, 'F')} active={findOpen} onPress={() => (findOpen ? closeFind() : openFind(false))} testID="open-find" />
           <IconButton
             icon="textView"
             label={withKey(t.textView, 'V')}
@@ -939,7 +1053,21 @@ export function Reader({
             testID="view-toggle"
           />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
-          <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
+          {docked ? (
+            // Beside the pages there is room for every action: one click each.
+            menuItems.map((it) => (
+              <IconButton
+                key={it.key}
+                icon={it.icon}
+                label={it.hint ? `${it.label} (${it.hint})` : it.label}
+                active={it.key === 'details' ? detailsOpen : undefined}
+                onPress={it.onPress}
+                testID={`menu-${it.key}`}
+              />
+            ))
+          ) : (
+            <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
+          )}
         </View>
       </Animated.View>
 
@@ -1022,7 +1150,7 @@ export function Reader({
         </View>
       </View>
 
-      {searchActive && panel !== 'find' && (
+      {searchActive && !findOpen && (
         <FindBar
           palette={p}
           query={query.trim()}
@@ -1038,39 +1166,7 @@ export function Reader({
         />
       )}
 
-      {panel === 'find' && (
-        <FindPanel
-          palette={p}
-          contents={{
-            palette: pageP,
-            outline,
-            page,
-            sizes: handle.pageSizes,
-            cache,
-            bookmarks: noted,
-            annotations: annots,
-            onShowNotes: showNotes,
-            onEditNote,
-            onDeleteNote,
-            onGo: (n) => {
-              goToPage(n);
-              if (!wide) setPanel(null);
-            },
-          }}
-          query={query}
-          onQuery={onQuery}
-          hits={hits}
-          active={active}
-          searching={searching}
-          focus={findFocus}
-          onPick={(i) => {
-            goToHit(i);
-            if (!wide) setPanel(null);
-          }}
-          onStep={stepHit}
-          onClose={() => setPanel(null)}
-        />
-      )}
+      {!docked && findPanel}
       {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
       {panel === 'appearance' && (
         <AppearancePanel
@@ -1085,8 +1181,13 @@ export function Reader({
       )}
       {view === 'page' && <SelectionBubble palette={p} onHighlight={onHighlight} />}
       <NoteDialog request={noteRequest} palette={p} />
-      {panel === 'details' && (
-        <DetailsPanel palette={p} initial={detailsOf(handle, doc.title)} busy={savingDetails} onSave={(d) => void writeDetails(d)} onClose={() => setPanel(null)} />
+      {!docked && detailsPanel}
+      {preparing && (
+        <View pointerEvents="none" testID="again-progress" style={[styles.reading, { top: insets.top + TOP_BAR + space.md, backgroundColor: p.glass, borderColor: p.hairline }]}>
+          <T v="caption" color={p.ink}>
+            {t.againPreparing(preparing.done + 1, preparing.total)}
+          </T>
+        </View>
       )}
       {intakeBusy && (
         <View pointerEvents="none" testID="searchable-progress" style={[styles.reading, { top: insets.top + TOP_BAR + space.md, backgroundColor: p.glass, borderColor: p.hairline }]}>
@@ -1105,10 +1206,20 @@ export function Reader({
       )}
       <Toast message={panel && !wide ? null : (edits.notice ?? reloaded)} onDismiss={() => (edits.clearNotice(), setReloaded(null))} />
     </View>
+      {docked && (findPanel || detailsPanel) && (
+        <View testID="side-panels" style={[styles.side, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
+          <Docked.Provider value>
+            {findPanel}
+            {detailsPanel}
+          </Docked.Provider>
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  side: { width: 360, borderLeftWidth: StyleSheet.hairlineWidth },
   reading: { position: 'absolute', alignSelf: 'center', paddingHorizontal: space.lg, paddingVertical: space.sm, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth },
   top: {
     position: 'absolute',

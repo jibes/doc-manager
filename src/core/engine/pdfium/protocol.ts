@@ -1,4 +1,4 @@
-import type { Annotation, DocMetadata, OcrLayer, PageWords, FormField, FormValue, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
+import type { Annotation, History, DocMetadata, OcrLayer, PageWords, FormField, FormValue, NormRect, OutlineItem, PageLayout, PageLink, SearchHit, Size, TextRun } from '../types';
 
 export type Request =
   | { id: number; type: 'open'; bytes: ArrayBuffer; password?: string }
@@ -19,6 +19,9 @@ export type Request =
   | { id: number; type: 'addNote'; doc: number; page: number; at: { x: number; y: number }; color: string; contents: string }
   | { id: number; type: 'updateAnnot'; doc: number; page: number; index: number; contents?: string; color?: string }
   | { id: number; type: 'removeAnnot'; doc: number; page: number; index: number }
+  | { id: number; type: 'step'; doc: number }
+  | { id: number; type: 'undo'; doc: number }
+  | { id: number; type: 'redo'; doc: number }
   | { id: number; type: 'search'; doc: number; query: string }
   | { id: number; type: 'cancel'; target: number }
   | { id: number; type: 'close'; doc: number };
@@ -49,6 +52,9 @@ export type ResultMap = {
   addNote: null;
   updateAnnot: null;
   removeAnnot: null;
+  step: History;
+  undo: History;
+  redo: History;
   search: null;
   cancel: null;
   close: null;

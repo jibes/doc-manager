@@ -1,6 +1,8 @@
 import type { DocHandle } from '@/core/engine/types';
 import { repo } from '@/core/storage';
+import { describeWithAi, type AiSettings } from '@/paper/scan/ai';
 import { infoFor, parseTags, real, realTitle, withInfo, type Details } from './pdfInfo';
+import { pagesWithoutText, readPages, textOf } from './searchable';
 
 /**
  * The details a PDF carries (falling back to `title` when it has none). Placeholders other programs leave
@@ -19,4 +21,31 @@ export async function saveDetails(id: string, handle: DocHandle, details: Detail
   const bytes = new Uint8Array(await handle.bytes());
   const out = withInfo(bytes, infoFor(details, handle.metadata.other));
   await repo.writeFile(id, out.buffer);
+}
+
+/** Pages whose text goes to the model to describe a document: its first pages say what it is. */
+const DESCRIBE_PAGES = 3;
+
+/**
+ * Details the AI model proposes for a document already in Tessel, from the text of its first pages (read on the
+ * device first where a page has none): only what `now` doesn't have is filled in; nothing is written yet.
+ */
+export async function suggestDetails(handle: DocHandle, fileName: string, now: Details, ai: AiSettings, signal?: AbortSignal): Promise<Details> {
+  const pages: string[] = [];
+  for (let p = 0; p < Math.min(handle.pageCount, DESCRIBE_PAGES); p++) {
+    const runs = await handle.pageText(p).catch(() => []);
+    pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join(''));
+  }
+  let text = pages.join('\n').trim();
+  if (!text && (await pagesWithoutText(handle, 1)).length) text = textOf(await readPages(handle, [0], undefined, signal).catch(() => []));
+  const d = await describeWithAi(ai, `${fileName}\n\n${text}`, signal);
+  const stem = fileName.replace(/\.pdf$/i, '');
+  const titled = now.title.trim() && now.title !== stem;
+  return {
+    title: titled ? now.title : d.title || now.title,
+    sender: now.sender || d.sender,
+    type: now.type || d.type,
+    date: now.date || d.date,
+    tags: now.tags.length ? now.tags : d.keywords,
+  };
 }

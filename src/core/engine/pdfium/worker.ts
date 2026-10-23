@@ -58,7 +58,20 @@ const ANNOT_KINDS: Record<number, Annotation['kind']> = {
  * `form`: PDFium's form-fill environment (null when the PDF has no form). `edited`: changed since it was opened
  * (a save, print or share doesn't undo that: the bytes it was opened from no longer are the document).
  */
-type Doc = { ptr: number; buf: number; len: number; pageSizes: Size[]; formInfo: number; form: number; edited: boolean };
+/** The document as it was before an edit, for undo (and after one, for redo). */
+type Snapshot = { bytes: ArrayBuffer; edited: boolean };
+type Doc = {
+  ptr: number;
+  buf: number;
+  len: number;
+  pageSizes: Size[];
+  formInfo: number;
+  form: number;
+  edited: boolean;
+  password: string;
+  undo: Snapshot[];
+  redo: Snapshot[];
+};
 type SearchJob = Extract<Request, { type: 'search' }> & { cursor: number; textPtr: number };
 type Job = Exclude<Request, { type: 'cancel' }> | SearchJob;
 
@@ -117,7 +130,8 @@ function getDoc(id: number): Doc {
 
 // ---------- operations ----------
 
-function open(bytes: ArrayBuffer, password = ''): OpenResult {
+/** PDF bytes into PDFium's memory, opened. */
+function load(bytes: ArrayBuffer, password: string) {
   const len = bytes.byteLength;
   const buf = malloc(len);
   heap().set(new Uint8Array(bytes), buf);
@@ -129,6 +143,30 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
     if (code === FPDF_ERR_PASSWORD) throw new Error(password ? 'password-wrong' : 'password-required');
     throw new Error(`Could not open PDF (error ${code}).`);
   }
+  return { ptr, buf, len };
+}
+
+/** Forms: PDFium keeps field values and regenerates their appearance as they change. */
+function formOf(ptr: number) {
+  const hasForm = M.FPDF_GetFormType(ptr) !== FORMTYPE_NONE;
+  const formInfo = hasForm ? M.PDFiumExt_OpenFormFillInfo() : 0;
+  const form = hasForm ? M.PDFiumExt_InitFormFillEnvironment(ptr, formInfo) : 0;
+  if (form) {
+    M.FPDF_SetFormFieldHighlightColor(form, 0, FIELD_HIGHLIGHT);
+    M.FPDF_SetFormFieldHighlightAlpha(form, 60);
+  }
+  return { formInfo, form };
+}
+
+function unload(d: Doc) {
+  if (d.form) M.PDFiumExt_ExitFormFillEnvironment(d.form);
+  if (d.formInfo) M.PDFiumExt_CloseFormFillInfo(d.formInfo);
+  M.FPDF_CloseDocument(d.ptr);
+  free(d.buf);
+}
+
+function open(bytes: ArrayBuffer, password = ''): OpenResult {
+  const { ptr, buf, len } = load(bytes, password);
   const pageCount = M.FPDF_GetPageCount(ptr);
   const pageSizes: Size[] = withScratch(8, (s) => {
     const out: Size[] = [];
@@ -140,15 +178,8 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
   });
   const meta = (tag: string) => readUtf16((b, l) => M.FPDF_GetMetaText(ptr, tag, b, l)).trim() || undefined;
   const doc = nextDoc++;
-  // Forms: PDFium keeps field values and regenerates their appearance as they change.
-  const hasForm = M.FPDF_GetFormType(ptr) !== FORMTYPE_NONE;
-  const formInfo = hasForm ? M.PDFiumExt_OpenFormFillInfo() : 0;
-  const form = hasForm ? M.PDFiumExt_InitFormFillEnvironment(ptr, formInfo) : 0;
-  if (form) {
-    M.FPDF_SetFormFieldHighlightColor(form, 0, FIELD_HIGHLIGHT);
-    M.FPDF_SetFormFieldHighlightAlpha(form, 60);
-  }
-  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false });
+  const { formInfo, form } = formOf(ptr);
+  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [] });
   // Entries kept as they are when Tessel rewrites the details.
   const other: Record<string, string> = {};
   for (const key of ['Creator', 'Producer', 'CreationDate', 'Trapped']) {
@@ -1066,6 +1097,47 @@ function removeAnnot(docId: number, pageIndex: number, index: number) {
   d.edited = true;
 }
 
+// ---------- undo ----------
+
+// Each step keeps the whole file: a few dozen steps, and the oldest let go past this much.
+const HISTORY_STEPS = 50;
+const HISTORY_BYTES = 256 * 1024 * 1024;
+
+/** The file as it is now: the bytes it was opened from until edited. */
+function current(d: Doc, docId: number): Snapshot {
+  return { bytes: d.edited ? save(docId) : heap().slice(d.buf, d.buf + d.len).buffer, edited: d.edited };
+}
+
+function history(d: Doc) {
+  return { undo: d.undo.length, redo: d.redo.length };
+}
+
+/** Before an edit (one per change the reader makes, however many calls it takes): undo comes back to here. */
+function step(docId: number) {
+  const d = getDoc(docId);
+  d.undo.push(current(d, docId));
+  d.redo = [];
+  let kept = d.undo.reduce((n, s) => n + s.bytes.byteLength, 0);
+  while (d.undo.length > 1 && (d.undo.length > HISTORY_STEPS || kept > HISTORY_BYTES)) kept -= d.undo.shift()!.bytes.byteLength;
+  return history(d);
+}
+
+/** Back (or forward) one step: the document is opened again from that step's file, in place. */
+function travel(docId: number, back: boolean) {
+  const d = getDoc(docId);
+  const [from, to] = back ? [d.undo, d.redo] : [d.redo, d.undo];
+  const target = from.at(-1);
+  if (!target) return history(d);
+  const now = current(d, docId);
+  // Opened before the document is let go: a step that can't be opened leaves it as it is.
+  const loaded = load(target.bytes, d.password);
+  from.pop();
+  to.push(now);
+  unload(d);
+  Object.assign(d, loaded, formOf(loaded.ptr), { edited: target.edited });
+  return history(d);
+}
+
 const SAFE_URL = /^(https?:|mailto:)/i;
 
 function pageLinks(docId: number, pageIndex: number): PageLink[] {
@@ -1134,10 +1206,7 @@ function searchSlice(job: SearchJob): boolean {
 function close(docId: number) {
   const d = docs.get(docId);
   if (!d) return;
-  if (d.form) M.PDFiumExt_ExitFormFillEnvironment(d.form);
-  if (d.formInfo) M.PDFiumExt_CloseFormFillInfo(d.formInfo);
-  M.FPDF_CloseDocument(d.ptr);
-  free(d.buf);
+  unload(d);
   docs.delete(docId);
 }
 
@@ -1205,6 +1274,11 @@ async function run(job: Job) {
     case 'removeAnnot':
       removeAnnot(job.doc, job.page, job.index);
       return post({ id: job.id, ok: true, result: null });
+    case 'step':
+      return post({ id: job.id, ok: true, result: step(job.doc) });
+    case 'undo':
+    case 'redo':
+      return post({ id: job.id, ok: true, result: travel(job.doc, job.type === 'undo') });
     case 'bytes': {
       const d = getDoc(job.doc);
       // Unedited: the bytes it was opened from, so an update appended to them changes nothing else.

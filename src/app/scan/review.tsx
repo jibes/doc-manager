@@ -17,6 +17,8 @@ import { defaultTitle } from '@/paper/scan/export';
 import { prefetchExports } from '@/paper/scan/exportCache';
 import { readAdded } from '@/paper/archive/intake';
 import { saveScan, type SaveProgress } from '@/paper/scan/save';
+import { saveAgain } from '@/paper/scan/again';
+import { repo } from '@/core/storage';
 import { aiHost, aiReady } from '@/paper/scan/ai';
 import { sayScan, useScan, useScanMessage, useScanSaving } from '@/paper/scan/session';
 import { holdBrowserBack, onBack } from '@/core/lib/backGuard';
@@ -35,7 +37,7 @@ export default function ScanReview() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { pages, title, loaded, aiRead, unsaved, restore, setTitle, setAiRead, applyToAll, clear, seal, moveTo, moveMany, removeMany, updateMany } = useScan();
+  const { pages, title, replaces, loaded, aiRead, unsaved, restore, setTitle, setAiRead, applyToAll, clear, seal, moveTo, moveMany, removeMany, updateMany } = useScan();
   const focused = useIsFocused();
   const scan = usePrefs((s) => s.scan);
   const ai = usePrefs((s) => s.ai);
@@ -131,7 +133,10 @@ export default function ScanReview() {
     if (useScanSaving.getState().controller || !pages.length) return;
     // Write access to the folder is asked for now, while the tap still counts (after the pages are rendered and
     // read it no longer would, and saving would fail at the very end).
-    if (archive && !(await folders.unlock(archive, true).catch(() => false))) return notify(t.scanSaveFailed(t.writeDenied));
+    // Pages scanned again go back into their document's file; a new scan into the Tessel folder.
+    if (replaces ? !(await repo.requestAccess(replaces.id, true).catch(() => false)) : archive && !(await folders.unlock(archive, true).catch(() => false))) {
+      return notify(t.scanSaveFailed(t.writeDenied));
+    }
     const controller = new AbortController();
     // Saved as it is now: an Undo offered before (a page deleted) can't change what is being written.
     sayScan(null);
@@ -141,14 +146,18 @@ export default function ScanReview() {
     // The pages being saved: only they leave the scan when it is saved.
     const saved = pages.map((pg) => pg.id);
     const run = async () => {
-      const { doc, unread } = await saveScan(pages, scan, title, placeholder, null, setProgress, controller.signal);
+      const { doc, unread } = replaces
+        ? await saveAgain(replaces, title, pages, scan, setProgress, controller.signal)
+        : await saveScan(pages, scan, title, placeholder, null, setProgress, controller.signal);
       clear(saved);
       // The model reads it in the background (the document opens meanwhile, and says so); untitled, it names it.
-      if (doc && aiOffered && aiRead) readAdded([doc], true, { name: !title.trim() });
+      if (doc && aiOffered && aiRead) readAdded([doc], true, { name: !replaces && !title.trim() });
       // Moved on meanwhile (the camera, say): the document is in the library; nothing takes the user away.
       if (!here.current) return;
       if (unread) await ask({ title: t.scanUnreadTitle(unread), body: t.ocrFailed, confirm: t.done });
-      if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
+      // Back to the document scanned again where it is open (it opens again with the new pages).
+      if (doc && replaces && router.canGoBack()) router.back();
+      else if (doc) router.replace({ pathname: '/read/[id]', params: { id: doc.id } });
       else router.replace('/');
     };
     await run().catch((e: unknown) => {
@@ -181,6 +190,11 @@ export default function ScanReview() {
             )}
           </ScreenHeader>
 
+          {replaces && (
+            <T v="caption" color={p.muted} testID="scan-again" style={{ marginBottom: space.md }}>
+              {t.againNote(replaces.title)}
+            </T>
+          )}
           {unsaved && (
             <T v="caption" color={p.markRing} testID="scan-unsaved" style={{ marginBottom: space.md }}>
               {t.scanUnsaved}
@@ -335,7 +349,7 @@ export default function ScanReview() {
               <>
                 <Button kind="quiet" label={t.scanDiscard} onPress={() => void discard()} />
                 <View style={{ flex: 1 }} />
-                <Button testID="scan-save" label={t.scanSave} icon="check" onPress={() => void save()} />
+                <Button testID="scan-save" label={replaces ? t.againSave : t.scanSave} icon="check" onPress={() => void save()} />
               </>
             )}
           </View>

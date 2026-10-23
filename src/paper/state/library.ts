@@ -88,6 +88,8 @@ type LibraryState = {
   linkTo(id: string, item: ImportItem): Promise<void>;
   /** Changes from elsewhere (another device's reading, a computed share key), saved as they are. */
   patchDoc(id: string, changes: Partial<DocRecord>): void;
+  /** The cover made again from the file (its first page looks different now). */
+  refreshCover(id: string, file: Blob): Promise<void>;
   /** Record facts that changed with the file itself (a linked file edited elsewhere). */
   updateFileInfo(id: string, info: { pageCount: number }): void;
   /** Point a linked document at a new location (after it was moved). */
@@ -373,6 +375,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
   };
 
   return {
+    refreshCover: makeCover,
     docs: [],
     books: [],
     covers: {},

@@ -34,6 +34,19 @@ export async function improvable(handle: DocHandle, page: number, signal?: Abort
   return { page, words: read.words, layer: false, turn: read.turn };
 }
 
+/**
+ * Whether the model has anything to read again: a page that is a picture (recognised text, or none yet) among the
+ * first `limit`. A document whose pages all have text of their own (typed) has nothing. `stop`: given up.
+ */
+export async function anyImprovable(handle: DocHandle, limit: number, stop?: () => boolean): Promise<boolean> {
+  for (let p = 0; p < Math.min(handle.pageCount, limit); p++) {
+    if (stop?.()) return false;
+    const layer = await handle.ocrLayer(p).catch(() => null);
+    if (layer && !layer.other) return true;
+  }
+  return false;
+}
+
 async function pageImage(handle: DocHandle, page: number, signal?: AbortSignal): Promise<Blob> {
   const { width: w, height: h } = handle.pageSizes[page];
   const raster = await handle.renderPage(page, { width: Math.round(w >= h ? AI_EDGE : (AI_EDGE * w) / h), signal });

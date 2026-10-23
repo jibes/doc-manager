@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
-import type { DocHandle } from '@/core/engine/types';
+import type { DocHandle, History } from '@/core/engine/types';
 import { t } from '@/core/i18n';
 import { ask } from '@/paper/state/ask';
 import type { Current } from '@/core/lib/fileActions';
@@ -13,6 +13,8 @@ import { libraryActions } from '@/paper/state/library';
 import { drafting, useDrafts } from './drafts';
 
 /** A form field being typed in commits its text when it loses focus: before saving, printing or sharing. */
+const NO_STEPS: History = { undo: 0, redo: 0 };
+
 function commitField() {
   if (Platform.OS !== 'web') return;
   const el = document.activeElement as HTMLElement | null;
@@ -34,6 +36,19 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
   // `dirty` as of now, for a Back that comes before the next render (a field's blur commits it just before).
   const dirtyNow = useRef(false);
   const release = useRef<() => void>(() => {});
+  // Per handle: the document opened again (its details saved, its text added) starts without steps.
+  const [kept, setKept] = useState<{ handle: DocHandle; history: History }>({ handle, history: NO_STEPS });
+  const history = kept.handle === handle ? kept.history : NO_STEPS;
+  const steps = useRef<{ handle: DocHandle; history: History; savedAt: number }>({ handle, history: NO_STEPS, savedAt: 0 });
+  const setHistory = useCallback(
+    (h: History) => {
+      // Steps back to the file as last saved (as opened, at first): there, nothing is unsaved.
+      const savedAt = steps.current.handle === handle ? steps.current.savedAt : 0;
+      steps.current = { handle, history: h, savedAt };
+      setKept({ handle, history: h });
+    },
+    [handle],
+  );
 
   const markDirty = useCallback(() => {
     edits.current++;
@@ -41,6 +56,26 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
     setDirty(true);
   }, []);
   const clearNotice = useCallback(() => setNotice(null), []);
+
+  /** Before each change: undo comes back to here. */
+  const step = useCallback(() => void handle.step().then(setHistory, () => {}), [handle, setHistory]);
+  /** One change back (or forward): every page is drawn again. */
+  const travel = useCallback(
+    async (back: boolean) => {
+      commitField();
+      const h = await (back ? handle.undo() : handle.redo()).catch(() => null);
+      if (!h) return false;
+      setHistory(h);
+      edits.current++;
+      const clean = h.undo === steps.current.savedAt;
+      dirtyNow.current = !clean;
+      setDirty(!clean);
+      return true;
+    },
+    [handle, setHistory],
+  );
+  const undo = useCallback(() => travel(true), [travel]);
+  const redo = useCallback(() => travel(false), [travel]);
 
   const save = useCallback(async () => {
     commitField();
@@ -57,6 +92,7 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
     libraryActions().patchDoc(doc.id, { bytes: bytes.byteLength });
     invalidate(doc.id);
     if (edits.current === saved) {
+      if (steps.current.handle === handle) steps.current.savedAt = steps.current.history.undo;
       dirtyNow.current = false;
       setDirty(false);
     }
@@ -104,5 +140,5 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
     return () => unhold();
   }, [unsaved, focused]);
 
-  return { dirty, unsaved, markDirty, save, current, leave, notice, clearNotice };
+  return { dirty, unsaved, markDirty, step, history, undo, redo, save, current, leave, notice, clearNotice };
 }

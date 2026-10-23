@@ -147,8 +147,8 @@ export function SearchResults({
 
 const styles = StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: space.xl - 4, paddingRight: space.sm, marginBottom: space.md, minHeight: 40 },
-  field: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 40, borderRadius: radius.md, paddingHorizontal: space.md },
-  input: { flex: 1, height: 40, fontFamily: fonts.sans, fontSize: 15, outlineStyle: 'none' } as object,
+  field: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 40, borderRadius: radius.md, paddingHorizontal: space.md },
+  input: { flex: 1, minWidth: 0, height: 40, fontFamily: fonts.sans, fontSize: 15, outlineStyle: 'none' } as object,
   status: { paddingHorizontal: space.xl - 4, paddingTop: space.md, paddingBottom: space.sm },
   hit: { flexDirection: 'row', gap: space.sm, paddingVertical: space.md, paddingHorizontal: space.xl - 4 },
 });

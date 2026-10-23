@@ -61,6 +61,8 @@ const sortName: Record<Sort, string> = { opened: t.sortOpened, date: t.sortDate,
 const AHEAD = 1500;
 
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
+/** List column width from which every filter has its own chip. */
+const ROOMY = 640;
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
 /** What the screen shows: the search, filters and the order. */
 type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; relevance: boolean };
@@ -336,6 +338,8 @@ export default function Documents() {
   const nothing = ready && all.length === 0 && !searching;
   const layout = useLayout();
   const column = columnWidth(mainWidth);
+  // A wide list shows every filter, not one button for them.
+  const roomy = column >= ROOMY;
   const grid = gridOf(column);
   // Room for the Add button (and the action bar while picking).
   const bottom = insets.bottom + space.xxxl + 56 + (selected ? 72 : 0);
@@ -490,11 +494,20 @@ export default function Documents() {
           )}
           {/* One row: the filters (first: always in reach), sync issues, and the saved views. */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
-            <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
+            {roomy ? (
+              // Room for every filter: each one click away (those without values in these documents left out).
+              <>
+                {FACETS.filter((f) => counts[f].length > 0 || filter[f]).map((f) => (
+                  <Chip key={f} testID={`facet-${f}`} icon={facetIcon[f]} label={filter[f] ?? facetName[f]} on={!!filter[f]} more onPress={() => choose(f)} />
+                ))}
+                {active > 0 && <Chip testID="facet-clear" icon="close" label={t.clearFilters} onPress={() => setFilter({})} />}
+              </>
+            ) : (
+              <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
+            )}
             {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
-            {FACETS.filter((f) => filter[f]).map((f) => (
-              <Chip key={f} testID={`facet-${f}`} label={filter[f]!} on onPress={() => choose(f)} />
-            ))}
+            {!roomy &&
+              FACETS.filter((f) => filter[f]).map((f) => <Chip key={f} testID={`facet-${f}`} label={filter[f]!} on onPress={() => choose(f)} />)}
             {views.map((v) => {
               const on = v === current;
               return (
@@ -623,7 +636,7 @@ function Empty({ reading, onAdd }: { reading: string | null; onAdd?: () => void 
 }
 
 /** A small pill: somewhere to go (the inbox, sync issues), the filter button, or a filter in use. */
-function Chip({ testID, icon, label, count, on, onPress }: { testID: string; icon?: IconName; label: string; count?: number; on?: boolean; onPress: () => void }) {
+function Chip({ testID, icon, label, count, on, more, onPress }: { testID: string; icon?: IconName; label: string; count?: number; on?: boolean; more?: boolean; onPress: () => void }) {
   const p = usePalette();
   return (
     <Pressable
@@ -641,7 +654,7 @@ function Chip({ testID, icon, label, count, on, onPress }: { testID: string; ico
           {count}
         </T>
       )}
-      {!icon && <Icon name="chevronDown" size={14} color={p.muted} />}
+      {(!icon || more) && <Icon name="chevronDown" size={14} color={p.muted} />}
     </Pressable>
   );
 }

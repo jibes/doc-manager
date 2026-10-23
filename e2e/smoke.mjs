@@ -399,8 +399,10 @@ async function tagged() {
 
 /** Opened from elsewhere, a document is only viewed: ⋯ → Keep in Tessel makes it the library's. */
 async function keepOpen(page) {
-  await page.getByTestId('open-more').locator('visible=true').click();
-  await page.getByTestId('menu-keep').click();
+  // Wide desktop windows have the actions in the bar.
+  const keep = page.getByTestId('menu-keep').locator('visible=true');
+  if (!(await keep.count())) await page.getByTestId('open-more').locator('visible=true').click();
+  await keep.click();
   await page.getByText('Kept in Tessel.').waitFor({ timeout: 10000 }).catch(() => {});
   // The menu has closed and the reader shows the kept document before anything else is pressed.
   await page.waitForTimeout(500);
@@ -1447,11 +1449,32 @@ async function aiReading() {
   });
   check(named.includes('2026-10-02 Musterwerke Zürich – Rechnung 40217.pdf'), `ai: …and its file (${named})`);
   await docRows(page).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(2600);
+  await vis('open-more').click();
+  check((await page.getByTestId('menu-improve').count()) === 1, 'ai: a scan can be read with AI again');
+  await page.keyboard.press('Escape');
   await switchView(page);
   await page.waitForFunction(() => /bez zum 30\.10\.2026/.test(document.body.innerText) && /ACME Instruments GmbH/.test(document.body.innerText), null, { timeout: 30000 }).then(
     () => check(true, 'ai: corrected and added text is in the PDF'),
     () => check(false, 'ai: corrected and added text is in the PDF'),
   );
+
+  // A document with text of its own: nothing for the model to read again, but it suggests the details still empty.
+  await openFixture(page, 'columns.pdf');
+  await page.waitForTimeout(2600);
+  await vis('open-more').click();
+  check((await page.getByTestId('menu-improve').count()) === 0, 'ai: a typed document isn’t offered to be read with AI');
+  await page.getByTestId('menu-details').click();
+  await vis('detail-sender').fill('');
+  const before = sent.length;
+  await vis('details-suggest').click();
+  let suggested = '';
+  for (let i = 0; i < 40 && suggested !== 'Musterwerke Zürich'; i++) suggested = await page.waitForTimeout(250).then(() => vis('detail-sender').inputValue());
+  const prompt = JSON.stringify(sent.slice(before).at(-1)?.body ?? {});
+  check(suggested === 'Musterwerke Zürich' && (await vis('detail-type').inputValue()) === 'Rechnung' && /columns/i.test(prompt), `ai: the model suggests the details of a document already kept (${suggested})`);
+  await vis('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 }).catch(() => {});
 
   // OpenAI-compatible, and the server fails: saved anyway, with the device's text, and the user is told.
   await page.goto(BASE);
@@ -1734,19 +1757,21 @@ async function documentsScreen() {
   await vis('docs-sort').click();
   await page.getByTestId('action-sort-date').click();
 
-  // Filters: one button lists them (those with values here), and the chosen ones show as chips.
-  await vis('docs-filter').click();
-  await page.getByTestId('action-facet-type').waitFor();
-  const offered = await page.getByTestId('action-sheet').innerText();
-  await page.getByTestId('action-facet-type').click();
+  // Filters: on a wide list each has its chip (those with values here), showing what is chosen.
+  const offered = (await page.locator('[data-testid^="facet-"]:visible').allInnerTexts()).join(' / ');
+  check((await vis('docs-filter').count()) === 0 && /Type/.test(offered) && !/Place/.test(offered), `documents: every filter is in reach (no place: that is the switch) (${offered})`);
+  await vis('facet-type').click();
   await page.getByTestId('action-sheet').getByText('Rechnung · 1').click();
-  check(/Type/.test(offered) && !/Place/.test(offered), `documents: the filter button lists the filters (no place: that is the switch) (${offered.replace(/\n/g, ' / ')})`);
   check((await count()) === '1 DOCUMENT' && /Old title/.test(await vis('archive-hit').first().innerText()) && /Rechnung/.test(await vis('facet-type').innerText()), 'documents: choosing a type narrows the list, and shows it');
-  await vis('docs-filter').click();
-  await page.getByTestId('action-facet-tag').click();
+  await vis('facet-tag').click();
   const tagged = await page.getByTestId('action-sheet').getByText('Steuer · 1').waitFor({ timeout: 5000 }).then(() => true, () => false);
   await page.getByTestId('action-any').click();
   check(tagged, 'documents: tags are counted within the chosen type');
+  // A phone's list has one button for them, the chosen ones as chips beside it.
+  await page.setViewportSize({ width: 390, height: 800 });
+  await vis('docs-filter').waitFor();
+  check((await vis('facet-tag').count()) === 0 && /Rechnung/.test(await vis('facet-type').innerText()), 'documents: narrow, the filters are behind one button');
+  await page.setViewportSize({ width: 1280, height: 800 });
 
   // Save the view: it is kept in Archive/.tessel.
   await vis('save-view').click();
@@ -2342,6 +2367,132 @@ async function pageNotes() {
   await ctx.close();
 }
 
+// A PDF scanned by another app, cleaned up in the scanner: its pages come in, get a filter, and go back into
+// the same file (no second document), its details kept and its text read.
+async function again() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`again: ${e.message}`));
+  await openFixture(page, 'scan.pdf');
+  // Kept, its text is read first (nothing is offered meanwhile).
+  await page.getByTestId('searchable-progress').waitFor({ timeout: 15000 }).catch(() => {});
+  await page.getByTestId('searchable-progress').waitFor({ state: 'detached', timeout: 180000 });
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('detail-sender').fill('Nordkorn');
+  await page.getByTestId('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+  await page.waitForTimeout(2600);
+  const bytes = () => page.evaluate(async () => (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Tessel')).getFileHandle('scan.pdf')).getFile()).size);
+  const before = await bytes().catch(() => 0);
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-again').click();
+  await page.waitForURL(/\/scan\/review/, { timeout: 60000 });
+  await page.getByTestId('scan-tile').nth(1).waitFor({ timeout: 60000 });
+  check((await page.getByTestId('scan-tile').count()) === 2 && (await page.getByTestId('scan-again').isVisible()), 'again: the document’s pages are in the scanner, saying they replace its own');
+  await page.getByTestId('scan-filter-bw').click();
+  await page.getByTestId('scan-save').click();
+  await page.waitForURL(/\/read\//, { timeout: 300000 });
+  await page.getByText('Pages cleaned up.').waitFor({ timeout: 60000 }).then(() => check(true, 'again: saved back into the document'), () => check(false, 'again: saved back into the document'));
+  await page.waitForSelector('[data-testid=text-layer] span', { timeout: 30000 }).catch(() => {});
+  const text = await page.$$eval('[data-testid=text-layer] span', (s) => s.map((x) => x.textContent).join(' '));
+  const after = await bytes().catch(() => 0);
+  check(before > 0 && after > 0 && after !== before && /quick brown fox/.test(text), `again: its file has the new pages, with their text (${before} → ${after} bytes; ${text.slice(0, 40)}…)`);
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  check((await page.getByTestId('detail-sender').inputValue()) === 'Nordkorn', 'again: its details are kept');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('back').click();
+  await docRows(page).first().waitFor();
+  await page.waitForTimeout(800);
+  check((await docRows(page).count()) === 1, 'again: no second document');
+  await ctx.close();
+}
+
+// Undo and redo: notes and highlights come and go again, Save follows whether the file differs from the saved one.
+async function undoRedo() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`undo: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  // The notes listed beside the pages (read again after every change).
+  const notes = async () => {
+    await page.waitForTimeout(800);
+    return (await page.getByTestId('note-row').allInnerTexts()).join(' | ');
+  };
+  check((await page.getByTestId('undo').count()) === 0, 'undo: nothing to undo at first');
+  await page.getByTestId('open-find').click();
+  await page.getByTestId('tab-notes').click();
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('First');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Second');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('undo').waitFor();
+  check(/First/.test(await notes()) && /Second/.test(await notes()), 'undo: two notes added');
+  await page.getByTestId('undo').click();
+  await page.waitForTimeout(500);
+  const once = await notes();
+  check(/First/.test(once) && !/Second/.test(once) && (await page.getByTestId('redo').count()) === 1, `undo: the last note is undone (${once})`);
+  await page.getByTestId('page-label').focus();
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(500);
+  check(!/First|Second/.test(await notes()) && (await page.getByTestId('save').count()) === 0, 'undo: ⌘Z undoes the first too: nothing left to save');
+  await page.keyboard.press('Control+Shift+z');
+  await page.keyboard.press('Control+y');
+  await page.waitForTimeout(500);
+  const again = await notes();
+  check(/First/.test(again) && /Second/.test(again) && (await page.getByTestId('save').count()) === 1 && (await page.getByTestId('redo').count()) === 0, `undo: redo brings both back (${again})`);
+  // Saved, then undone: the file differs from the saved one again; redone, it doesn't.
+  await page.getByTestId('save').click();
+  await page.getByTestId('save').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  await page.getByTestId('undo').click();
+  await page.getByTestId('save').waitFor({ timeout: 5000 }).catch(() => {});
+  const dirty = (await page.getByTestId('save').count()) === 1;
+  await page.getByTestId('redo').click();
+  await page.waitForTimeout(500);
+  check(dirty && (await page.getByTestId('save').count()) === 0, 'undo: Save is offered only while the document differs from the saved file');
+  await ctx.close();
+}
+
+// Wide desktop windows: Find and Details stay open beside the pages, each closed on its own (and remembered);
+// the document's actions are in the bar, one click each.
+async function docked() {
+  const ctx = await newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`docked: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  const side = page.getByTestId('side-panels');
+  const shown = (id) => side.getByTestId(id).isVisible().catch(() => false);
+  check((await shown('find-panel')) && (await shown('details-panel')), 'docked: Find and Details are open beside the pages');
+  const sideBox = await side.boundingBox();
+  const pagesBox = await page.getByTestId('pages').boundingBox();
+  check(!!sideBox && !!pagesBox && pagesBox.x + pagesBox.width <= sideBox.x + 1, 'docked: the pages make room for them (nothing covered)');
+  check((await page.getByTestId('open-more').count()) === 0 && (await page.getByTestId('menu-print').isVisible()) && (await page.getByTestId('menu-share').isVisible()), 'docked: every action is in the bar, no ⋯ menu');
+  await page.getByTestId('open-find').click();
+  check(!(await shown('find-panel')) && (await shown('details-panel')), 'docked: Find closes on its own');
+  await page.getByTestId('menu-details').click();
+  check((await side.count()) === 0, 'docked: with both closed the pages have the whole window');
+  await page.goto(BASE);
+  await docRows(page).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(800);
+  check((await side.count()) === 0, 'docked: closed stays closed');
+  await page.keyboard.press('Control+f');
+  await page.waitForTimeout(400);
+  check((await shown('find-panel')) && (await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'search-input', 'docked: ⌘F opens Find with its field ready');
+  await page.keyboard.type('the');
+  await page.waitForFunction(() => /\d+ results?/.test(document.body.innerText), null, { timeout: 10000 }).then(() => check(true, 'docked: searching beside the pages'), () => check(false, 'docked: searching beside the pages'));
+  await page.getByTestId('menu-details').click();
+  await side.getByTestId('detail-title').fill('Rechnung 40217');
+  await side.getByTestId('details-save').click();
+  await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  check((await side.getByTestId('detail-title').inputValue()) === 'Rechnung 40217' && (await shown('details-panel')), 'docked: Details stay open after saving, showing what was saved');
+  await ctx.close();
+}
+
 // A browser library from 2.x (a copy in IndexedDB, where it was left on the record): the copy becomes a file in the
 // browser's own Tessel folder, and where it was left is in this device's cache, by its content.
 async function upgrade() {
@@ -2898,12 +3049,15 @@ await step('shell', shellBridge);
 await step('forms', forms);
 await step('annotations', annotations);
 await step('page-notes', pageNotes);
+await step('undo', undoRedo);
+await step('again', again);
+await step('docked', docked);
 await step('upgrade', upgrade);
 await step('linked', linked);
 await step('tessel-folder', tesselFolder);
 await step('tidy', tidy);
 await step('folders-shell', foldersShell);
-await step('desktop', () => run('desktop', { width: 1440, height: 900 }, false));
+await step('desktop', () => run('desktop', { width: 1280, height: 860 }, false));
 await step('mobile', () => run('mobile', { width: 390, height: 844 }, true));
 await browser.close();
 

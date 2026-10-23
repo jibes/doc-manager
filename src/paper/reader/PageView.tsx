@@ -25,6 +25,8 @@ type Props = {
   onPress?: () => void;
   onLink?: (link: PageLink) => void;
   /** A form field on this page was changed. */
+  /** Before a field changes (undo comes back to here). */
+  beforeEdit?: () => void;
   onEdited?: () => void;
 };
 
@@ -48,7 +50,7 @@ function usePageExtras(handle: DocHandle, page: number) {
 }
 
 /** Fillable fields of a page (forms only), and a setter that re-renders the page with the new value. */
-function useFields(cache: RasterCache, page: number, onEdited?: () => void) {
+function useFields(cache: RasterCache, page: number, beforeEdit?: () => void, onEdited?: () => void) {
   const { handle } = cache;
   const [fields, setFields] = useState<{ page: number; list: FormField[] } | null>(null);
   // Read again whenever the page changes (a note deleted shifts the places fields are addressed by).
@@ -62,13 +64,15 @@ function useFields(cache: RasterCache, page: number, onEdited?: () => void) {
     };
   }, [handle, page, version]);
   const change = useCallback(
-    (index: number, value: FormValue) =>
+    (index: number, value: FormValue) => (
+      beforeEdit?.(),
       handle.setField(page, index, value).then((list) => {
         setFields({ page, list });
         cache.invalidate(page);
         onEdited?.();
-      }),
-    [handle, cache, page, onEdited],
+      })
+    ),
+    [handle, cache, page, beforeEdit, onEdited],
   );
   return { fields: fields?.page === page ? fields.list : null, change };
 }
@@ -92,10 +96,10 @@ export function useRaster(cache: RasterCache, page: number, cssWidth: number, ur
   return (fetched?.page === page ? fetched.raster : undefined) ?? cache.best(page);
 }
 
-export const PageView = memo(function PageView({ page, width, height, cache, palette, hits, activeHit, onPress, onLink, onEdited }: Props) {
+export const PageView = memo(function PageView({ page, width, height, cache, palette, hits, activeHit, onPress, onLink, beforeEdit, onEdited }: Props) {
   const raster = useRaster(cache, page, width);
   const extras = usePageExtras(cache.handle, page);
-  const form = useFields(cache, page, onEdited);
+  const form = useFields(cache, page, beforeEdit, onEdited);
   return (
     <Pressable
       onPress={onPress}

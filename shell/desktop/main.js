@@ -2,7 +2,7 @@
 // Chromium does folders, storage and the PDF engine as in the browser; this file adds what a browser tab can't:
 // AI requests without the browser's cross-origin rules, "Open with" for PDFs, and access to the chosen folder
 // that survives a restart.
-const { app, BrowserWindow, ipcMain, net, protocol, session, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, net, protocol, screen, session, shell, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -65,9 +65,11 @@ async function serve(request) {
 const ours = (origin) => typeof origin === 'string' && origin.startsWith(ORIGIN);
 
 function createWindow() {
+  // Room for the pages with Find and Details beside them, where the screen has it.
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    width: Math.min(1440, width),
+    height: Math.min(900, height),
     minWidth: 380,
     minHeight: 520,
     backgroundColor: '#ECE8DF',

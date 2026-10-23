@@ -9,6 +9,7 @@ import { dropRenders } from './renderCache';
 import { forgetPage } from './services';
 import type { SaveProgress } from './save';
 import type { Page } from './types';
+import type { Details } from '@/paper/archive/pdfInfo';
 
 /**
  * The document being scanned. Pages are replaced, never mutated. Kept in IndexedDB as it changes, so a
@@ -16,7 +17,9 @@ import type { Page } from './types';
  * crop, filter, title) together, once per change (a few hundred bytes).
  */
 type PageRecord = Omit<Page, 'source'>;
-type Draft = { pages: PageRecord[]; title: string };
+/** A document's pages scanned again (its filters, crops): saving writes them into that document's file. */
+export type Replaces = { id: string; title: string; details: Details; other: Record<string, string> };
+type Draft = { pages: PageRecord[]; title: string; replaces?: Replaces | null };
 
 let db: UseStore | null = null;
 /** Opened on first use: the store is web only. */
@@ -26,6 +29,7 @@ const photoKey = (id: string) => `photo:${id}`;
 type ScanState = {
   pages: Page[];
   title: string;
+  replaces: Replaces | null;
   loaded: boolean;
   /** Read with the AI model when saved: switched on for this scan only. */
   aiRead: boolean;
@@ -47,6 +51,8 @@ type ScanState = {
   /** Gives every page this filter; returns a function that puts each page's previous filter back. */
   applyToAll(filter: FilterId): () => void;
   setTitle(title: string): void;
+  /** Starts scanning a document's pages again (the scan is empty). */
+  setReplaces(replaces: Replaces | null): void;
   setAiRead(on: boolean): void;
   /** Undos offered so far do nothing (the document is being saved as it is now). */
   seal(): void;
@@ -85,9 +91,9 @@ export const useScan = create<ScanState>((setState, getState) => {
   const failed = () => setState({ unsaved: true });
   const flush = () => {
     pending = false;
-    const { pages, title, loaded } = getState();
+    const { pages, title, replaces, loaded } = getState();
     if (!loaded || unreadable) return;
-    const draft: Draft = { pages: [...pages.map(({ source: _, ...rest }) => rest), ...unread], title };
+    const draft: Draft = { pages: [...pages.map(({ source: _, ...rest }) => rest), ...unread], title, replaces };
     set('draft', draft, store()).catch(failed);
   };
   const savePhoto = (page: Page) => {
@@ -143,6 +149,7 @@ export const useScan = create<ScanState>((setState, getState) => {
   return {
     pages: [],
     title: '',
+    replaces: null,
     loaded: false,
     aiRead: false,
     unsaved: false,
@@ -170,7 +177,7 @@ export const useScan = create<ScanState>((setState, getState) => {
           }
         }
         // Pages taken while the draft was loading go after the saved ones (and into the draft with them).
-        setState((s) => ({ pages: [...pages, ...s.pages], title: s.title || draft?.title || '', loaded: true }));
+        setState((s) => ({ pages: [...pages, ...s.pages], title: s.title || draft?.title || '', replaces: s.replaces ?? draft?.replaces ?? null, loaded: true }));
         save();
       })();
       return restoring;
@@ -278,6 +285,11 @@ export const useScan = create<ScanState>((setState, getState) => {
       save();
     },
 
+    setReplaces(replaces) {
+      setState({ replaces });
+      save();
+    },
+
     setAiRead: (aiRead) => setState({ aiRead }),
 
     seal() {
@@ -293,7 +305,7 @@ export const useScan = create<ScanState>((setState, getState) => {
       const kept = ids ? pages.filter((p) => !ids.includes(p.id)) : [];
       for (const page of gone) forget(page);
       // Pages taken while it was saved are a new document: its own title, and no AI reading unless switched on for it.
-      setState({ pages: kept, title: '', aiRead: false, ...(kept.length ? {} : { unsaved: false }) });
+      setState({ pages: kept, title: '', aiRead: false, replaces: null, ...(kept.length ? {} : { unsaved: false }) });
       // Nothing left to prepare: the export cache empties and its workers close.
       if (!kept.length) resetExports();
       const lost = ids ? [] : unread;
