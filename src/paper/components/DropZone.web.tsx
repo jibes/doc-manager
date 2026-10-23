@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { t } from '@/core/i18n';
 import { fonts, radius } from '@/core/design/tokens';
+import { desktop } from '@/core/lib/desktop';
 import { isFileHandle, type FileHandle } from '@/core/lib/fsa';
 import { itemsFromFiles, itemsFromHandles } from '@/paper/state/pick';
 import type { ImportItem } from '@/paper/state/library';
@@ -56,6 +57,11 @@ export function DropZone({ children, onFiles }: { children: ReactNode; onFiles: 
     window.addEventListener('drop', drop);
     (window as unknown as { launchQueue?: LaunchQueue }).launchQueue?.setConsumer(async ({ files }) => {
       const items = await itemsFromHandles(files);
+      if (items.length) cb.current(items);
+    });
+    // The desktop app: PDFs opened with Tessel from the Finder or Explorer (or dropped on its Dock icon).
+    desktop?.onOpen((files) => {
+      const items = itemsFromFiles(files.map((f) => new File([f.bytes as Uint8Array<ArrayBuffer>], f.name, { type: 'application/pdf' })));
       if (items.length) cb.current(items);
     });
     // Files from other apps in the Android app: see ShellOpen.

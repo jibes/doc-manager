@@ -1,0 +1,69 @@
+{
+  "name": "tessel-desktop",
+  "productName": "Tessel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tessel for macOS, Windows and Linux: the web app in its own window.",
+  "main": "main.js",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "smoke": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.16.1",
+    "playwright-core": "1.64.0"
+  },
+  "build": {
+    "appId": "app.tessel.desktop",
+    "productName": "Tessel",
+    "files": [
+      "main.js",
+      "preload.js",
+      "www/**/*"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF document",
+        "role": "Viewer",
+        "mimeType": "application/pdf"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "www/icons/icon-512.png",
+      "identity": null,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Tessel uses the camera to scan pages. The pictures stay on this Mac."
+      }
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "www/icons/icon-512.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office",
+      "icon": "www/icons/icon-512.png"
+    },
+    "artifactName": "tessel-${version}-${os}.${ext}",
+    "publish": null
+  }
+}

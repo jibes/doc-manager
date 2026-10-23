@@ -1,3 +1,4 @@
+import { desktop } from '@/core/lib/desktop';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
 import type { PdfWord } from './engine/pdf/writer';
@@ -180,6 +181,17 @@ export function parseResult(text: string, pageCount: number): AiResult {
  * own host, which an address's CORS rules (set up for the web app's address, or for none) don't allow.
  */
 async function post(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
+  // The desktop app makes the request itself: an address's cross-origin rules don't know the app's origin.
+  if (desktop) {
+    init.signal?.throwIfAborted();
+    const r = await desktop
+      .http({ url, method: 'POST', headers: init.headers, body: init.body }, (abort) => init.signal?.addEventListener('abort', abort, { once: true }))
+      .catch((e: unknown) => {
+        if (init.signal?.aborted) throw init.signal.reason;
+        throw new Error(`${AI_UNREACHABLE}:${new URL(url).host}`, { cause: e });
+      });
+    return new Response(r.body, { status: r.status });
+  }
   if (!shell)
     return fetch(url, { method: 'POST', ...init }).catch((e: unknown) => {
       // No answer at all (offline, a wrong address, or the browser's rules against the request): said as such.

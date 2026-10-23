@@ -47,6 +47,12 @@ F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6
 
 Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release when `package.json`'s version on main is new (or for a `v*` tag, or a manual run of the Android workflow with a version) (signing key from the `ANDROID_*` repository secrets).
 
+## Install on macOS
+
+Tessel for macOS is on the [Releases](https://github.com/jibes/doc-manager/releases) page too: `tessel-x.y.z-mac.dmg` (Apple silicon and Intel). It isn't signed with an Apple Developer ID, so the first start needs a right click on Tessel in Applications → **Open** → **Open** (or System Settings → Privacy & Security → **Open Anyway**); after that it starts like any app.
+
+The app is the web app in its own window (`shell/desktop`, Electron): folders, the browser's own storage, the PDF engine and on-device text recognition are Chromium's, as on the website. The shell adds what a browser tab can't: AI requests made by the app (an address's cross-origin rules don't stop them), **Open with** and the Dock icon for PDFs, and access to the chosen Tessel folder that stays after a restart (no "let Tessel in again"). The same shell builds for Windows and Linux (`npx electron-builder --win` / `--linux` in `shell/desktop`). `npm run build:desktop-web`, then `npm start` in `shell/desktop`, runs it locally; `npm run smoke` there starts it for real and checks it (CI does on every push, under a virtual display).
+
 ## Architecture
 
 ```
@@ -65,6 +71,7 @@ src/paper/            Tessel's document management
   components/ state/    shared UI; zustand stores (library links, prefs, device cache, viewed history)
 modules/pdf-engine/   local Expo module — iOS: PDFKit (Swift), Android: PdfRenderer (Kotlin)
 shell/android/        the Android app: WebView shell, folders, bridge
+shell/desktop/        the desktop app (macOS, Windows, Linux): Electron window, AI requests, Open with
 ```
 
 UI depends only on `src/core/engine/types.ts`. Platform files (`*.web.ts`) pick the implementation at bundle time.

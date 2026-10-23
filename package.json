@@ -71,6 +71,7 @@
     "lint": "expo lint",
     "test:e2e": "node e2e/smoke.mjs",
     "test": "vitest run",
+    "build:desktop-web": "npm run engine && expo export -p web --output-dir shell/desktop/www && OUT_DIR=shell/desktop/www node scripts/postexport.mjs",
     "build:android-web": "npm run engine && expo export -p web --output-dir shell/android/app/src/main/assets/www && OUT_DIR=shell/android/app/src/main/assets/www node scripts/postexport.mjs",
     "test:scan": "node e2e/scan/run.mjs"
   },

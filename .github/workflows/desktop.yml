@@ -1,0 +1,95 @@
+name: Desktop
+
+# Tessel for macOS (and, from the same shell, Windows and Linux): the web app in an Electron window
+# (shell/desktop). Every push to main starts it for real on Linux and builds the macOS app; a new version in
+# package.json adds the macOS app to that version's GitHub release once the Android workflow has created it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:desktop-web
+      - run: npm ci
+        working-directory: shell/desktop
+      - name: Desktop smoke test
+        working-directory: shell/desktop
+        run: xvfb-run -a npm run smoke
+
+  mac:
+    needs: smoke
+    runs-on: macos-latest
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:desktop-web
+      - run: npm ci
+        working-directory: shell/desktop
+      - id: version
+        name: Version
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          # A version whose tag doesn't exist yet is being released by this push (the Android workflow tags it).
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then echo "release=true" >> "$GITHUB_OUTPUT"; fi
+          echo "name=$PKG" >> "$GITHUB_OUTPUT"
+      - name: Build the macOS app
+        working-directory: shell/desktop
+        # Not signed (no Apple Developer ID): macOS asks once, on the first start (Open from the context menu).
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac --publish never -c.extraMetadata.version=${{ steps.version.outputs.name }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tessel-mac
+          path: |
+            shell/desktop/dist/*.dmg
+            shell/desktop/dist/*.zip
+
+  release:
+    needs: mac
+    if: needs.mac.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: tessel-mac
+          path: out
+      # The Android workflow publishes the release (after the Web checks): the macOS app joins it there.
+      - name: Add to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.mac.outputs.version }}
+        run: |
+          for _ in $(seq 1 90); do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" out/* -R "$GITHUB_REPOSITORY" --clobber
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::Release $TAG didn't appear within 30 minutes"; exit 1
