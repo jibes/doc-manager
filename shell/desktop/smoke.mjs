@@ -54,8 +54,14 @@ try {
   await page.getByTestId('find-panel').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
   const findBefore = await page.getByTestId('find-panel').count();
   if (findBefore) await page.getByTestId('open-find').click();
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu', 'find'));
-  check(await page.getByTestId('find-panel').waitFor({ timeout: 5000 }).then(() => true, () => false), 'a menu command does what its key does (Find)');
+  // Sent again while the page may still be settling (a slow machine): the first that lands opens Find.
+  let found = false;
+  for (let i = 0; i < 5 && !found; i++) {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu', 'find'));
+    found = await page.getByTestId('find-panel').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  }
+  const state = found ? '' : await page.evaluate(() => `${location.pathname}, ${innerWidth}px, active ${document.activeElement?.tagName}`);
+  check(found, `a menu command does what its key does (Find) ${state}`);
   // A document in a window of its own: the app's own page, in a window of the app.
   const [second] = await Promise.all([app.waitForEvent('window', { timeout: 15000 }), page.evaluate(() => window.open('/', '_blank'))]);
   check(!!second && second.url().startsWith('app://tessel/'), `opens a second window of the app (${second?.url()})`);

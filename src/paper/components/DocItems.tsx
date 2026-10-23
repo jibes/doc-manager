@@ -111,6 +111,8 @@ export type DocItemProps = {
 
 export type Drag = { keys: () => string[]; type: string; file: () => { name: string; url: string } | undefined; prepare: () => void };
 
+const finePointer = () => typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
+
 /** Lets a row or tile be dragged: into other apps as a file, onto a tag in Tessel as documents (a ref for it). */
 function useDrag(drag: Drag | undefined) {
   const latest = useRef(drag);
@@ -123,7 +125,8 @@ function useDrag(drag: Drag | undefined) {
     detach.current();
     detach.current = () => {};
     const node = view as unknown as HTMLElement | null;
-    if (Platform.OS !== 'web' || !node || !latest.current) return;
+    // Only with a mouse or trackpad: a finger's long press picks (and a phone's file needn't be read ahead).
+    if (Platform.OS !== 'web' || !node || !latest.current || !finePointer()) return;
     node.draggable = true;
     const start = (e: DragEvent) => {
       const d = latest.current;
@@ -133,7 +136,7 @@ function useDrag(drag: Drag | undefined) {
       const file = d.file();
       if (file) e.dataTransfer.setData('DownloadURL', `application/pdf:${file.name}:${file.url}`);
     };
-    const enter = () => latest.current?.prepare();
+    const enter = (e: PointerEvent) => e.pointerType === 'mouse' && latest.current?.prepare();
     node.addEventListener('dragstart', start);
     node.addEventListener('pointerenter', enter);
     detach.current = () => {
