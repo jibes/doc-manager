@@ -2409,6 +2409,65 @@ async function again() {
   await ctx.close();
 }
 
+// The list on a wide desktop window: a document opens beside it, ↑ ↓ go through them, ⌘K goes anywhere; on a
+// narrower one Space looks at a document without opening it and ⌘⌫ deletes it.
+async function desktopList() {
+  const ctx = await newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`desktop list: ${e.message}`));
+  await openFixture(page, 'xrefstream.pdf');
+  await openFixture(page, 'columns.pdf');
+  await page.goto(BASE);
+  await docRows(page).nth(1).waitFor();
+  const pane = page.getByTestId('doc-pane');
+  check((await pane.isVisible()) && /Choose a document/.test(await pane.innerText()), 'desktop list: room beside the list for a document');
+  const paneTitle = () => pane.getByTestId('reader-title').innerText().catch(() => '');
+  await docRows(page).first().click();
+  await pane.getByTestId('reader').waitFor();
+  const first = await paneTitle();
+  check((await docRows(page).first().getAttribute('aria-current')) === 'true' && (await page.getByTestId('docs-search').isVisible()), `desktop list: a document opens beside the list, which stays (${first})`);
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(1200);
+  const second = await paneTitle();
+  check(second !== first && (await docRows(page).nth(1).getAttribute('aria-current')) === 'true', `desktop list: ↓ opens the next one (${first} → ${second}, ${await docRows(page).nth(1).getAttribute('aria-current')})`);
+  await page.keyboard.press('Meta+k');
+  await page.getByTestId('palette').waitFor();
+  await page.getByTestId('palette-input').fill('old tit');
+  await page.getByTestId('palette-input').press('Enter');
+  await page.waitForTimeout(1200);
+  check((await page.getByTestId('palette').count()) === 0 && /Old title/.test(await paneTitle()), `desktop list: ⌘K goes to a document by its title (${await paneTitle()})`);
+  await page.keyboard.press('Meta+k');
+  await page.getByTestId('palette-input').fill('settings');
+  check((await page.getByTestId('palette-act-settings').count()) === 1, 'desktop list: …and to actions');
+  await page.keyboard.press('Escape');
+  await pane.getByTestId('back').click();
+  check(/Choose a document/.test(await pane.innerText()), 'desktop list: closing it leaves the list alone');
+
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.waitForTimeout(500);
+  check((await pane.count()) === 0, 'desktop list: narrower, documents open as a screen again');
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press(' ');
+  await page.getByTestId('quick-look').waitFor();
+  const looked = await page.getByTestId('quick-look').innerText();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=quick-look] canvas')].some((c) => c.width > 100), null, { timeout: 15000 }).then(
+    () => check(true, `desktop list: Space shows the first page without opening it (${looked.split('\n')[0]})`),
+    () => check(false, 'desktop list: Space shows the first page without opening it'),
+  );
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(600);
+  check((await page.getByTestId('quick-look').innerText()) !== looked, 'desktop list: ↓ looks at the next one');
+  await page.keyboard.press(' ');
+  check((await page.getByTestId('quick-look').count()) === 0, 'desktop list: Space again closes it');
+  const before = await docRows(page).count();
+  await page.keyboard.press('Meta+Backspace');
+  await page.getByTestId('ask-confirm').click().catch(() => {});
+  await page.waitForTimeout(1500);
+  check((await docRows(page).count()) === before - 1, `desktop list: ⌘⌫ deletes the one with the cursor (${before} → ${await docRows(page).count()})`);
+  await ctx.close();
+}
+
 // Undo and redo: notes and highlights come and go again, Save follows whether the file differs from the saved one.
 async function undoRedo() {
   const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
@@ -3050,6 +3109,7 @@ await step('forms', forms);
 await step('annotations', annotations);
 await step('page-notes', pageNotes);
 await step('undo', undoRedo);
+await step('desktop-list', desktopList);
 await step('again', again);
 await step('docked', docked);
 await step('upgrade', upgrade);

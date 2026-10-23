@@ -26,7 +26,7 @@ function commitField() {
  * to the user's own file when it was opened in place, to the library copy otherwise. `unsaved`: those, or text
  * still being typed (a field, the details), which leaving asks about too.
  */
-export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
+export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, close: () => void = goBack) {
   const [dirty, setDirty] = useState(false);
   const typed = useDrafts((s) => s.field || s.details);
   const unsaved = dirty || typed;
@@ -107,14 +107,14 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true) {
   }, [handle]);
 
   const leave = useCallback(() => {
-    if (!dirtyNow.current && !drafting()) return goBack();
+    if (!dirtyNow.current && !drafting()) return close();
     void ask({ title: t.unsavedTitle, body: t.unsavedLeave, confirm: t.discard, destructive: true }).then((answer) => {
       if (answer === null) return;
       useDrafts.setState({ field: false, details: false });
       release.current();
-      goBack();
+      close();
     });
-  }, []);
+  }, [close]);
 
   const leaveRef = useRef(leave);
   useEffect(() => {

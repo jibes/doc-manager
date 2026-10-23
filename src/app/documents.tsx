@@ -1,11 +1,13 @@
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { router, useFocusEffect, useIsFocused, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ascending, FACETS, facetCounts, matches, placeOf, SORTS, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/paper/archive/facets';
 import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/paper/archive/indexer';
-import { HitRow } from '@/paper/archive/Results';
+import { HitRow, openDoc } from '@/paper/archive/Results';
+import { QuickLook } from '@/paper/archive/QuickLook';
+import { Palette, type PaletteItem } from '@/paper/components/Palette';
 import { duplicateGroups } from '@/paper/archive/duplicates';
 import { dropOldState } from '@/paper/archive/dirs';
 import { dropSources } from '@/paper/archive/tessel';
@@ -23,10 +25,12 @@ import { aiReady } from '@/paper/scan/ai';
 import { Toast } from '@/paper/components/Toast';
 import { useNotice } from '@/paper/components/useNotice';
 import { fonts, radius, space } from '@/core/design/tokens';
-import { opError, t } from '@/core/i18n';
+import { errorText, opError, t } from '@/core/i18n';
+import { shortcut } from '@/core/lib/keys';
+import { realTitle } from '@/paper/archive/pdfInfo';
 import { useThrottled } from '@/core/lib/useThrottled';
 import { showActions } from '@/paper/state/actions';
-import { ask } from '@/paper/state/ask';
+import { ask, useAsk } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { folders } from '@/core/lib/folders';
 import { useLibrary, type ImportItem } from '@/paper/state/library';
@@ -36,6 +40,8 @@ import { useInstall } from '@/core/lib/install';
 import { repo, type DocRecord } from '@/core/storage';
 import { useCache } from '@/paper/state/cache';
 import { refreshInboxCount, useInboxCount } from '@/paper/archive/inbox';
+import { closePane, showInPane, usePane } from '@/paper/state/pane';
+import { ReadView } from '@/paper/reader/ReadView';
 
 const newViewId = () => `v-${Date.now().toString(36)}`;
 
@@ -45,7 +51,7 @@ const SOURCE_URL = 'https://github.com/jibes/doc-manager';
 function openRecord(doc: DocRecord) {
   // A linked file may need the browser's OK again (after a restart); ask while the tap still counts as a gesture.
   const ready = doc.linked ? repo.requestAccess(doc.id).catch(() => false) : Promise.resolve(true);
-  ready.then(() => router.push({ pathname: '/read/[id]', params: { id: doc.id } }));
+  ready.then(async () => (await showInPane({ id: doc.id })) || router.push({ pathname: '/read/[id]', params: { id: doc.id } }));
 }
 
 /** Rows shown at first, and added each time the list is scrolled near its end. */
@@ -63,6 +69,9 @@ const AHEAD = 1500;
 const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null });
 /** List column width from which every filter has its own chip. */
 const ROOMY = 640;
+/** Window width from which a document opens beside the list, and the list's width then. */
+const SPLIT_MIN = 1300;
+const LIST_W = 500;
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
 /** What the screen shows: the search, filters and the order. */
 type Showing = { query: string; filter: Filter; sort: Sort; reverse: boolean; relevance: boolean };
@@ -86,7 +95,15 @@ export default function Documents() {
   const inboxHere = usePrefs((s) => s.inboxHere);
   const inboxCount = useInboxCount((s) => s.count);
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
-  const mainWidth = useMainWidth();
+  const winWidth = useMainWidth();
+  // A wide desktop window: the list, and beside it the document opened from it.
+  const split = Platform.OS === 'web' && winWidth >= SPLIT_MIN;
+  const mainWidth = split ? LIST_W : winWidth;
+  const pane = usePane((s) => s.doc);
+  useEffect(() => {
+    usePane.setState({ split });
+    return () => usePane.setState({ split: false });
+  }, [split]);
   // Folders read as sources before 3.2: let go of, once.
   useEffect(() => {
     void refreshInboxCount();
@@ -140,7 +157,7 @@ export default function Documents() {
   // When this device last opened (or added) each document: the library knows (files don't say), by document or file.
   const library = useLibrary((s) => s.docs);
   const cached = useCache((s) => s.docs);
-  const openedAt = useMemo(() => {
+  const liveOpenedAt = useMemo(() => {
     const byKey = new Map<string, number>();
     for (const d of library) {
       if (d.viewed) continue;
@@ -153,6 +170,13 @@ export default function Documents() {
     // This device's cache first (by content, wherever the file is); then the library's records.
     return (d: IndexedDoc) => (d.share ? cached.get(d.share)?.openedAt : undefined) ?? byKey.get(d.key) ?? (d.share ? byKey.get(`share:${d.share}`) : undefined) ?? byKey.get(`file:${d.name}|${d.size}`);
   }, [library, cached]);
+  // Beside a document, the order stays as it was when the first was opened (opening one would move it to the top,
+  // from under the cursor).
+  const [held, setHeld] = useState<{ at: typeof liveOpenedAt } | null>(null);
+  const holding = split && !!pane;
+  if (holding && !held) setHeld({ at: liveOpenedAt });
+  if (!holding && held) setHeld(null);
+  const openedAt = held?.at ?? liveOpenedAt;
   // Search results come best match first, until another order is chosen for them.
   const [bestFirst, setBestFirst] = useState(true);
   const [limit, setLimit] = useState(PAGE);
@@ -339,7 +363,7 @@ export default function Documents() {
   const layout = useLayout();
   const column = columnWidth(mainWidth);
   // A wide list shows every filter, not one button for them.
-  const roomy = column >= ROOMY;
+  const roomy = split || column >= ROOMY;
   const grid = gridOf(column);
   // Room for the Add button (and the action bar while picking).
   const bottom = insets.bottom + space.xxxl + 56 + (selected ? 72 : 0);
@@ -376,8 +400,7 @@ export default function Documents() {
   };
   // Documents only in this library leave it (as on Reading); files are deleted.
   const onlyHere = (list: IndexedDoc[]) => list.length > 0 && list.every((d) => d.place.kind === 'library');
-  const remove = async () => {
-    const list = picked;
+  const remove = async (list = picked) => {
     if (onlyHere(list)) {
       const one = list.length === 1;
       const yes = await ask({
@@ -394,6 +417,8 @@ export default function Documents() {
     await batch(async () => {
       const { trashed, settle } = await deleteAll(list);
       dropShown(new Set(list.map((d) => d.key)));
+      // The one beside the list goes with it.
+      if (list.some((d) => d.key === usePane.getState().doc?.key)) closePane();
       const n = trashed.reduce((k, g) => k + g.items.length, 0);
       if (n && n === list.length) {
         say(t.trashedN(n), { undo: () => void undoDelete(trashed).catch((e) => say(opError(e))), settle });
@@ -404,6 +429,78 @@ export default function Documents() {
     });
   };
 
+  // ---------- keyboard (web) ----------
+  // ↑ ↓ go through the list (beside a document: open each), Enter opens, Space looks without opening, ⌘⌫ deletes,
+  // ⌘K goes anywhere, ⌘N scans.
+  const focused = useIsFocused();
+  const cursor = usePane((s) => s.cursor);
+  const [look, setLook] = useState<IndexedDoc | null>(null);
+  const [palette, setPalette] = useState(false);
+  const fail = (e: unknown) => say(errorText(e));
+  const step = (dir: 1 | -1, from = cursor) => {
+    if (!visible.length) return null;
+    const at = visible.findIndex((h) => h.doc.key === from);
+    const next = visible[at < 0 ? (dir > 0 ? 0 : visible.length - 1) : Math.max(0, Math.min(visible.length - 1, at + dir))];
+    usePane.setState({ cursor: next.doc.key });
+    if (split) void openDoc(next.doc, undefined, '').catch(fail);
+    return next;
+  };
+  const keys = useRef({ step, look, palette, cursor, visible, remove, split, selected, picked });
+  useEffect(() => {
+    keys.current = { step, look, palette, cursor, visible, remove, split, selected, picked };
+  });
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !focused) return;
+    const onKey = (e: KeyboardEvent) => {
+      const k = keys.current;
+      if (useAsk.getState().request || e.defaultPrevented || k.look || k.palette) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (mod && key === 'k') return e.preventDefault(), setPalette(true);
+      if (mod && key === 'n' && scanSupported) return e.preventDefault(), router.push('/scan');
+      const target = e.target as HTMLElement | null;
+      // The document beside the list has its own keys.
+      if (target?.closest?.('[data-testid="doc-pane"]')) return;
+      const inSearch = target?.getAttribute?.('data-testid') === 'docs-search';
+      if (inSearch ? key !== 'ArrowDown' : /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '') || target?.isContentEditable) return;
+      if (inSearch) target?.blur();
+      const hit = k.visible.find((h) => h.doc.key === k.cursor);
+      if (key === 'ArrowDown' || key === 'ArrowUp') return e.preventDefault(), void k.step(key === 'ArrowDown' ? 1 : -1);
+      if (key === 'Enter' && hit && !k.split) return e.preventDefault(), void openDoc(hit.doc, undefined, '').catch(fail);
+      if (key === ' ' && hit && !k.split) return e.preventDefault(), setLook(hit.doc);
+      if (((mod && key === 'Backspace') || key === 'Delete') && (k.selected ? k.picked.length : hit)) return e.preventDefault(), void k.remove(k.selected ? k.picked : [hit!.doc]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is the screen's notice (stable enough); the rest is read from `keys`.
+  }, [focused]);
+  // The row with the cursor stays in sight.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !cursor) return;
+    document.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [cursor]);
+
+  // ⌘K: documents by title, what to filter by, and every action of the screen.
+  const paletteItems = (): PaletteItem[] => [
+    ...(scanSupported ? [{ key: 'act-scan', icon: 'camera' as IconName, label: t.addCamera, hint: shortcut('N'), run: () => router.push('/scan') }] : []),
+    { key: 'act-files', icon: 'plus' as IconName, label: t.addFiles, run: () => void addFiles(improveAdded) },
+    { key: 'act-settings', icon: 'settings' as IconName, label: t.settings, run: () => router.push('/settings') },
+    ...moreItems.map((a) => ({ key: `act-${a.key}`, icon: a.icon, label: a.label, run: a.onPress })),
+    ...FACETS.flatMap((f) =>
+      counts[f].map((c) => ({ key: `facet-${f}-${c.value}`, icon: facetIcon[f], label: c.value, hint: `${facetName[f]} · ${c.count}`, run: () => setFilter({ ...filter, [f]: c.value }) })),
+    ),
+    ...base.map((h) => ({
+      key: `doc-${h.doc.key}`,
+      icon: 'documents' as IconName,
+      label: realTitle(h.doc.title) || h.doc.name.replace(/\.pdf$/i, ''),
+      hint: h.doc.sender || undefined,
+      run: () => {
+        usePane.setState({ cursor: h.doc.key });
+        void openDoc(h.doc, undefined, '').catch(fail);
+      },
+    })),
+  ];
+
   // More rows as the end of the list comes near (no button to press).
   const more = shown.length > limit;
   const onScroll = ({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -412,6 +509,8 @@ export default function Documents() {
 
   return (
     <AppFrame tab="documents">
+      <View style={{ flex: 1, flexDirection: 'row' }}>
+      <View style={split ? [styles.list, { borderColor: p.hairline }] : { flex: 1 }}>
       <ScrollView
         testID="docs-scroll"
         style={{ flex: 1 }}
@@ -492,8 +591,9 @@ export default function Documents() {
               {!intake && <IconButton icon="close" size={28} label={t.dismiss} onPress={() => useIntake.setState({ said: null })} />}
             </View>
           )}
-          {/* One row: the filters (first: always in reach), sync issues, and the saved views. */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
+
+          {/* One row (several beside a document: the list is narrow there): the filters (first: always in reach), sync issues, and the saved views. */}
+          <ChipRow wrap={split}>
             {roomy ? (
               // Room for every filter: each one click away (those without values in these documents left out).
               <>
@@ -534,7 +634,7 @@ export default function Documents() {
                 </T>
               </Pressable>
             )}
-          </ScrollView>
+          </ChipRow>
 
           {/* The count, and the order beside it (a long press on a row picks documents). */}
           <View style={styles.countRow}>
@@ -617,6 +717,37 @@ export default function Documents() {
         </Pressable>
       )}
       <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} above={selected ? BAR_ROOM : 0} />
+      </View>
+      {look && (
+        <QuickLook
+          doc={look}
+          onClose={() => setLook(null)}
+          onStep={(dir) => {
+            const next = step(dir, look.key);
+            if (next) setLook(next.doc);
+          }}
+          onOpen={() => {
+            setLook(null);
+            void openDoc(look, undefined, '').catch(fail);
+          }}
+        />
+      )}
+      {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
+      {split && (
+        <View style={{ flex: 1 }} testID="doc-pane">
+          {pane ? (
+            <ReadView key={pane.id} id={pane.id} page={pane.page} q={pane.q} onClose={closePane} />
+          ) : (
+            <View style={styles.paneEmpty}>
+              <Icon name="documents" size={36} color={p.hairline} />
+              <T v="label" color={p.muted}>
+                {t.paneEmpty}
+              </T>
+            </View>
+          )}
+        </View>
+      )}
+      </View>
     </AppFrame>
   );
 }
@@ -632,6 +763,16 @@ function Empty({ reading, onAdd }: { reading: string | null; onAdd?: () => void 
       </T>
       {!reading && onAdd && <Button testID="docs-add-folder" icon="folderAdd" label={t.addFolder} onPress={onAdd} />}
     </View>
+  );
+}
+
+/** The chips in one line that scrolls sideways, or (`wrap`) in as many lines as they need. */
+function ChipRow({ wrap, children }: { wrap: boolean; children: ReactNode }) {
+  if (wrap) return <View style={styles.chips} testID="views">{children}</View>;
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { flexWrap: 'nowrap' }]} testID="views">
+      {children}
+    </ScrollView>
   );
 }
 
@@ -662,6 +803,8 @@ function Chip({ testID, icon, label, count, on, more, onPress }: { testID: strin
 
 const styles = StyleSheet.create({
   // The select bar over the top of the list while picking, wherever it is scrolled to.
+  list: { width: LIST_W, borderRightWidth: StyleSheet.hairlineWidth },
+  paneEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.md },
   stickyBar: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', paddingBottom: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   // Clear of + on either side, wherever the list ends.

@@ -106,11 +106,14 @@ export function Reader({
   cache,
   onReload,
   at,
+  onClose,
 }: {
   doc: DocRecord;
   handle: DocHandle;
   cache: RasterCache;
   onReload?: () => void;
+  /** Shown beside the list of documents (a wide desktop window): closing it goes back to the list alone. */
+  onClose?: () => void;
   /** Open at this page, with this search (from a search across documents), instead of where it was left. */
   at?: { page: number; query?: string };
 }) {
@@ -124,7 +127,8 @@ export function Reader({
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   // Wide desktop windows: Find and Details stay open beside the pages (each closed and opened on its own).
-  const docked = isDocked(winW);
+  const embedded = !!onClose;
+  const docked = embedded || isDocked(winW);
   const side = usePrefs((s) => s.side);
   // The actions only (stable): the reader doesn't re-render when other documents (or its own position) change.
   const { savePosition, flushPositions, toggleInvert, markOpened, setView, updateFileInfo, setDetails } = libraryActions();
@@ -135,7 +139,7 @@ export function Reader({
   const textApiRef = useRef<ReflowApi | null>(null);
   // Only the reader in front takes keys and Back: another one opened over it (a file dropped) leaves this one mounted underneath.
   const focused = useIsFocused();
-  const edits = useEdits(doc, handle, focused);
+  const edits = useEdits(doc, handle, focused, onClose);
   // Text read in the background waits for unsaved changes (one would be written over the other).
   useEffect(() => {
     editing(doc.id, edits.dirty);
@@ -297,15 +301,18 @@ export function Reader({
   const [findFocus, setFindFocus] = useState(false);
   // Bumped to put the keyboard in the field of a Find that is open already (beside the pages).
   const [findAsked, setFindAsked] = useState(0);
-  const openFind = (focus: boolean) => {
-    setFindFocus(focus);
-    if (!docked) return setPanel('find');
-    setPrefs({ side: { ...usePrefs.getState().side, find: true } });
-    if (focus) setFindAsked((n) => n + 1);
-  };
+  const openFind = useCallback(
+    (focus: boolean) => {
+      setFindFocus(focus);
+      if (!docked) return setPanel('find');
+      setPrefs({ side: { ...usePrefs.getState().side, find: true } });
+      if (focus) setFindAsked((n) => n + 1);
+    },
+    [docked, setPrefs],
+  );
   const findOpen = docked ? side.find : panel === 'find';
   const detailsOpen = docked ? side.details : panel === 'details';
-  const closeFind = () => (docked ? setPrefs({ side: { ...usePrefs.getState().side, find: false } }) : setPanel(null));
+  const closeFind = useCallback(() => (docked ? setPrefs({ side: { ...usePrefs.getState().side, find: false } }) : setPanel(null)), [docked, setPrefs]);
   const openDetails = () => (docked ? setPrefs({ side: { ...usePrefs.getState().side, details: true } }) : setPanel('details'));
   const closeDetails = () => (docked ? setPrefs({ side: { ...usePrefs.getState().side, details: false } }) : setPanel(null));
   const [outline, setOutline] = useState<FlatOutline | null>(null);
@@ -741,6 +748,9 @@ export function Reader({
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '') || !!target?.closest?.('.fl');
       // A question being asked has the keys (Esc answers it itself).
       if (useAsk.getState().request || e.defaultPrevented) return;
+      // Beside the list: keys typed in the list (its search) are the list's, and ↑ ↓ go through the documents.
+      if (embedded && target && target !== document.body && !target.closest?.('[data-testid="reader"]')) return;
+      if (embedded && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;
       if (e.key === 'Escape') {
         if (closeSomething()) return;
         // A selection (its Highlight bubble) goes before the document does.
@@ -814,7 +824,7 @@ export function Reader({
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, onPageNote, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs]);
+  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, onPageNote, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs, embedded, findOpen, travel, closeFind, openFind]);
 
   // ---------- pinch (native) ----------
   // The pages scale about where the fingers started; on release the zoom keeps that point there.
@@ -1031,9 +1041,9 @@ export function Reader({
         pointerEvents={chromeShown ? 'box-none' : 'none'}
         style={[styles.top, { paddingTop: insets.top, height: insets.top + TOP_BAR, backgroundColor: p.glass, borderColor: p.hairline }, topStyle]}
       >
-        <IconButton icon="back" label={t.back} onPress={edits.leave} testID="back" />
+        <IconButton icon={embedded ? 'close' : 'back'} label={embedded ? t.close : t.back} onPress={edits.leave} testID="back" />
         <View style={styles.titleWrap}>
-          <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15, letterSpacing: -0.2 }}>
+          <T numberOfLines={1} testID="reader-title" style={{ fontFamily: fonts.sansMedium, fontSize: 15, letterSpacing: -0.2 }}>
             {doc.title}
           </T>
         </View>

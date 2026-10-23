@@ -6,6 +6,7 @@ import { errorText, t } from '@/core/i18n';
 import { folders } from '@/core/lib/folders';
 import { APP_ROOT_ID } from '@/core/lib/nesting';
 import { useLibrary } from '@/paper/state/library';
+import { showInPane, usePane } from '@/paper/state/pane';
 import { usePalette } from '@/paper/state/prefs';
 import { docDate } from './facets';
 import { realTitle } from './pdfInfo';
@@ -42,9 +43,10 @@ export async function openDoc(doc: IndexedDoc, page: number | undefined, query: 
   // Without a page (no match to show), it opens where it was left.
   const params = page === undefined ? {} : { page: String(page), q: query.trim() };
   const { place } = doc;
-  if (place.kind === 'library') return router.push({ pathname: '/read/[id]', params: { id: place.id, ...params } });
-  const added = await importFromFolder(place);
-  if (added) router.push({ pathname: '/read/[id]', params: { id: added.id, ...params } });
+  const id = place.kind === 'library' ? place.id : (await importFromFolder(place))?.id;
+  if (!id) return;
+  // Beside the list where there is room for it, else a screen of its own.
+  if (!(await showInPane({ id, ...params, key: doc.key }))) router.push({ pathname: '/read/[id]', params: { id, ...params } });
 }
 
 /** One document found, as every list shows documents: its picture, title, details and place, the words around the match and its page. */
@@ -76,6 +78,8 @@ export function HitRow({
 }) {
   const p = usePalette();
   const { place } = h.doc;
+  // The one open beside the list.
+  const current = usePane((s) => s.doc?.key === h.doc.key || (!s.split && s.cursor === h.doc.key));
   const cover = useLibrary((s) => (place.kind === 'library' ? s.covers[place.id] : undefined));
   const aspect = useLibrary((s) => (place.kind === 'library' ? s.docs.find((d) => d.id === place.id)?.coverAspect : undefined));
   // One folder: only where a document still waits to be filed is worth saying.
@@ -103,6 +107,7 @@ export function HitRow({
       badge={h.snippet ? t.pageShort(h.page + 1) : undefined}
       first={first}
       last={last}
+      current={current}
       selected={selected}
       onOpen={() => void openDoc(h.doc, h.snippet ? h.page : undefined, query).catch((e) => onError(errorText(e)))}
       onSelect={onSelect}

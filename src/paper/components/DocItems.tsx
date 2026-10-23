@@ -92,6 +92,8 @@ export type DocItemProps = {
   /** The first and last rows (list): the list's rounded edges. */
   first?: boolean;
   last?: boolean;
+  /** Open beside the list. */
+  current?: boolean;
   /** Undefined: not picking. */
   selected?: boolean;
   onOpen: () => void;
@@ -118,7 +120,7 @@ export function DocItem(props: DocItemProps) {
   return props.layout === 'grid' ? <Tile {...props} /> : <Row {...props} />;
 }
 
-function Row({ testID, picture, title, label, meta, extra, badge, progress, busy, first, last, selected, onOpen, onSelect, onToggle, actions }: DocItemProps) {
+function Row({ testID, picture, title, label, meta, extra, badge, progress, busy, first, last, current, selected, onOpen, onSelect, onToggle, actions }: DocItemProps) {
   const p = usePalette();
   const image = usePicture(picture);
   const picking = selected !== undefined;
@@ -127,7 +129,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
     <View
       style={[
         styles.row,
-        { backgroundColor: p.surface, borderColor: p.hairline },
+        { backgroundColor: current ? p.mark : p.surface, borderColor: p.hairline },
         first && { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg },
         last && { borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, borderBottomWidth: StyleSheet.hairlineWidth },
       ]}
@@ -137,6 +139,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
         accessibilityRole={picking ? 'checkbox' : 'button'}
         aria-checked={picking ? selected : undefined}
         accessibilityLabel={label ?? title}
+        aria-current={current || undefined}
         onPress={picking ? onToggle : onOpen}
         onLongPress={onSelect}
         delayLongPress={350}
@@ -184,7 +187,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
   );
 }
 
-function Tile({ width, testID, picture, title, label, meta, progress, busy, selected, onOpen, onSelect, onToggle }: DocItemProps) {
+function Tile({ width, testID, picture, title, label, meta, progress, busy, current, selected, onOpen, onSelect, onToggle }: DocItemProps) {
   const p = usePalette();
   const image = usePicture(picture);
   const picking = selected !== undefined;
@@ -200,11 +203,15 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, sele
       accessibilityRole={picking ? 'checkbox' : 'button'}
       aria-checked={picking ? selected : undefined}
       accessibilityLabel={label ?? title}
+      aria-current={current || undefined}
       onPress={picking ? onToggle : onOpen}
       onLongPress={onSelect}
       delayLongPress={350}
       {...rightClick(onSelect)}
-      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [{ width, opacity: pressed || busy ? 0.6 : hovered ? 0.92 : 1 }]}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        { width, opacity: pressed || busy ? 0.6 : hovered ? 0.92 : 1 },
+        current && { backgroundColor: p.mark, borderRadius: radius.md },
+      ]}
     >
       <View style={{ height: boxH, justifyContent: 'flex-end', alignItems: 'center' }}>
         {isDir ? (
