@@ -7,7 +7,7 @@ import { readPage } from './searchable';
 /**
  * Improving a document's text with AI: each page's invisible text (an earlier recognition's, or this device's
  * where a page has none) goes to the model with the page's image, as for a new scan; its corrections and what it
- * finds besides (handwriting) replace the page's invisible text, appended to the file. Pages with text of their
+ * finds besides (handwriting) replace the page's invisible text (the earlier text leaves the file). Pages with text of their
  * own (typed, sideways or nested text) are left as they are.
  */
 

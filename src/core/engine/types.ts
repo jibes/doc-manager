@@ -184,7 +184,7 @@ export interface DocHandle {
   save(): Promise<ArrayBuffer>;
   /** The file as it is: the bytes it was opened from, or (with unsaved edits) as save() writes it. */
   bytes(): Promise<ArrayBuffer>;
-  /** The file with invisible text over recognised words (an incremental update to bytes()); reopen it to see it. */
+  /** The file with invisible text over recognised words (written anew, as save(); signed files updated); reopen it to see it. */
   addTextLayer(pages: PageWords[]): Promise<ArrayBuffer>;
   /** A page's invisible text layer, to be read again (by a model). */
   ocrLayer(page: number): Promise<OcrLayer>;

@@ -860,17 +860,9 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   } finally {
     M.FPDFFont_Close(font);
   }
-  const w = M.PDFiumExt_OpenFileWriter();
-  try {
-    if (!M.FPDF_SaveAsCopy(d.ptr, w, FPDF_INCREMENTAL)) throw new Error('Could not save the PDF');
-    const n = M.PDFiumExt_GetFileWriterSize(w);
-    return withScratch(n, (p) => {
-      M.PDFiumExt_GetFileWriterData(w, p, n);
-      return heap().slice(p, p + n).buffer;
-    });
-  } finally {
-    M.PDFiumExt_CloseFileWriter(w);
-  }
+  // The file written anew (as Save does): the layers it replaced leave the file, rather than staying behind in
+  // earlier revisions (a document read again and again grew by megabytes each time). A signed one is updated.
+  return save(docId);
 }
 
 function writeTextLayer(d: Doc, pages: PageWords[], font: number) {
