@@ -918,6 +918,9 @@ export function Reader({
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: edits.dirty ? undefined : shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
+  // Buttons that fit beside the title: back, Find, Text view and Aa are always there; undo, redo and Save while editing.
+  const room = docked ? Math.floor(((vp?.w ?? 0) - TITLE_MIN) / BAR_BUTTON) - 4 - (narrow ? 0 : Math.min(1, edits.history.undo) + Math.min(1, edits.history.redo)) - (edits.dirty ? 2 : 0) : 0;
+  const inBar = room >= menuItems.length ? menuItems : menuItems.slice(0, Math.max(0, room - 1));
 
   const onLink = useCallback(
     (l: PageLink) => {
@@ -1090,21 +1093,18 @@ export function Reader({
             testID="view-toggle"
           />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
-          {docked && (vp?.w ?? 0) >= BAR_BUTTON * (menuItems.length + 7) + TITLE_MIN ? (
-            // Beside the pages there is room for every action: one click each (else the ⋯ menu, a narrow pane).
-            menuItems.map((it) => (
-              <IconButton
-                key={it.key}
-                icon={it.icon}
-                label={it.hint ? `${it.label} (${it.hint})` : it.label}
-                active={it.key === 'details' ? detailsOpen : undefined}
-                onPress={it.onPress}
-                testID={`menu-${it.key}`}
-              />
-            ))
-          ) : (
-            <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />
-          )}
+          {/* Beside the pages: as many actions as there is room for, one click each; the rest (a narrow pane) in ⋯. */}
+          {inBar.map((it) => (
+            <IconButton
+              key={it.key}
+              icon={it.icon}
+              label={it.hint ? `${it.label} (${it.hint})` : it.label}
+              active={it.key === 'details' ? detailsOpen : undefined}
+              onPress={it.onPress}
+              testID={`menu-${it.key}`}
+            />
+          ))}
+          {inBar.length < menuItems.length && <IconButton icon="more" label={t.more} active={menu} onPress={() => setMenu((m) => !m)} testID="open-more" />}
         </View>
       </Animated.View>
 
@@ -1204,7 +1204,7 @@ export function Reader({
       )}
 
       {!docked && findPanel}
-      {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={[...stepItems, ...menuItems]} onClose={() => setMenu(false)} />}
+      {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={[...stepItems, ...menuItems.slice(inBar.length)]} onClose={() => setMenu(false)} />}
       {panel === 'appearance' && (
         <AppearancePanel
           palette={p}

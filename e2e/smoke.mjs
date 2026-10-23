@@ -2654,7 +2654,9 @@ async function docked() {
   const sideBox = await side.boundingBox();
   const pagesBox = await page.getByTestId('pages').boundingBox();
   check(!!sideBox && !!pagesBox && pagesBox.x + pagesBox.width <= sideBox.x + 1, 'docked: the pages make room for them (nothing covered)');
-  check((await page.getByTestId('open-more').count()) === 0 && (await page.getByTestId('menu-print').isVisible()) && (await page.getByTestId('menu-share').isVisible()), 'docked: every action is in the bar, no ⋯ menu');
+  check((await page.getByTestId('menu-share').isVisible()) && (await page.getByTestId('menu-details').isVisible()), 'docked: the actions are in the bar, one click each (as many as fit)');
+  const barBox = await page.getByTestId('reader-title').boundingBox();
+  check(!!barBox && barBox.width >= 100, `docked: …and the title still shows (${Math.round(barBox?.width ?? 0)} px)`);
   // The notes tab of the docked Find lists notes too.
   await side.getByTestId('tab-notes').click();
   await page.getByTestId('page-note').click();
