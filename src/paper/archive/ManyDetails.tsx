@@ -42,12 +42,12 @@ export function ManyDetails({ docs, onClose, onDone }: { docs: IndexedDoc[]; onC
       remove: shared.tags.filter((x) => !all.includes(x)),
     };
     setProgress({ done: 0, total: docs.length });
-    const failed = await writeDetailsMany(docs, change, (done, total) => setProgress({ done, total }));
+    const { failed, changed } = await writeDetailsMany(docs, change, (done, total) => setProgress({ done, total }));
     setProgress(null);
-    onDone(failed ? t.detailsManyFailed(failed) : t.detailsManySaved(docs.length));
+    onDone(failed ? t.detailsManyFailed(failed) : changed ? t.detailsManySaved(changed) : t.detailsManyNone);
   };
 
-  const field = (testID: string, label: string, value: string | null, own: string | null, onChange: (v: string) => void, hint?: string) => (
+  const field = (testID: string, label: string, value: string | null, own: string | null, onChange: (v: string | null) => void, hint?: string) => (
     <View style={{ gap: space.xs, flex: 1 }}>
       <T v="caption" color={p.muted}>
         {label}
@@ -55,7 +55,8 @@ export function ManyDetails({ docs, onClose, onDone }: { docs: IndexedDoc[]; onC
       <TextInput
         testID={testID}
         value={own ?? value ?? ''}
-        onChangeText={onChange}
+        // Emptied where each document has its own: left as each has it again (not cleared in all of them).
+        onChangeText={(v) => onChange(v === '' && value === null ? null : v)}
         placeholder={value === null ? t.detailsMixed : hint}
         accessibilityLabel={label}
         placeholderTextColor={p.muted}

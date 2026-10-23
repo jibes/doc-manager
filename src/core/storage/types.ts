@@ -76,6 +76,8 @@ export interface LibraryRepo {
   /** Text recognized on-device for scanned PDFs, per page; undefined = not recognized yet. */
   loadOcr(id: string, pageCount: number): Promise<(TextLine[] | undefined)[]>;
   saveOcr(id: string, page: number, lines: TextLine[]): Promise<void>;
+  /** Forgets the text read from a document's pages (its pages were replaced). */
+  clearOcr(id: string): Promise<void>;
   /** A viewed document's file, held in memory while it is open: read like any other, never written. */
   hold(id: string, data: Blob | FileHandle): void;
   /** What `hold` keeps (to keep the document: it is saved then). */

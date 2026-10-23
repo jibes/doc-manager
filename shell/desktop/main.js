@@ -35,7 +35,11 @@ function open(paths) {
     win.webContents.send('open', files);
     if (win.isMinimized()) win.restore();
     win.focus();
-  } else waiting.push(...files);
+  } else {
+    waiting.push(...files);
+    // macOS keeps running with no window open: a file opened then gets one (which takes it once it's ready).
+    if (!win && app.isReady()) createWindow();
+  }
 }
 
 // ---------- the main window's place on the screen, kept across starts ----------
@@ -45,9 +49,17 @@ const stateFile = () => path.join(app.getPath('userData'), 'window.json');
 function savedBounds() {
   try {
     const b = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
+    if (![b.x, b.y, b.width, b.height].every(Number.isInteger)) return null;
     // Only where a screen still is (a display unplugged since).
     const on = screen.getAllDisplays().some(({ workArea: a }) => b.x < a.x + a.width && b.x + b.width > a.x && b.y < a.y + a.height && b.y + b.height > a.y);
-    return on ? b : null;
+    if (!on) return null;
+    // All of it on that screen, as the screen is now (a lower resolution, the Dock or taskbar moved).
+    const { workArea: a } = screen.getDisplayMatching(b);
+    const width = Math.min(b.width, a.width);
+    const height = Math.min(b.height, a.height);
+    const x = Math.min(Math.max(b.x, a.x), a.x + a.width - width);
+    const y = Math.min(Math.max(b.y, a.y), a.y + a.height - height);
+    return { ...b, x, y, width, height };
   } catch {
     return null;
   }
@@ -75,7 +87,8 @@ function debounce(fn, ms) {
   };
 }
 
-const background = () => (nativeTheme.shouldUseDarkColors ? '#1B1A17' : '#ECE8DF');
+// The canvas colours of src/core/design/tokens.ts (dark, light): no flash of another colour while the page loads.
+const background = () => (nativeTheme.shouldUseDarkColors ? '#18191C' : '#ECE8DF');
 
 const webPreferences = () => ({ preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true });
 
@@ -107,7 +120,12 @@ app.on('open-file', (e, file) => {
 });
 app.on('second-instance', (_e, argv) => {
   open(pdfsIn(argv.slice(1)));
-  if (win) win.focus();
+  // Launched again: the window comes back (from the taskbar or the Dock too), or there is one again.
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } else if (app.isReady()) createWindow();
 });
 
 /** The app's files; paths without an extension are app routes and get index.html (the router takes them). */
@@ -158,47 +176,54 @@ const command = (name) => () => BrowserWindow.getFocusedWindow()?.webContents.se
 /** Shown with its key, which the page handles itself (the menu doesn't take the key from it). */
 const item = (label, accelerator, name) => ({ label, accelerator, registerAccelerator: false, click: command(name) });
 
+/** The menu's own words in the app's languages (the page's are in src/core/i18n; the roles' come with Electron). */
+const LABELS = {
+  en: { file: 'File', scan: 'Scan…', open: 'Open File…', save: 'Save', print: 'Print…', edit: 'Edit', undo: 'Undo', redo: 'Redo', find: 'Find', goto: 'Go to…', view: 'View', zoomIn: 'Zoom In', zoomOut: 'Zoom Out', zoomReset: 'Actual Size', update: 'Check for Updates…', github: 'Tessel on GitHub' },
+  de: { file: 'Datei', scan: 'Scannen…', open: 'Datei öffnen…', save: 'Speichern', print: 'Drucken…', edit: 'Bearbeiten', undo: 'Rückgängig', redo: 'Wiederholen', find: 'Suchen', goto: 'Gehe zu…', view: 'Ansicht', zoomIn: 'Vergrößern', zoomOut: 'Verkleinern', zoomReset: 'Originalgröße', update: 'Nach Updates suchen…', github: 'Tessel auf GitHub' },
+};
+
 function menu() {
   const mac = process.platform === 'darwin';
+  const l = app.getLocale().toLowerCase().startsWith('de') ? LABELS.de : LABELS.en;
   return Menu.buildFromTemplate([
     ...(mac ? [{ role: 'appMenu' }] : []),
     {
-      label: 'File',
+      label: l.file,
       submenu: [
-        item('Scan…', 'CmdOrCtrl+N', 'scan'),
-        item('Open File…', 'CmdOrCtrl+O', 'open'),
+        item(l.scan, 'CmdOrCtrl+N', 'scan'),
+        item(l.open, 'CmdOrCtrl+O', 'open'),
         { type: 'separator' },
-        item('Save', 'CmdOrCtrl+S', 'save'),
-        item('Print…', 'CmdOrCtrl+P', 'print'),
+        item(l.save, 'CmdOrCtrl+S', 'save'),
+        item(l.print, 'CmdOrCtrl+P', 'print'),
         { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },
       ],
     },
     {
-      label: 'Edit',
+      label: l.edit,
       submenu: [
-        item('Undo', 'CmdOrCtrl+Z', 'undo'),
-        item('Redo', 'Shift+CmdOrCtrl+Z', 'redo'),
+        item(l.undo, 'CmdOrCtrl+Z', 'undo'),
+        item(l.redo, 'Shift+CmdOrCtrl+Z', 'redo'),
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
         { type: 'separator' },
-        item('Find', 'CmdOrCtrl+F', 'find'),
-        item('Go to…', 'CmdOrCtrl+K', 'goto'),
+        item(l.find, 'CmdOrCtrl+F', 'find'),
+        item(l.goto, 'CmdOrCtrl+K', 'goto'),
       ],
     },
     {
-      label: 'View',
-      submenu: [item('Zoom In', 'CmdOrCtrl+Plus', 'zoomIn'), item('Zoom Out', 'CmdOrCtrl+-', 'zoomOut'), item('Actual Size', 'CmdOrCtrl+0', 'zoomReset'), { type: 'separator' }, { role: 'togglefullscreen' }],
+      label: l.view,
+      submenu: [item(l.zoomIn, 'CmdOrCtrl+Plus', 'zoomIn'), item(l.zoomOut, 'CmdOrCtrl+-', 'zoomOut'), item(l.zoomReset, 'CmdOrCtrl+0', 'zoomReset'), { type: 'separator' }, { role: 'togglefullscreen' }],
     },
     { role: 'windowMenu' },
     {
       role: 'help',
       submenu: [
-        { label: 'Check for Updates…', click: () => void checkUpdate(true) },
-        { label: 'Tessel on GitHub', click: () => void shell.openExternal('https://github.com/jibes/doc-manager') },
+        { label: l.update, click: () => void checkUpdate(true) },
+        { label: l.github, click: () => void shell.openExternal('https://github.com/jibes/doc-manager') },
       ],
     },
   ]);
@@ -206,11 +231,17 @@ function menu() {
 
 // ---------- updates (the app isn't signed: it can't replace itself, it says where the new one is) ----------
 
+/** Whether version a is newer than b: by 1.2.3 first; with those equal, a release is newer than its pre-releases. */
 const newer = (a, b) => {
-  const x = a.split('.').map(Number);
-  const y = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
-  return false;
+  const parse = (v) => {
+    const at = v.indexOf('-');
+    return { n: (at < 0 ? v : v.slice(0, at)).split('.').map((s) => parseInt(s, 10) || 0), pre: at < 0 ? '' : v.slice(at + 1) };
+  };
+  const x = parse(a);
+  const y = parse(b);
+  for (let i = 0; i < 3; i++) if ((x.n[i] ?? 0) !== (y.n[i] ?? 0)) return (x.n[i] ?? 0) > (y.n[i] ?? 0);
+  if (!x.pre || !y.pre) return !x.pre && !!y.pre;
+  return x.pre.localeCompare(y.pre, 'en', { numeric: true }) > 0;
 };
 
 async function checkUpdate(asked) {
@@ -221,7 +252,14 @@ async function checkUpdate(asked) {
   const version = latest?.tag_name?.replace(/^v/, '');
   const target = win ?? BrowserWindow.getAllWindows()[0];
   if (!target) return;
-  if (version && newer(version, app.getVersion())) target.webContents.send('update', { version, url: latest.html_url });
+  // No answer (offline, rate-limited): said only when asked for, and not as "up to date".
+  if (!version) {
+    if (asked) target.webContents.send('update', { version: null, url: null, failed: true });
+    return;
+  }
+  // Only a version there is a build of for this computer: releases have the macOS one alone.
+  const built = process.platform === 'darwin' && (latest.assets ?? []).some((f) => /-mac\.dmg$/i.test(f?.name ?? ''));
+  if (built && newer(version, app.getVersion())) target.webContents.send('update', { version, url: latest.html_url });
   else if (asked) target.webContents.send('update', { version: null, url: null });
 }
 
@@ -242,7 +280,7 @@ app.whenReady().then(() => {
     done(allowed);
   });
   open(pdfsIn(process.argv.slice(1)));
-  createWindow();
+  if (!win) createWindow();
   app.on('activate', () => {
     if (!BrowserWindow.getAllWindows().length) createWindow();
   });
@@ -265,16 +303,18 @@ ipcMain.on('ready-for-files', (e) => {
 });
 
 /** AI requests, made by the app (a model's address doesn't allow the app's own origin, as it wouldn't a page's). */
+// Each window counts its requests from 1: they are told apart by the window too.
 const running = new Map();
 ipcMain.handle('http', async (e, { id, url, method, headers, body }) => {
   if (!ours(e.senderFrame?.url) || !/^https?:\/\//i.test(url)) throw new Error('Not allowed');
+  const key = `${e.sender.id}:${id}`;
   const stop = new AbortController();
-  running.set(id, stop);
+  running.set(key, stop);
   try {
     const res = await net.fetch(url, { method, headers, body, signal: stop.signal });
     return { status: res.status, body: await res.text() };
   } finally {
-    running.delete(id);
+    running.delete(key);
   }
 });
-ipcMain.on('http-abort', (_e, id) => running.get(id)?.abort());
+ipcMain.on('http-abort', (e, id) => running.get(`${e.sender.id}:${id}`)?.abort());

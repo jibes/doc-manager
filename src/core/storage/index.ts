@@ -26,7 +26,8 @@ async function load(): Promise<Map<string, DocRecord>> {
 
 /** Serialized, atomic-ish write: temp file then move over the index. */
 function flush() {
-  writeChain = writeChain.then(async () => {
+  // A write that failed doesn't stop the ones after it.
+  writeChain = writeChain.catch(() => {}).then(async () => {
     const tmp = new File(root, 'index.tmp.json');
     tmp.write(JSON.stringify([...(cache ?? new Map()).values()]));
     if (index.exists) index.delete();
@@ -82,6 +83,7 @@ export const repo: LibraryRepo = {
   // No on-device OCR on native yet (see src/ocr), so nothing is ever stored.
   loadOcr: async (_id, pageCount) => new Array(pageCount).fill(undefined),
   saveOcr: async () => {},
+  clearOcr: async () => {},
   // The native app opens documents from the library only.
   hold: () => {},
   held: () => undefined,

@@ -1,8 +1,8 @@
 import type { DocHandle } from '@/core/engine/types';
-import { repo } from '@/core/storage';
 import { describeWithAi, type AiSettings } from '@/paper/scan/ai';
 import { infoFor, parseTags, real, realTitle, withInfo, type Details } from './pdfInfo';
 import { pagesWithoutText, readPages, textOf } from './searchable';
+import { writeFrom } from './versions';
 
 /**
  * The details a PDF carries (falling back to `title` when it has none). Placeholders other programs leave
@@ -20,7 +20,7 @@ export function detailsOf(handle: DocHandle, title: string): Details {
 export async function saveDetails(id: string, handle: DocHandle, details: Details): Promise<void> {
   const bytes = new Uint8Array(await handle.bytes());
   const out = withInfo(bytes, infoFor(details, handle.metadata.other));
-  await repo.writeFile(id, out.buffer);
+  await writeFrom(id, handle, out.buffer);
 }
 
 /** Pages whose text goes to the model to describe a document: its first pages say what it is. */

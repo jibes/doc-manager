@@ -40,12 +40,16 @@ export function whereIs(place: Extract<Place, { kind: 'folder' }>): string {
 }
 
 /** Opens a document at a page, with the query highlighted: a library document directly, a folder file via the library. */
+let opening = 0;
+
 export async function openDoc(doc: IndexedDoc, page: number | undefined, query: string) {
   // Without a page (no match to show), it opens where it was left.
   const params = page === undefined ? {} : { page: String(page), q: query.trim() };
   const { place } = doc;
+  const mine = ++opening;
   const id = place.kind === 'library' ? place.id : (await importFromFolder(place))?.id;
-  if (!id) return;
+  // Only the last one asked for (↓ pressed quickly: the ones before are passed).
+  if (!id || mine !== opening) return;
   // Beside the list where there is room for it, else a screen of its own.
   if (!(await showInPane({ id, ...params, key: doc.key }))) router.push({ pathname: '/read/[id]', params: { id, ...params } });
 }
@@ -91,7 +95,7 @@ export function HitRow({
   const p = usePalette();
   const { place } = h.doc;
   // The one open beside the list.
-  const current = usePane((s) => s.doc?.key === h.doc.key || (!s.split && s.cursor === h.doc.key));
+  const current = usePane((s) => (s.split && s.doc?.key === h.doc.key) || (!s.split && s.cursor === h.doc.key));
   const cover = useLibrary((s) => (place.kind === 'library' ? s.covers[place.id] : undefined));
   const aspect = useLibrary((s) => (place.kind === 'library' ? s.docs.find((d) => d.id === place.id)?.coverAspect : undefined));
   // One folder: only where a document still waits to be filed is worth saying.

@@ -17,7 +17,7 @@ import { ActionSheet } from '@/paper/components/ActionSheet';
 import { AskDialog } from '@/paper/components/AskDialog';
 import { DropZone } from '@/paper/components/DropZone';
 import { PasswordDialog } from '@/paper/components/PasswordDialog';
-import { RootToast } from '@/paper/components/RootToast';
+import { RootToast, sayRoot } from '@/paper/components/RootToast';
 import { DesktopBridge } from '@/paper/components/DesktopBridge';
 import { ShellOpen } from '@/paper/components/ShellOpen';
 import { shell } from '@/core/lib/shell';
@@ -25,7 +25,9 @@ import { useAmbientLight } from '@/paper/state/ambient';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { schedule, startIndexing } from '@/paper/archive/indexer';
 import { refreshInboxCount } from '@/paper/archive/inbox';
-import { resumeReading } from '@/paper/archive/intake';
+import { readAdded, resumeReading } from '@/paper/archive/intake';
+import { showInPane } from '@/paper/state/pane';
+import { t } from '@/core/i18n';
 import { showInPicker } from '@/paper/archive/tessel';
 import { useLibrary, type ImportItem } from '@/paper/state/library';
 
@@ -34,10 +36,15 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 /** Files dropped on the window: one is opened to look at; several are kept (there is nothing to show them in). */
 async function dropped(items: ImportItem[]) {
   const library = useLibrary.getState();
+  // Beside the list where there is room, as from Add.
+  const open = async (id: string) => void ((await showInPane({ id })) || router.push({ pathname: '/read/[id]', params: { id } }));
   const doc = items.length === 1 ? await library.view(items[0]) : null;
-  if (doc) return void router.push({ pathname: '/read/[id]', params: { id: doc.id } });
+  if (doc) return open(doc.id);
   const added = items.length > 1 ? await library.importFiles(items) : [];
-  if (added.length === 1) router.push({ pathname: '/read/[id]', params: { id: added[0].id } });
+  // Their text read as for files added (pages without any get theirs).
+  readAdded(added);
+  if (added.length === 1) await open(added[0].id);
+  else if (added.length) sayRoot(t.filesAddedN(added.length));
 }
 
 export default function RootLayout() {

@@ -215,7 +215,7 @@ export default function Settings() {
                 <T v="label" numberOfLines={1} style={{ fontFamily: fonts.sansMedium, fontSize: 15 }}>
                   {where?.name ?? (shell ? t.tesselAppFolder : t.tesselBrowser)}
                 </T>
-                <T v="caption" color={where?.locked ? p.accent : p.muted} numberOfLines={1}>
+                <T v="caption" color={where?.locked ? p.accent : p.muted} numberOfLines={2}>
                   {where?.locked ? t.tesselLocked : where?.name ? t.tesselChosenNote : shell ? t.tesselAppFolderNote : t.tesselBrowserNote}
                 </T>
               </View>
@@ -253,7 +253,7 @@ export default function Settings() {
                   <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
                     {t.pickerDevice}
                   </T>
-                  <View style={[styles.track, { backgroundColor: pickerDevice ? p.accent : p.hairline }]}>
+                  <View style={[styles.track, { backgroundColor: pickerDevice ? p.accent : p.muted }]}>
                     <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: pickerDevice ? 18 : 0 }] }]} />
                   </View>
                 </Pressable>
@@ -356,7 +356,7 @@ function SyncSection() {
             <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
               {t.inboxHere}
             </T>
-            <View style={[styles.track, { backgroundColor: inboxHere ? p.accent : p.hairline }]}>
+            <View style={[styles.track, { backgroundColor: inboxHere ? p.accent : p.muted }]}>
               <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: inboxHere ? 18 : 0 }] }]} />
             </View>
           </Pressable>
@@ -382,8 +382,13 @@ function AiSection() {
   const set = (patch: Partial<typeof ai>) => {
     running?.abort();
     setRunning(null);
-    setStatus(null);
-    setPrefs({ ai: { ...ai, ...patch } });
+    const next = { ...ai, ...patch };
+    // A key belongs to the service it was made for: with another API or address it would be sent to someone else.
+    const host = aiUrl(ai)?.host;
+    const moved = !!ai.key && !!host && (next.api !== ai.api || aiUrl(next)?.host !== host);
+    if (moved) next.key = '';
+    setStatus(moved ? t.aiKeyCleared : null);
+    setPrefs({ ai: next });
   };
   const test = async () => {
     const ctrl = new AbortController();
@@ -456,7 +461,7 @@ function AiSection() {
         {field('ai-key', t.aiKey, ai.key, (key) => set({ key }), undefined, true)}
         {field('ai-model', t.aiModel, ai.model, (model) => set({ model }), t.aiModelHint(ai.api))}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <Button testID="ai-test" kind="quiet" label={t.aiTest} disabled={testing || badUrl || insecure || !ai.url.trim()} onPress={() => void test()} />
+          <Button testID="ai-test" kind="quiet" label={t.aiTest} disabled={testing || badUrl || insecure || !ai.url.trim() || !ai.model.trim()} onPress={() => void test()} />
           {status && (
             <T testID="ai-status" v="caption" color={p.inkSoft} style={{ flex: 1 }}>
               {status}
@@ -482,7 +487,7 @@ function AiSection() {
         <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
           {t.aiThinking}
         </T>
-        <View style={[styles.track, { backgroundColor: ai.thinking ? p.accent : p.hairline }]}>
+        <View style={[styles.track, { backgroundColor: ai.thinking ? p.accent : p.muted }]}>
           <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: ai.thinking ? 18 : 0 }] }]} />
         </View>
       </Pressable>
@@ -506,7 +511,7 @@ function AiSection() {
             <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
               {t.improveAdded}
             </T>
-            <View style={[styles.track, { backgroundColor: improveAdded ? p.accent : p.hairline }]}>
+            <View style={[styles.track, { backgroundColor: improveAdded ? p.accent : p.muted }]}>
               <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: improveAdded ? 18 : 0 }] }]} />
             </View>
           </Pressable>

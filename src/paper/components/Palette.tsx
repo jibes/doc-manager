@@ -62,7 +62,12 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
               if (key === 'ArrowDown' || key === 'ArrowUp') {
                 e.preventDefault();
                 setActive((a) => (Math.min(a, found.length - 1) + (key === 'ArrowDown' ? 1 : -1) + found.length) % Math.max(1, found.length));
-              } else if (key === 'Escape') onClose();
+              } else if (key === 'Escape') {
+                // The palette's only: a selection under it stays.
+                e.preventDefault();
+                (e.nativeEvent as unknown as Event).stopPropagation?.();
+                onClose();
+              }
             }}
             style={[styles.input, { color: p.ink }]}
           />

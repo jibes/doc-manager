@@ -33,7 +33,7 @@ import { errorText, opError, t } from '@/core/i18n';
 import { shortcut } from '@/core/lib/keys';
 import { realTitle } from '@/paper/archive/pdfInfo';
 import { useThrottled } from '@/core/lib/useThrottled';
-import { showActions } from '@/paper/state/actions';
+import { showActions, useActions } from '@/paper/state/actions';
 import { ask, useAsk } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { folders } from '@/core/lib/folders';
@@ -102,14 +102,22 @@ export default function Documents() {
   const inboxCount = useInboxCount((s) => s.count);
   const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
   const winWidth = useMainWidth();
-  // A wide desktop window: the list, and beside it the document opened from it.
-  const split = Platform.OS === 'web' && winWidth >= SPLIT_MIN;
-  const mainWidth = split ? LIST_W : winWidth;
   const pane = usePane((s) => s.doc);
+  // Changes not saved yet in the document beside the list: it stays (the window made narrower doesn't drop them).
+  const paneEdited = useIntake((s) => !!pane && s.editing.includes(pane.id));
+  // A wide desktop window: the list, and beside it the document opened from it.
+  const split = Platform.OS === 'web' && (winWidth >= SPLIT_MIN || paneEdited);
+  const mainWidth = split ? LIST_W : winWidth;
+  // Too narrow for it: the document beside the list is closed (not shown again when the window is wider).
   useEffect(() => {
-    usePane.setState({ split });
-    return () => usePane.setState({ split: false });
+    if (!split) closePane();
   }, [split]);
+  const focused = useIsFocused();
+  // Only while the list is the screen shown: a document opened from Inbox or Duplicates on top opens as a screen.
+  useEffect(() => {
+    usePane.setState({ split: split && focused });
+    return () => usePane.setState({ split: false });
+  }, [split, focused]);
   // Folders read as sources before 3.2: let go of, once.
   useEffect(() => {
     void refreshInboxCount();
@@ -260,8 +268,8 @@ export default function Documents() {
       ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
       ...(archive ? [{ key: 'more-trash', icon: 'trash' as IconName, label: t.trashTitle, onPress: () => router.push('/trash') }] : []),
       ...(doubled > 0 ? [{ key: 'more-duplicates', icon: 'copy' as IconName, label: t.duplicatesN(doubled), onPress: () => router.push('/duplicates') }] : []),
-      ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'copy' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
-      ...(archive ? [{ key: 'more-rules', icon: 'tag' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
+      ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'sync' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
+      ...(archive ? [{ key: 'more-rules', icon: 'rules' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
       ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
   ];
   // ⋯ only for two or more; one is a button of its own, none is nothing.
@@ -375,6 +383,7 @@ export default function Documents() {
   const bottom = insets.bottom + space.xxxl + 56 + (selected ? 72 : 0);
 
   const picked = selected ? shown.filter((h) => selected.has(h.doc.key)).map((h) => h.doc) : [];
+  const deletable = (docs: IndexedDoc[]) => docs.length > 0 && !docs.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry));
   // A long press (or right click) starts picking; taps then add and remove.
   const hold = (key: string) => {
     if (justSelected(key)) return;
@@ -437,8 +446,10 @@ export default function Documents() {
   // ---------- keyboard (web) ----------
   // ↑ ↓ go through the list (beside a document: open each), Enter opens, Space looks without opening, ⌘⌫ deletes,
   // ⌘K goes anywhere, ⌘N scans.
-  const focused = useIsFocused();
   const cursor = usePane((s) => s.cursor);
+  // Several documents' details at once (picked, or one from its menu), and a right click's menu.
+  const [many, setMany] = useState<IndexedDoc[] | null>(null);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; hit: Hit } | null>(null);
   const [look, setLook] = useState<IndexedDoc | null>(null);
   const [palette, setPalette] = useState(false);
   const fail = (e: unknown) => say(errorText(e));
@@ -450,15 +461,17 @@ export default function Documents() {
     if (split) void openDoc(next.doc, undefined, '').catch(fail);
     return next;
   };
-  const keys = useRef({ step, look, palette, cursor, visible, remove, split, selected, picked });
+  const keys = useRef({ step, look, palette, cursor, visible, remove, deletable, split, selected, picked, menu: false, many: false });
   useEffect(() => {
-    keys.current = { step, look, palette, cursor, visible, remove, split, selected, picked };
+    keys.current = { step, look, palette, cursor, visible, remove, deletable, split, selected, picked, menu: !!menu, many: !!many };
   });
   useEffect(() => {
     if (Platform.OS !== 'web' || !focused) return;
     const onKey = (e: KeyboardEvent) => {
       const k = keys.current;
-      if (useAsk.getState().request || e.defaultPrevented || k.look || k.palette) return;
+      // Not behind a dialog, sheet or menu (they have their own keys).
+      if (useAsk.getState().request || e.defaultPrevented || k.look || k.palette || k.menu || k.many || useActions.getState().sheet) return;
+      if (document.querySelector('[aria-modal="true"], [data-testid="more-menu"]')) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (mod && key === 'k') return e.preventDefault(), setPalette(true);
@@ -474,7 +487,8 @@ export default function Documents() {
       if (key === 'ArrowDown' || key === 'ArrowUp') return e.preventDefault(), void k.step(key === 'ArrowDown' ? 1 : -1);
       if (key === 'Enter' && hit && !k.split) return e.preventDefault(), void openDoc(hit.doc, undefined, '').catch(fail);
       if (key === ' ' && hit && !k.split) return e.preventDefault(), setLook(hit.doc);
-      if (((mod && key === 'Backspace') || key === 'Delete') && (k.selected ? k.picked.length : hit)) return e.preventDefault(), void k.remove(k.selected ? k.picked : [hit!.doc]);
+      const gone = k.selected ? k.picked : hit ? [hit.doc] : [];
+      if (((mod && key === 'Backspace') || key === 'Delete') && k.deletable(gone)) return e.preventDefault(), void k.remove(gone);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -486,9 +500,6 @@ export default function Documents() {
     document.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: 'nearest' });
   }, [cursor]);
 
-  // Several documents' details at once (picked, or one from its menu), and a right click's menu.
-  const [many, setMany] = useState<IndexedDoc[] | null>(null);
-  const [menu, setMenu] = useState<{ at: { x: number; y: number }; hit: Hit } | null>(null);
   const byKey = (keys: string[]) => keys.map((k) => all.find((d) => d.key === k)).filter((d): d is IndexedDoc => !!d);
   const menuItems = (h: Hit): MenuItem[] => {
     const d = h.doc;
@@ -502,17 +513,18 @@ export default function Documents() {
       ...(editable ? [{ key: 'ctx-rename', icon: 'pencil' as IconName, label: t.rename, onPress: () => void rename(d) }] : []),
       // Not a long press: picked as it says, whatever was pressed just before.
       { key: 'ctx-select', icon: 'select', label: t.ctxSelect, onPress: () => setSelected((sel) => new Set([...(sel ?? []), d.key])) },
-      { key: 'ctx-delete', icon: 'trash', label: onlyHere([d]) ? t.remove : t.delete, hint: shortcut('⌫'), onPress: () => void remove([d]) },
+      ...(deletable([d]) ? [{ key: 'ctx-delete', icon: 'trash' as IconName, label: onlyHere([d]) ? t.remove : t.delete, hint: shortcut('⌫'), onPress: () => void remove([d]) }] : []),
     ];
   };
   // Documents dropped on the Tag chip: the tag chosen there (else asked for) added to each.
   const tagDropped = async (keys: string[]) => {
     const docs = byKey(keys);
     if (!docs.length) return;
-    const tag = filter.tag ?? (await ask({ title: t.tagDocs(docs.length), input: '', placeholder: t.tagName, confirm: t.save }))?.trim();
+    // Asked each time (the tag filtered by, to start with): those shown have that one already.
+    const tag = (await ask({ title: t.tagDocs(docs.length), input: filter.tag ?? '', placeholder: t.tagName, confirm: t.save }))?.trim();
     if (!tag) return;
-    const failed = await writeDetailsMany(docs, { add: [tag] });
-    say(failed ? t.detailsManyFailed(failed) : t.detailsManySaved(docs.length));
+    const { failed, changed } = await writeDetailsMany(docs, { add: [tag] });
+    say(failed ? t.detailsManyFailed(failed) : changed ? t.detailsManySaved(changed) : t.detailsManyNone);
   };
 
   // ⌘K: documents by title, what to filter by, and every action of the screen.
@@ -558,7 +570,7 @@ export default function Documents() {
           {/* While picking, the bar with the count stays over the top (below); the header stays in its place under it. */}
           <AppHeader tab="documents">
             <LayoutToggle />
-            {onlyMore || winWidth >= EXPAND_MORE ? (
+            {onlyMore || (!split && winWidth >= EXPAND_MORE) ? (
               // A wide window has room for each of them: one click, no ⋯ menu.
               moreItems.map((it) => <IconButton key={it.key} testID={it.key} icon={it.icon} label={it.label} onPress={it.onPress} />)
             ) : (
@@ -710,7 +722,7 @@ export default function Documents() {
                   drag={{
                     type: DOCS_TYPE,
                     // A row picked carries all the picked ones.
-                    keys: () => (selected?.has(h.doc.key) ? [...selected] : [h.doc.key]),
+                    keys: () => (selected?.has(h.doc.key) ? picked.map((d) => d.key) : [h.doc.key]),
                     file: () => dragFile(h.doc.key),
                     prepare: () => prepareDrag(h.doc),
                   }}
@@ -755,7 +767,7 @@ export default function Documents() {
             onPress={() => void rename()}
           />
  <Action testID="act-details" icon="tag" label={t.details} disabled={!picked.length} onPress={() => setMany(picked)} />
-          <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => void remove()} />
+          <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!deletable(picked)} onPress={() => void remove()} />
         </ActionBar>
       )}
       {/* Add: the camera or files, into the Tessel folder. */}

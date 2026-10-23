@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, openAiReply, pageLines, parseResult, prompt, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, openAiReply, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -88,6 +88,34 @@ describe('AI reading', () => {
     expect(r.pages[0]).toEqual({ lines: [], added: [] });
     expect(r.pages[1].lines).toEqual([{ id: '2.1', text: 'zwei' }]);
     expect(r.pages[2]).toEqual({ lines: [{ id: '3.1', text: 'drei' }], added: [{ text: 'bez', box: [1, 2, 3, 4] }] });
+  });
+
+  it('trusts the page the line ids name over a page number counted from 0', () => {
+    const reply = JSON.stringify({
+      pages: [
+        { page: 0, lines: [{ id: '1.1', text: 'eins' }], added: [] },
+        { page: 1, lines: [{ id: '2.1', text: 'zwei' }], added: [] },
+        { page: 2, lines: [], added: [{ text: 'bez', box: [1, 2, 3, 4] }] },
+      ],
+    });
+    const r = parseResult(reply, 3);
+    expect(r.pages.map((p) => p.lines.map((l) => l.text))).toEqual([['eins'], ['zwei'], []]);
+    // No ids: its number, counted from 0 like the others.
+    expect(r.pages[2].added).toHaveLength(1);
+  });
+
+  it('fails when the reply has no pages', () => {
+    expect(() => parseResult(JSON.stringify({ title: 'A', date: '', sender: '', type: '', keywords: [] }), 1)).toThrow(AI_NO_JSON);
+    // Describing (no pages asked for) needs none.
+    expect(parseResult(JSON.stringify({ title: 'A' }), 0).title).toBe('A');
+  });
+
+  it('ends a line at a wide gap, so corrected text stays within its column', () => {
+    const row = [w('left', 100, 100, 200, 125), w('more', 220, 100, 300, 125), w('right', 960, 100, 1060, 125)];
+    expect(pageLines(row, 0).map((l) => l.words.map((x) => x.text))).toEqual([['left', 'more'], ['right']]);
+    const out = applyReading(row, 0, { lines: [{ id: '1.1', text: 'left more ok' }], added: [] }, 2000, 2000);
+    expect(out.map((x) => x.text)).toEqual(['left', 'more', 'ok', 'right']);
+    expect(Math.max(...out.slice(0, 3).map((x) => x.x1))).toBeLessThanOrEqual(300);
   });
 
   it('names the file by date, sender and title', () => {
@@ -206,6 +234,28 @@ describe('output formats', () => {
     expect(sent[1].thinking).toEqual({ type: 'adaptive' });
     await describeWithAi({ api: 'anthropic', url: 'https://off.test', key: 'k', model: 'm' }, 'text').catch(() => {});
     expect(sent[2].thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('give the JSON shape in the prompt when the schema isn’t sent', async () => {
+    const texts: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { response_format?: { type: string }; messages: { content: { type: string; text?: string }[] }[] };
+      texts.push(body.messages[0].content.find((c) => c.type === 'text')!.text!);
+      if (body.response_format?.type === 'json_schema') return new Response(JSON.stringify({ error: { message: 'response_format json_schema is not supported' } }), { status: 400 });
+      return new Response(sse({ choices: [{ delta: { content: answer } }] }));
+    });
+    await describeWithAi({ api: 'openai', url: 'https://shape.test/v1', key: 'k', model: 'm' }, 'text');
+    expect(texts[0]).not.toContain('of this shape');
+    expect(texts[1]).toContain('of this shape');
+    expect(texts[1]).toContain('"keywords":[');
+  });
+
+  it('say what a server’s JSON error says, not the JSON', async () => {
+    expect(serverSaid(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }))).toBe('invalid x-api-key');
+    expect(serverSaid(JSON.stringify({ detail: 'Not found' }))).toBe('Not found');
+    expect(serverSaid('<html>Bad gateway</html>')).toBe('<html>Bad gateway</html>');
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401 }));
+    await expect(readWithAi({ api: 'openai', url: 'https://key.test/v1', key: 'k', model: 'm' }, [{ jpeg: new Blob(), lines: [] }])).rejects.toThrow('ai:server 401 Incorrect API key provided');
   });
 
   it('read an error sent with a 200 as the error', () => {

@@ -1,6 +1,7 @@
 import { BASE } from '@/core/lib/base';
 import { takeEarlyWorker } from '@/core/lib/shell';
 
+import { fingerprint } from '@/core/lib/bytes';
 import type { OpenResult, Request, Response, ResultMap } from './pdfium/protocol';
 import type { Annotation, DocHandle, DocSource, DocumentEngine, OutlineItem, PageLink, Raster, SearchHit, TextRun } from './types';
 
@@ -92,6 +93,7 @@ function handleFrom(r: OpenResult): DocHandle {
     pageSizes: r.pageSizes,
     metadata: r.metadata,
     hasForm: r.hasForm,
+    signed: r.signed,
     async renderPage(page, { width, clip, signal }): Promise<Raster> {
       const out = await client.call('render', { doc: r.doc, page, width, clip }, { signal });
       return { kind: 'bitmap', ...out };
@@ -110,7 +112,7 @@ function handleFrom(r: OpenResult): DocHandle {
     redo: () => (textCache.clear(), linkCache.clear(), client.call('redo', { doc: r.doc })),
     save: () => client.call('save', { doc: r.doc }),
     bytes: () => client.call('bytes', { doc: r.doc }),
-    addTextLayer: (pages) => client.call('addText', { doc: r.doc, pages }),
+    addTextLayer: (pages) => (textCache.clear(), linkCache.clear(), client.call('addText', { doc: r.doc, pages })),
     ocrLayer: (page) => client.call('ocrLayer', { doc: r.doc, page }),
     // A slice of pages per request: a long document's notes don't hold up the pages being drawn meanwhile.
     annotations: async () => {
@@ -132,12 +134,21 @@ export const engine: DocumentEngine = {
   async open(source, password) {
     // Copy, then transfer: the worker owns its bytes; callers keep theirs (and can retry with a password).
     const bytes = (await toBytes(source)).slice(0);
-    return handleFrom(await client.call('open', { bytes, password }, { transfer: [bytes] }));
+    const origin = fingerprint(bytes);
+    const handle = handleFrom(await client.call('open', { bytes, password }, { transfer: [bytes] }));
+    handle.origin = origin;
+    return handle;
   },
   async renderCover(source, width, password) {
     const handle = await engine.open(source, password);
-    const cover = await client.call('cover', { doc: docIds.get(handle)!, width });
-    return { cover, handle };
+    try {
+      const cover = await client.call('cover', { doc: docIds.get(handle)!, width });
+      return { cover, handle };
+    } catch (e) {
+      // No cover (no pages, a page that won't load): the document is let go here, not kept in the worker.
+      handle.close();
+      throw e;
+    }
   },
   warm: () => client.start(),
 };

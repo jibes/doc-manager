@@ -114,6 +114,18 @@ export const RESULT_SCHEMA = object({
   },
 });
 
+/** A short example of the reply a schema describes, for a request without structured output (the prompt says it). */
+export function shapeOf(schema: object): string {
+  type Node = { type?: string; description?: string; properties?: Record<string, Node>; items?: Node };
+  const example = (n: Node): unknown => {
+    if (n.type === 'object') return Object.fromEntries(Object.entries(n.properties ?? {}).map(([k, v]) => [k, example(v)]));
+    if (n.type === 'array') return n.items ? [example(n.items)] : [];
+    if (n.type === 'integer' || n.type === 'number') return 1;
+    return n.description ?? '';
+  };
+  return `Reply with one JSON object of this shape:\n${JSON.stringify(example(schema as Node))}`;
+}
+
 export function prompt(pages: AiPage[]): string {
   const listed = pages.map((p, i) => `Page ${i + 1}:\n${p.lines.map((l) => `${l.id}\t${l.text}`).join('\n') || '(no text found)'}`).join('\n\n');
   return [
@@ -149,13 +161,16 @@ export function parseResult(text: string, pageCount: number): AiResult {
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   type Entry = Partial<AiResult['pages'][number]> & { page?: unknown };
   const entries = (Array.isArray(raw.pages) ? raw.pages : []) as Entry[];
-  // Which page an entry is: its number, else the page its lines' ids name ("3.2" is on page 3), else its place
-  // in the list. A model that leaves a blank page out mustn't shift the next page's handwriting onto it.
+  if (pageCount > 0 && !Array.isArray(raw.pages)) throw new Error(AI_NO_JSON);
+  // Which page an entry is: the page its lines' ids name ("3.2" is on page 3), else its number, else its place
+  // in the list. A model that leaves a blank page out mustn't shift the next page's handwriting onto it; one that
+  // counts pages from 0 (the ids still say which) mustn't drop the last page's corrections.
+  const fromZero = entries.some((e) => Number(e?.page) === 0);
   const pageOf = (e: Entry, i: number) => {
-    const n = Number(e?.page);
-    if (Number.isInteger(n) && n >= 1 && n <= pageCount) return n - 1;
     const named = [...new Set((e?.lines ?? []).map((l) => Number(String(l?.id ?? '').split('.')[0])).filter(Number.isInteger))];
     if (named.length === 1 && named[0] >= 1 && named[0] <= pageCount) return named[0] - 1;
+    const n = Number(e?.page) + (fromZero ? 1 : 0);
+    if (Number.isInteger(n) && n >= 1 && n <= pageCount) return n - 1;
     return i;
   };
   const byPage = new Map<number, Entry>();
@@ -370,6 +385,19 @@ const asReply = (read: () => string) => {
  */
 /** A request: images (JPEG), the instructions, and the JSON schema the reply should follow. */
 type Request = { images: Blob[]; text: string; schema: object };
+const withShape = (req: Request) => `${req.text}\n\n${shapeOf(req.schema)}`;
+
+/** What a rejection said: an error body's own message ({"error": {"message": …}}, {"detail": …}), else its start. */
+export function serverSaid(said: string): string {
+  try {
+    const body = JSON.parse(said) as { error?: { message?: unknown } | string; message?: unknown; detail?: unknown };
+    const message = typeof body.error === 'string' ? body.error : (body.error?.message ?? body.message ?? body.detail);
+    if (typeof message === 'string' && message.trim()) return message.trim().slice(0, 300);
+  } catch {
+    // Not JSON: a page or plain text.
+  }
+  return said.slice(0, 200);
+}
 
 async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): Promise<string> {
   const images = await Promise.all(req.images.map(async (jpeg) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await base64(jpeg) } })));
@@ -380,7 +408,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
       // Streamed: the reply starts at once, so a proxy on the way (Cloudflare gives up after ~100 s without a
       // byte) doesn't cut off a long reading. The whole stream is read before it is used.
       stream: true,
-      messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
+      messages: [{ role: 'user', content: [...images, { type: 'text', text: structured ? req.text : withShape(req) }] }],
       ...(structured ? { output_config: { format: { type: 'json_schema', schema: req.schema } } } : {}),
       ...hints.body(),
     });
@@ -416,7 +444,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
       }
     }
     const said = await res.text().catch(() => '');
-    last = `${res.status} ${said.slice(0, 200)}`;
+    last = `${res.status} ${serverSaid(said)}`;
     if (res.status !== 400) break;
     if (hints.rejected(said)) continue;
     if (LENGTH_REJECTED.test(said) && length < MAX_TOKENS.length - 1) length++;
@@ -431,7 +459,8 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
   const body = (format: unknown) =>
     JSON.stringify({
       model: s.model.trim(),
-      messages: [{ role: 'user', content: [...images, { type: 'text', text: req.text }] }],
+      // Plain JSON or none: the schema isn't sent, so the prompt gives the shape.
+      messages: [{ role: 'user', content: [...images, { type: 'text', text: format === formats[0] ? req.text : withShape(req) }] }],
       stream: true,
       ...(format ? { response_format: format } : {}),
       ...hints.body(),
@@ -464,7 +493,7 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
       }
     }
     const said = await res.text().catch(() => '');
-    last = `${res.status} ${said.slice(0, 200)}`;
+    last = `${res.status} ${serverSaid(said)}`;
     if ((res.status === 400 || res.status === 422) && hints.rejected(said)) {
       i--;
       continue;
@@ -516,14 +545,18 @@ export async function testAi(s: AiSettings, signal?: AbortSignal): Promise<void>
 
 /* -------------------------------------------------------- the text layer ---- */
 
-/** The words of a page in lines (as the device read them), with the ids sent to the model. */
+/**
+ * The words of a page in lines (as the device read them), with the ids sent to the model. A wide gap (a gutter,
+ * between a table's cells) ends a line: its corrected text is laid out within one run of words, not across the gap.
+ */
 export function pageLines<W extends PdfWord>(words: W[], page: number): { id: string; words: W[] }[] {
   const lines: { id: string; words: W[] }[] = [];
   for (const w of words) {
     const line = lines.at(-1);
     const prev = line?.words.at(-1);
     const overlap = prev ? Math.min(prev.y1, w.y1) - Math.max(prev.y0, w.y0) : 0;
-    if (line && prev && w.x0 > prev.x0 && overlap > 0.5 * Math.min(prev.y1 - prev.y0, w.y1 - w.y0)) line.words.push(w);
+    const near = prev ? w.x0 - prev.x1 <= 2 * Math.max(prev.y1 - prev.y0, w.y1 - w.y0) : false;
+    if (line && prev && w.x0 > prev.x0 && near && overlap > 0.5 * Math.min(prev.y1 - prev.y0, w.y1 - w.y0)) line.words.push(w);
     else lines.push({ id: `${page + 1}.${lines.length + 1}`, words: [w] });
   }
   return lines;

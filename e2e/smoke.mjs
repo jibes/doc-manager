@@ -2581,6 +2581,60 @@ async function undoRedo() {
   await page.getByTestId('redo').click();
   await page.waitForTimeout(500);
   check(dirty && (await page.getByTestId('save').count()) === 0, 'undo: Save is offered only while the document differs from the saved file');
+  // Saved, undone, then a new change instead: undo and redo again don't bring back the saved state.
+  await page.getByTestId('undo').click();
+  await page.waitForTimeout(500);
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Third');
+  await page.getByTestId('note-save').click();
+  await page.waitForTimeout(500);
+  await page.getByTestId('undo').click();
+  await page.waitForTimeout(500);
+  await page.getByTestId('redo').click();
+  await page.waitForTimeout(500);
+  check((await page.getByTestId('save').count()) === 1, 'undo: a change made after undoing a saved one stays unsaved through undo and redo');
+  await ctx.close();
+}
+
+// A file changed elsewhere while open (synced from another device): saving over it is asked about first.
+async function changedElsewhere() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`changed: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Mine');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('save').waitFor();
+  // Another version of the file arrives (a revision appended, as another device's save makes).
+  const touched = await page.evaluate(async () => {
+    const find = async (dir) => {
+      for await (const [name, h] of dir.entries()) {
+        if (h.kind === 'file' && name === 'columns.pdf') return h;
+        if (h.kind === 'directory') {
+          const f = await find(h);
+          if (f) return f;
+        }
+      }
+      return null;
+    };
+    const h = await find(await navigator.storage.getDirectory());
+    if (!h) return false;
+    const bytes = new Uint8Array(await (await h.getFile()).arrayBuffer());
+    const w = await h.createWritable();
+    await w.write(new Blob([bytes, new TextEncoder().encode('\n% theirs\n%%EOF\n')]));
+    await w.close();
+    return true;
+  });
+  await page.getByTestId('save').click();
+  const asked = await page.getByText('Changed elsewhere').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  check(touched && asked, 'changed: saving over a file changed since it was opened asks first');
+  await page.getByTestId('ask-cancel').click().catch(() => page.keyboard.press('Escape'));
+  check((await page.getByTestId('save').count()) === 1, 'changed: …and cancelled, the changes stay unsaved');
+  await page.getByTestId('save').click();
+  await page.getByTestId('ask-confirm').click();
+  await page.getByTestId('save').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  check((await page.getByTestId('save').count()) === 0, 'changed: …and confirmed, saved');
   await ctx.close();
 }
 
@@ -2598,6 +2652,15 @@ async function docked() {
   const pagesBox = await page.getByTestId('pages').boundingBox();
   check(!!sideBox && !!pagesBox && pagesBox.x + pagesBox.width <= sideBox.x + 1, 'docked: the pages make room for them (nothing covered)');
   check((await page.getByTestId('open-more').count()) === 0 && (await page.getByTestId('menu-print').isVisible()) && (await page.getByTestId('menu-share').isVisible()), 'docked: every action is in the bar, no ⋯ menu');
+  // The notes tab of the docked Find lists notes too.
+  await side.getByTestId('tab-notes').click();
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Docked note');
+  await page.getByTestId('note-save').click();
+  check(await side.getByTestId('note-row').first().waitFor({ timeout: 5000 }).then(() => true, () => false), 'docked: the Notes tab lists the notes');
+  await page.getByTestId('undo').click();
+  await page.waitForTimeout(500);
+  await side.getByTestId('tab-contents').click().catch(() => {});
   await page.getByTestId('open-find').click();
   check(!(await shown('find-panel')) && (await shown('details-panel')), 'docked: Find closes on its own');
   await page.getByTestId('menu-details').click();
@@ -3178,6 +3241,7 @@ await step('forms', forms);
 await step('annotations', annotations);
 await step('page-notes', pageNotes);
 await step('undo', undoRedo);
+await step('changed', changedElsewhere);
 await step('desktop-list', desktopList);
 await step('again', again);
 await step('docked', docked);

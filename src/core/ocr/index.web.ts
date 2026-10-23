@@ -33,6 +33,8 @@ function load(): Promise<Tesseract> {
 /** ~300 dpi: Tesseract's sweet spot. */
 const DPI = 300;
 const MAX_WIDTH = 3000;
+/** Long side cap: a tall page (a receipt, a poster strip) at full DPI exceeds browsers' canvas limits. */
+const MAX_SIDE = 4200;
 const LSTM_ONLY = 1;
 
 export async function createRecognizer(): Promise<Recognizer> {
@@ -50,7 +52,8 @@ export async function createRecognizer(): Promise<Recognizer> {
   return {
     async page(handle: DocHandle, page: number) {
       const size = handle.pageSizes[page];
-      const raster = await handle.renderPage(page, { width: Math.min(MAX_WIDTH, Math.round((size.width / 72) * DPI)) });
+      const width = Math.min(MAX_WIDTH, (size.width / 72) * DPI, (MAX_SIDE * size.width) / size.height);
+      const raster = await handle.renderPage(page, { width: Math.round(width) });
       if (raster.kind !== 'bitmap') return [];
       const canvas = document.createElement('canvas');
       canvas.width = raster.width;

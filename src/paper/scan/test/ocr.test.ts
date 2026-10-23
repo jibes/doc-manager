@@ -168,6 +168,13 @@ describe('reading order', () => {
     expect(order(boxes, ['L1', 'L2', 'L3', 'L4', 'R1', 'R2', 'R3'])).toEqual(['L1', 'L2', 'L3', 'L4', 'R1', 'R2', 'R3']);
   });
 
+  it('reads two typeset columns down, even with their lines level', () => {
+    const boxes: ReturnType<typeof box>[] = [];
+    for (let i = 0; i < 6; i++) boxes.push(box(100, 100 + i * 40, 900, 125 + i * 40), box(960, 100 + i * 40, 1760, 125 + i * 40));
+    const names = boxes.map((_, i) => `${i % 2 ? 'R' : 'L'}${i >> 1}`);
+    expect(order(boxes, names)).toEqual(['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'R0', 'R1', 'R2', 'R3', 'R4', 'R5']);
+  });
+
   it("reads a form's labels and values across, row by row", () => {
     const boxes = [box(0, 0, 100, 20), box(300, 0, 400, 20), box(0, 30, 100, 50), box(300, 31, 400, 51), box(0, 60, 100, 80), box(300, 59, 400, 79)];
     expect(order(boxes, ['Datum', 'd', 'Zahlbar', 'z', 'Kunde', 'k'])).toEqual(['Datum', 'd', 'Zahlbar', 'z', 'Kunde', 'k']);

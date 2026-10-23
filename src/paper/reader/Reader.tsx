@@ -56,6 +56,7 @@ import { NoteDialog, type NoteRequest } from './NoteDialog';
 import { HIGHLIGHT_COLORS } from './selection';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
+import { changedElsewhere } from '@/paper/archive/versions';
 import { discardDetails, useDrafts } from './drafts';
 import { useMoving } from './useMoving';
 import { MoreMenu, type MenuItem } from './MoreMenu';
@@ -158,6 +159,9 @@ export function Reader({
   const writeDetails = async (details: Details) => {
     // Saved into the file: a document only viewed is kept first.
     if (!(await libraryActions().ensureKept(doc.id))) return;
+    // The details go into the file as it is now: unsaved changes with them (asked first), a field still typed in too.
+    if (edits.dirty && (await ask({ title: t.unsavedTitle, body: t.detailsWithEdits, confirm: t.detailsSaveBoth })) === null) return;
+    if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return;
     setSavingDetails(true);
     const failed = await detailsWritten(doc.id, handle, details);
     setSavingDetails(false);
@@ -222,6 +226,12 @@ export function Reader({
 
   // A document scanned elsewhere, into the scanner (its filters, crops); saved there, back into this file.
   const [preparing, setPreparing] = useState<{ done: number; total: number } | null>(null);
+  // Left before the pages were ready: the scanner isn't opened over whatever is shown by then.
+  const [me] = useState(() => ({}));
+  useEffect(() => {
+    shownReaders.add(me);
+    return () => void shownReaders.delete(me);
+  }, [me]);
   const cleanUp = async () => {
     if (!(await libraryActions().ensureKept(doc.id))) return;
     const scan = useScan.getState();
@@ -237,7 +247,7 @@ export function Reader({
       (e: unknown) => (useScan.getState().clear(), setReloaded(scanError(e)), false),
     );
     setPreparing(null);
-    if (ok) router.push('/scan/review');
+    if (ok && shownReaders.has(me)) router.push('/scan/review');
   };
 
   // A PDF with pages without text (a scan, or scanned pages after typed ones) can get their text read and added.
@@ -488,7 +498,7 @@ export function Reader({
   // Read again only when they changed (not each time Find opens).
   const annotsRead = useRef(-1);
   useEffect(() => {
-    if (panel !== 'find' || !notesShown || annotsRead.current === annotVersion) return;
+    if (!findOpen || !notesShown || annotsRead.current === annotVersion) return;
     let alive = true;
     handle.annotations().then(
       (a) => {
@@ -501,7 +511,7 @@ export function Reader({
     return () => {
       alive = false;
     };
-  }, [panel, notesShown, handle, annotVersion]);
+  }, [findOpen, notesShown, handle, annotVersion]);
 
   const askNote = useCallback(
     (initial: string, quote: string) =>
@@ -591,6 +601,8 @@ export function Reader({
     async (back: boolean) => {
       if (noteBusy.current || !(await (back ? edits.undo() : edits.redo()))) return;
       for (let pg = 0; pg < handle.pageCount; pg++) cache.invalidate(pg);
+      // The notes as they were are gone (their places may differ now): none listed until read again.
+      setAnnots(null);
       setAnnotVersion((v) => v + 1);
     },
     [edits, handle, cache],
@@ -760,6 +772,8 @@ export function Reader({
         return searchActive ? onQuery('') : edits.leave();
       }
       if (typing || mod) return;
+      // A button, tab or menu item with the focus: Space and Enter press it.
+      if ((e.key === ' ' || e.key === 'Enter') && target?.closest?.('button, [role="button"], [role="tab"], [role="menuitem"], a')) return;
       const step = vp.h * 0.15;
       const pageStep = vp.h - TOP_BAR - BOTTOM_BAR;
       // Text view scrolls its own list; page view the pages.
@@ -796,6 +810,8 @@ export function Reader({
     let cursor = { x: 0, y: 0 };
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
+      // Over the pages only: the list or a panel beside them zooms as the browser does.
+      if (!(e.target as HTMLElement | null)?.closest?.('[data-testid="reader"]')) return;
       e.preventDefault(); // trackpad pinch arrives as ctrl+wheel
       pending *= Math.exp(-e.deltaY * 0.01);
       cursor = { x: e.clientX, y: e.clientY };
@@ -884,16 +900,22 @@ export function Reader({
   }, [panel, wide]);
 
   // Document actions; how it looks lives in Aa, how to find things in the bar.
+  // A phone's bar: undo and redo in ⋯ (⌘Z still works where there are keys).
+  const narrow = winW < NARROW_BAR;
+  const stepItems: MenuItem[] = [
+    ...(narrow && edits.history.undo > 0 ? [{ key: 'undo', icon: 'undo' as const, label: t.undo, onPress: () => void travel(true) }] : []),
+    ...(narrow && edits.history.redo > 0 ? [{ key: 'redo', icon: 'redo' as const, label: t.redo, onPress: () => void travel(false) }] : []),
+  ];
   const menuItems: MenuItem[] = [
     // Most used first.
     ...(doc.viewed ? [{ key: 'keep', icon: 'inbox' as const, label: t.keepInTessel, onPress: () => void keepViewed() }] : []),
     { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
     { key: 'details', icon: 'tag', label: t.details, onPress: () => (docked && detailsOpen ? closeDetails() : openDetails()) },
     ...(outside && !doc.viewed && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
-    ...(textless && !edits.dirty && !intakeBusy ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
+    ...(textless && !edits.dirty && !intakeBusy ? [{ key: 'searchable', icon: 'searchable' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
     ...(canImprove && (improvable || textless) && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'sparkles' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
     ...(Platform.OS === 'web' && (improvable || textless) && !edits.dirty && !intakeBusy && !preparing ? [{ key: 'again', icon: 'scan' as const, label: t.again, onPress: () => void cleanUp() }] : []),
-    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
+    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: edits.dirty ? undefined : shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
   ];
 
@@ -1049,11 +1071,15 @@ export function Reader({
           </T>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {edits.history.undo > 0 && <IconButton icon="undo" label={withShortcut(t.undo, 'Z')} onPress={() => void travel(true)} testID="undo" />}
-          {edits.history.redo > 0 && <IconButton icon="redo" label={withShortcut(t.redo, '⇧Z')} onPress={() => void travel(false)} testID="redo" />}
-          {edits.dirty && (
-            <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginHorizontal: space.sm }} />
-          )}
+          {!narrow && edits.history.undo > 0 && <IconButton icon="undo" label={withShortcut(t.undo, 'Z')} onPress={() => void travel(true)} testID="undo" />}
+          {!narrow && edits.history.redo > 0 && <IconButton icon="redo" label={withShortcut(t.redo, '⇧Z')} onPress={() => void travel(false)} testID="redo" />}
+          {edits.dirty &&
+            // A phone's bar has no room for the word: the title and ⋯ stay in sight.
+            (narrow ? (
+              <IconButton icon="check" label={t.save} active onPress={() => void edits.save()} testID="save" />
+            ) : (
+              <Button label={t.save} icon="check" onPress={() => void edits.save()} testID="save" style={{ marginHorizontal: space.sm }} />
+            ))}
           {/* One button per kind: find your way, the form you read in, how it looks, the file itself. */}
           <IconButton icon="search" label={withShortcut(t.findShortcut, 'F')} active={findOpen} onPress={() => (findOpen ? closeFind() : openFind(false))} testID="open-find" />
           <IconButton
@@ -1064,8 +1090,8 @@ export function Reader({
             testID="view-toggle"
           />
           <IconButton icon="type" label={t.appearance} active={panel === 'appearance'} onPress={() => togglePanel('appearance')} testID="open-appearance" />
-          {docked ? (
-            // Beside the pages there is room for every action: one click each.
+          {docked && (vp?.w ?? 0) >= BAR_BUTTON * (menuItems.length + 7) + TITLE_MIN ? (
+            // Beside the pages there is room for every action: one click each (else the ⋯ menu, a narrow pane).
             menuItems.map((it) => (
               <IconButton
                 key={it.key}
@@ -1178,7 +1204,7 @@ export function Reader({
       )}
 
       {!docked && findPanel}
-      {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={menuItems} onClose={() => setMenu(false)} />}
+      {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={[...stepItems, ...menuItems]} onClose={() => setMenu(false)} />}
       {panel === 'appearance' && (
         <AppearancePanel
           palette={p}
@@ -1228,6 +1254,15 @@ export function Reader({
     </View>
   );
 }
+
+/** Readers on screen now (one gone meanwhile doesn't open the scanner when its pages are ready). */
+const shownReaders = new Set<object>();
+
+/** The bar's room: a button, and the least of the title that still says which document it is. */
+const BAR_BUTTON = 44;
+/** Narrower than this, Save is an icon. */
+const NARROW_BAR = 600;
+const TITLE_MIN = 140;
 
 const styles = StyleSheet.create({
   side: { width: 360, borderLeftWidth: StyleSheet.hairlineWidth },

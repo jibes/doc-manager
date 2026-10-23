@@ -42,11 +42,19 @@ const writeManifest = (root: string, items: Trashed[]) => folders.writeText(root
  * Reads, changes and writes back the manifest; nothing when it can't be read. With the trash's files (`present`),
  * entries whose file has long been gone are dropped.
  */
+const manifestChain = new Map<string, Promise<void>>();
+
 async function changeManifest(root: string, edit: (items: Trashed[]) => Trashed[], present?: Set<string>) {
-  const items = await readManifest(root);
-  if (!items) return;
-  const now = Date.now();
-  await writeManifest(root, edit(present ? items.filter((t) => present.has(t.name) || now - t.deletedAt < STALE_MS) : items));
+  // One after another per trash: two deletes in a row each read the other's entry, not the same old list.
+  const run = async () => {
+    const items = await readManifest(root);
+    if (!items) return;
+    const now = Date.now();
+    await writeManifest(root, edit(present ? items.filter((t) => present.has(t.name) || now - t.deletedAt < STALE_MS) : items));
+  };
+  const next = (manifestChain.get(root) ?? Promise.resolve()).catch(() => {}).then(run);
+  manifestChain.set(root, next);
+  await next;
 }
 
 /** The newest entry for a name (an older one may be left from a file of that name deleted before). */

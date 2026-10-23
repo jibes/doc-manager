@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The library (WebView storage) is backed up; cached outgoing files are not. -->
+<!-- WebView storage stays on the device: its settings hold the AI key (and the library is rebuilt from the Tessel
+     folder). Cached outgoing files aren't kept either. -->
 <full-backup-content>
+    <exclude domain="root" path="app_webview/" />
     <exclude domain="file" path="outgoing/" />
 </full-backup-content>

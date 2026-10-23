@@ -59,7 +59,7 @@ const ANNOT_KINDS: Record<number, Annotation['kind']> = {
  * (a save, print or share doesn't undo that: the bytes it was opened from no longer are the document).
  */
 /** The document as it was before an edit, for undo (and after one, for redo). */
-type Snapshot = { bytes: ArrayBuffer; edited: boolean };
+type Snapshot = { bytes: ArrayBuffer; edited: boolean; state: number };
 type Doc = {
   ptr: number;
   buf: number;
@@ -71,6 +71,8 @@ type Doc = {
   password: string;
   undo: Snapshot[];
   redo: Snapshot[];
+  /** Which state the document is in: 0 as opened, a new number after each step (an undo goes back to that step's). */
+  state: number;
   /** Per page: what its paper needs to come out white (a scan's grey or yellowed paper), once looked at. */
   paper: Map<number, Gain | null>;
 };
@@ -104,7 +106,12 @@ let nextDoc = 1;
 // ---------- memory helpers ----------
 
 const heap = () => (M.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
-const malloc = (n: number) => M.pdfium.wasmExports.malloc(n);
+// Out of memory gives 0 (memory may grow): writing there would overwrite every open document's memory.
+const malloc = (n: number) => {
+  const p = M.pdfium.wasmExports.malloc(n);
+  if (!p) throw new Error('Not enough memory for this document');
+  return p;
+};
 const free = (p: number) => M.pdfium.wasmExports.free(p);
 
 function withScratch<T>(bytes: number, fn: (p: number) => T): T {
@@ -183,7 +190,7 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
   const meta = (tag: string) => readUtf16((b, l) => M.FPDF_GetMetaText(ptr, tag, b, l)).trim() || undefined;
   const doc = nextDoc++;
   const { formInfo, form } = formOf(ptr);
-  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [], paper: new Map() });
+  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [], state: 0, paper: new Map() });
   // Entries kept as they are when Tessel rewrites the details.
   const other: Record<string, string> = {};
   for (const key of ['Creator', 'Producer', 'CreationDate', 'Trapped']) {
@@ -197,6 +204,7 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
     pageSizes,
     metadata: { title: meta('Title'), author: meta('Author'), subject: meta('Subject'), keywords: meta('Keywords'), date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined, other },
     hasForm: !!form,
+    signed: M.FPDF_GetSignatureCount(ptr) > 0,
   };
 }
 
@@ -852,6 +860,8 @@ function sameLine(a: NormRect, b: NormRect): boolean {
  */
 function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   const d = getDoc(docId);
+  // Changed from the first page written (a page that fails later leaves the others' text in the document).
+  d.edited = true;
   // One font for every word (a font per word made thousands of them: big files, slow pages).
   const font = M.FPDFText_LoadStandardFont(d.ptr, 'Helvetica');
   if (!font) throw new Error('Could not load the text layer font');
@@ -1210,11 +1220,13 @@ const HISTORY_BYTES = 256 * 1024 * 1024;
 
 /** The file as it is now: the bytes it was opened from until edited. */
 function current(d: Doc, docId: number): Snapshot {
-  return { bytes: d.edited ? save(docId) : heap().slice(d.buf, d.buf + d.len).buffer, edited: d.edited };
+  return { bytes: d.edited ? save(docId) : heap().slice(d.buf, d.buf + d.len).buffer, edited: d.edited, state: d.state };
 }
 
+let states = 0;
+
 function history(d: Doc) {
-  return { undo: d.undo.length, redo: d.redo.length };
+  return { undo: d.undo.length, redo: d.redo.length, state: d.state };
 }
 
 /** Before an edit (one per change the reader makes, however many calls it takes): undo comes back to here. */
@@ -1222,6 +1234,7 @@ function step(docId: number) {
   const d = getDoc(docId);
   d.undo.push(current(d, docId));
   d.redo = [];
+  d.state = ++states;
   let kept = d.undo.reduce((n, s) => n + s.bytes.byteLength, 0);
   while (d.undo.length > 1 && (d.undo.length > HISTORY_STEPS || kept > HISTORY_BYTES)) kept -= d.undo.shift()!.bytes.byteLength;
   return history(d);
@@ -1239,7 +1252,7 @@ function travel(docId: number, back: boolean) {
   from.pop();
   to.push(now);
   unload(d);
-  Object.assign(d, loaded, formOf(loaded.ptr), { edited: target.edited });
+  Object.assign(d, loaded, formOf(loaded.ptr), { edited: target.edited, state: target.state });
   return history(d);
 }
 

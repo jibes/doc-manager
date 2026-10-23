@@ -229,6 +229,8 @@ async function rootsToWalk(): Promise<{ roots: FolderRoot[]; locked: string[]; s
   // Only the Tessel folder: the one chosen, else this device's own.
   const tessel = usePrefs.getState().archive ?? APP_ROOT_ID;
   const here = all.filter((r) => r.id === tessel);
+  // Not among them for now (its folder briefly missing, say): unknown, so its documents aren't dropped and read again.
+  if (!here.length && usePrefs.getState().archive) return null;
   return { roots: here.filter((r) => !r.locked), locked: here.filter((r) => r.locked).map((r) => r.id), skip: new Map() };
 }
 
@@ -301,7 +303,10 @@ async function candidates(): Promise<{ list: Candidate[]; unlisted: Unlisted[]; 
     for (const other of handles) if (other.name === h.name && (await h.isSameEntry(other).catch(() => false))) return true;
     return false;
   };
-  for (const d of await repo.list().catch(() => [])) {
+  // Unreadable for now: unknown, rather than every library document taken for gone.
+  const library = await repo.list().catch(() => null);
+  if (!library) return null;
+  for (const d of library) {
     if (linked.has(d.id) || (d.linked && (inFolders.has(`${d.fileName}|${d.bytes}`) || (await sameFile(d.id))))) continue;
     list.push({ key: `lib:${d.id}`, place: { kind: 'library', id: d.id }, name: d.fileName, size: d.bytes, modified: d.addedAt });
   }

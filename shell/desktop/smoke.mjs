@@ -50,7 +50,8 @@ try {
   check(await page.evaluate(() => typeof window.showDirectoryPicker === 'function'), 'folders can be chosen');
   // The menu bar: the app's commands, each reaching the page as its key does (⌘F opens Find).
   const labels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.map((i) => i.label) ?? []);
-  check(['File', 'Edit', 'View'].every((l) => labels.includes(l)), `a menu bar (${labels.join(', ')})`);
+  // In the system's language (English or German).
+  check([['File', 'Edit', 'View'], ['Datei', 'Bearbeiten', 'Ansicht']].some((ls) => ls.every((l) => labels.includes(l))), `a menu bar (${labels.join(', ')})`);
   await page.getByTestId('find-panel').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
   const findBefore = await page.getByTestId('find-panel').count();
   if (findBefore) await page.getByTestId('open-find').click();

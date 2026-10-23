@@ -85,7 +85,7 @@ const isMulti = <L extends TextLine>(r: Row<L>) =>
   r.items.length >= 2 && r.items.every((l, i) => i === 0 || l.rect.x >= r.items[i - 1].rect.x + r.items[i - 1].rect.w - 0.002);
 
 /** Prose: a long line, or a sentence. Text like this is read, not looked up. */
-const SENTENCE = /[.!?…]["”’»)]?$/;
+const SENTENCE = /[.!?…。！？]["”’»)]?$/;
 const isProse = (l: TextLine) => len(l) >= 60 || (len(l) >= 30 && SENTENCE.test(l.text.trim()));
 /** Figures in a row: "27.05.2024 312 7311 1 77.00 85.45", an amount, an account number. */
 const isNumeric = (l: TextLine) => {

@@ -1,4 +1,4 @@
-import type { Graphic, NormRect, PageLayout, TextLine } from '@/core/engine/types';
+import type { Graphic, NormRect, PageLayout, Size, TextLine } from '@/core/engine/types';
 import { CAPTION, findFigures, findTables, median, mergeFigures, readingOrder, taggedTables, type Figure } from './layout';
 
 /**
@@ -38,15 +38,24 @@ type Line = TextLine & { page: number; col: number };
 
 /** Top/bottom band where running headers and footers live. */
 const BAND = 0.085;
-const SENTENCE_END = /[.!?:;…"”’»)\]]$/;
+const SENTENCE_END = /[.!?:;…"”’»)\]。！？]$/;
+/** Chinese and Japanese script, written without spaces between words (or wrapped lines). */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}。！？、，]/u;
 const BULLET = /^((?:[•▪◦‣●○■□–—*-])|(?:\d{1,3}[.)])|(?:[a-z][.)])|(?:\(\w{1,3}\)))\s+/;
 /** "9. Dezember 2024", "3. Mai": a date, not a numbered item. */
-const DATE_START = /^\d{1,2}\.\s*(jan|feb|mär|mar|apr|mai|may|jun|jul|aug|sep|okt|oct|nov|dez|dec)/i;
+const DATE_START =
+  /^\d{1,2}\.\s*(jan(uar|uary)?|feb(ruar|ruary)?|mär(z)?|mar(ch)?|apr(il)?|mai|may|jun[ie]?|jul[iy]?|aug(ust)?|sep(t|tember)?|okt(ober)?|oct(ober)?|nov(ember)?|dez(ember)?|dec(ember)?)\.?(?!\p{L})/iu;
+/** "z. B.", "d. h.", "u. a.": an abbreviation, not a lettered item. */
+const ABBREV = /^\p{L}\.\s?\p{L}\./u;
 const PAGE_NUMBER = /^(?:(?:page|seite|p\.)\s*)?[-–—(]?\s*#\s*[-–—)]?(?:\s*(?:of|von|\/)\s*#)?$/i;
 const MIN_CHARS_PER_PAGE = 40;
 const HYPHEN_END = /[-\u00ad]$/;
 /** Upper bound on lines per block, so pathological text (no punctuation for pages) stays renderable. */
 const MAX_BLOCK_LINES = 60;
+/** Rows with a gap at the same place: a gutter between columns, not a wide space in a line. */
+const GUTTER_ROWS = 3;
+/** Width over height when a page's size isn't known (A4 portrait). */
+const ASPECT = 1 / Math.SQRT2;
 
 const signature = (s: string) => s.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 const inBand = (l: { rect: NormRect }) => l.rect.y < BAND || l.rect.y + l.rect.h > 1 - BAND;
@@ -106,15 +115,23 @@ function tagKind(role: string | undefined): BlockKind {
 
 /**
  * Pieces of one line of text that came apart (a recogniser cuts a line at a wide space): next to each other on the
- * same baseline, closer than a few characters. Table cells, further apart, stay apart.
+ * same baseline, closer than a few characters. Table cells, further apart, stay apart, and so do two columns whose
+ * lines happen to be level: a gap at the same place on several rows is a gutter. `aspect` is the page's width over
+ * its height, so a gap across (in page widths) compares with line heights (in page heights).
  */
-function rejoinRows(lines: Line[]): Line[] {
+function rejoinRows(lines: Line[], aspect: number): Line[] {
+  const pieces = (prev: Line, l: Line) => {
+    const h = Math.min(l.rect.h, prev.rect.h);
+    const gap = (l.rect.x - (prev.rect.x + prev.rect.w)) * aspect;
+    return !l.role && Math.abs(l.rect.y + l.rect.h / 2 - (prev.rect.y + prev.rect.h / 2)) < h * 0.5 && gap >= -h * 0.5 && gap < h * 2.5;
+  };
+  const gaps = lines.flatMap((l, i) => (i > 0 && pieces(lines[i - 1], l) ? [[lines[i - 1].rect.x + lines[i - 1].rect.w, l.rect.x]] : []));
+  const gutter = (x0: number, x1: number) => gaps.filter(([a, b]) => a < x1 && b > x0).length >= GUTTER_ROWS;
   const out: Line[] = [];
   for (const l of lines) {
     const prev = out[out.length - 1];
-    const h = prev ? Math.min(l.rect.h, prev.rect.h) : 0;
-    const gap = prev ? l.rect.x - (prev.rect.x + prev.rect.w) : 0;
-    if (prev && !l.role && Math.abs(l.rect.y + l.rect.h / 2 - (prev.rect.y + prev.rect.h / 2)) < h * 0.5 && gap >= -h * 0.5 && gap < h * 2.5) {
+    const end = prev ? prev.rect.x + prev.rect.w : 0;
+    if (prev && pieces(prev, l) && !(l.rect.x > end && gutter(end, l.rect.x))) {
       const x1 = Math.max(prev.rect.x + prev.rect.w, l.rect.x + l.rect.w);
       const y0 = Math.min(prev.rect.y, l.rect.y);
       const y1 = Math.max(prev.rect.y + prev.rect.h, l.rect.y + l.rect.h);
@@ -136,6 +153,7 @@ function joinLines(lines: Line[]): string {
     const prev = lines[i - 1];
     const split = i > 0 && last && HYPHEN_END.test(last.slice(-1)) && (prev.hyphen || HYPHEN_END.test(prev.text.trim())) && /^\p{Ll}/u.test(text);
     if (split) parts[parts.length - 1] = last.slice(0, -1) + text;
+    else if (last && CJK.test(last.slice(-1)) && CJK.test(text.charAt(0))) parts[parts.length - 1] = last + text;
     else parts.push(text);
   });
   return parts.join(' ').replace(/\s+/g, ' ').trim();
@@ -164,15 +182,17 @@ function scannedTypography(lines: TextLine[], body: number): TextLine[] {
   });
 }
 
-export function buildReflow(input: PageLayout[]): Reflow {
+/** `sizes`: the pages' sizes, when known (for gaps across a line in its height). */
+export function buildReflow(input: PageLayout[], sizes?: Size[]): Reflow {
   // Typed pages set the body size scanned ones are measured in (10pt when all are scans).
   const typed = input.flatMap((p) => p.lines.filter((l) => !l.ocr)) as Line[];
   const typedBody = typed.length ? bodySize(typed) : 10;
-  const raw = input.map((page, i) => rejoinRows(scannedTypography(page.lines, typedBody).map((l): Line => ({ ...l, page: i, col: 0 }))));
+  const aspect = (i: number) => (sizes?.[i] ? sizes[i].width / sizes[i].height : ASPECT);
+  const raw = input.map((page, i) => rejoinRows(scannedTypography(page.lines, typedBody).map((l): Line => ({ ...l, page: i, col: 0 })), aspect(i)));
   const scanned = input.map((p) => isScanned(p.lines));
-  const chars = raw.reduce((n, p) => n + p.reduce((m, l) => m + l.text.length, 0), 0);
-  // Scanned PDFs have no text layer (or only stray OCR noise): nothing to reflow.
-  if (chars / Math.max(1, input.length) < MIN_CHARS_PER_PAGE) return { blocks: [], tagged: false, status: 'no-text' };
+  // Scanned PDFs have no text layer (or only stray OCR noise): nothing to reflow. Counted per page, so a long
+  // document with a few pages of text (the rest pictures) still reads as text.
+  if (!raw.some((p) => p.reduce((n, l) => n + l.text.length, 0) >= MIN_CHARS_PER_PAGE)) return { blocks: [], tagged: false, status: 'no-text' };
 
   const tagged = raw.some((p) => p.some((l) => l.role));
   const textPages = tagged ? raw : dropFurniture(raw);
@@ -200,7 +220,7 @@ export function buildReflow(input: PageLayout[]): Reflow {
     // A short bold line at body size standing on its own reads as a minor heading.
     if (l.bold && Math.abs(l.size - body) <= 1 && text.length < 80 && !SENTENCE_END.test(text)) return 'h3';
     if (l.size < body * 0.9 && text.length < 40 && !SENTENCE_END.test(text)) return 'label';
-    return BULLET.test(text) && !DATE_START.test(text) ? 'li' : 'p';
+    return BULLET.test(text) && !DATE_START.test(text) && !ABBREV.test(text) ? 'li' : 'p';
   };
   const kindOf = (l: Line): BlockKind => (tagged ? tagKind(l.role) : sizeKind(l));
 
@@ -237,7 +257,11 @@ export function buildReflow(input: PageLayout[]): Reflow {
       continue;
     }
     const l = it.line!;
-    const kind = kindOf(l);
+    let kind = kindOf(l);
+    const last = cur?.lines[cur.lines.length - 1];
+    // A wrapped line can start like an item ("19. Jahrhundert", "– und zwar"): a list starts after a sentence or
+    // another item, or indented.
+    if (kind === 'li' && !tagged && cur?.kind === 'p' && last && !SENTENCE_END.test(last.text.trim()) && l.rect.x <= edgeOf(l).left + 0.015) kind = 'p';
     if (held && kind !== 'caption') {
       const resume = (!cur || cur.kind === 'caption') && kind === 'p' && /^\p{Ll}/u.test(l.text.trim());
       if (resume) {

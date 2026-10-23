@@ -6,7 +6,7 @@ import { Icon } from '@/paper/components/Icon';
 import { T } from '@/paper/components/primitives';
 import { radius, space } from '@/core/design/tokens';
 import { scanError, t } from '@/core/i18n';
-import { captureStill, openCamera, setTorch, stopStream } from '../engine/camera/camera';
+import { CAMERA_UNSUPPORTED, captureStill, openCamera, setTorch, stopStream } from '../engine/camera/camera';
 import type { Detection } from '../engine/detect/heatmap';
 import { MODEL_INPUT } from '../engine/detect/model';
 import type { FilterId } from '../engine/imaging/filters';
@@ -72,6 +72,7 @@ function cameraMessage(error: unknown): string {
   if (name === 'NotAllowedError' || name === 'SecurityError') return t.scanCameraBlocked;
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return t.scanCameraMissing;
   if (name === 'NotReadableError' || name === 'AbortError') return t.scanCameraBusy;
+  if (error instanceof Error && error.message === CAMERA_UNSUPPORTED) return t.scanCameraUnsupported;
   return scanError(error);
 }
 
@@ -386,9 +387,10 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
     if (summary.failed) say(t.scanImportFailed(summary.failed));
     else if (summary.missing) say(t.scanImportNoEdges(summary.missing));
     else if (summary.cut) say(t.scanImportCut(summary.cut));
-    if (retakeId) onRetaken(retakeId);
-    // Nothing came of it: the camera stays, with what went wrong.
-    else if (useScan.getState().pages.length > before) onClose();
+    // Nothing came of it: the camera stays, with what went wrong (a failed retake leaves the page as it was).
+    if (retakeId) {
+      if (summary.added) onRetaken(retakeId);
+    } else if (useScan.getState().pages.length > before) onClose();
   };
 
   const toggleTorch = async () => {

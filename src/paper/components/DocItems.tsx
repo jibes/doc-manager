@@ -155,7 +155,8 @@ export const rightClick = (fn: () => void, menu?: (at: { x: number; y: number })
         onContextMenu: (ev: MenuEvent) => {
           ev.preventDefault();
           const ne = ev.nativeEvent;
-          if (menu && ne?.pointerType === 'mouse') menu({ x: ne.clientX ?? 0, y: ne.clientY ?? 0 });
+          // A mouse, the context-menu key or a browser that doesn't say: the menu. A long press of a finger or pen selects.
+          if (menu && ne?.pointerType !== 'touch' && ne?.pointerType !== 'pen') menu({ x: ne?.clientX ?? 0, y: ne?.clientY ?? 0 });
           else fn();
         },
       }

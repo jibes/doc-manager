@@ -51,7 +51,7 @@ jobs:
             if [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then REQUESTED="$PKG"; fi
           fi
           if [ -n "$REQUESTED" ]; then
-            if ! [[ "$REQUESTED" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Version must look like 1.2.3"; exit 1; fi
+            if ! [[ "$REQUESTED" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Version must look like 1.2.3 (no leading zeros)"; exit 1; fi
             NAME="$REQUESTED"
             echo "release=true" >> "$GITHUB_OUTPUT"
             IFS=. read -r MA MI PA <<< "${NAME%%-*}"

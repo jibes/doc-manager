@@ -111,6 +111,10 @@ export const repo: LibraryRepo = {
     if (viewed.has(id)) return Array.from({ length: pageCount }, (_, i) => viewedOcr.get(ocrKey(id, i)));
     return getMany<TextLine[] | undefined>(Array.from({ length: pageCount }, (_, i) => ocrKey(id, i)), ocr);
   },
+  async clearOcr(id) {
+    for (const k of viewedOcr.keys()) if (k.startsWith(`${id}#`)) viewedOcr.delete(k);
+    await delMany((await keys<string>(ocr)).filter((k) => k.startsWith(`${id}#`)), ocr);
+  },
   async saveOcr(id, page, lines) {
     if (viewed.has(id)) return void viewedOcr.set(ocrKey(id, page), lines);
     await set(ocrKey(id, page), lines, ocr);

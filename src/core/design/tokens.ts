@@ -45,14 +45,16 @@ export const palettes: Record<ThemeName, Palette> = {
     raised: '#FFFFFF',
     ink: '#1B1A17',
     inkSoft: '#46433D',
-    muted: '#857F73',
+    // ≥ 4.5:1 on canvas, surface and raised (it is text: captions, hints).
+    muted: '#6C675D',
     hairline: 'rgba(27,26,23,0.10)',
     accent: '#2F4F86',
     accentInk: '#FFFFFF',
     accentSoft: 'rgba(47,79,134,0.11)',
     mark: 'rgba(255,190,40,0.32)',
     markActive: 'rgba(255,150,0,0.55)',
-    markRing: '#D06A00',
+    // Also the error and destructive text colour: ≥ 4.5:1 on all three surfaces.
+    markRing: '#A25100',
     scrim: 'rgba(27,26,23,0.28)',
     glass: 'rgba(247,245,240,0.82)',
     page: { cssFilter: 'none', base: '#FFFFFF' },

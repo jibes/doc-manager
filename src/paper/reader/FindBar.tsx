@@ -22,7 +22,8 @@ type Props = {
 
 /** Compact find-in-page bar that keeps a search alive (and highlighted) after the panel closes. */
 export function FindBar({ palette: p, query, count, more, active, searching, top, onOpen, onStep, onClear }: Props) {
-  const status = count ? t.nOf(active >= 0 ? active + 1 : '–', count, !!more && !searching) : searching ? t.searching : t.noMatches;
+  // Before one is gone to: how many there are.
+  const status = count ? (active >= 0 ? t.nOf(active + 1, count, !!more && !searching) : t.results(count, !!more && !searching)) : searching ? t.searching : t.noMatches;
   return (
     <Animated.View
       entering={FadeInUp.duration(200)}

@@ -34,7 +34,7 @@ function apply(to: MiniSearch<Indexable>, change: Indexable | string) {
 
 /** The saved index with what changed since it was saved, or null (none, or unreadable). */
 async function loadSaved(): Promise<MiniSearch<Indexable> | null> {
-  const [json, changed, version] = await getMany<string | string[] | number | undefined>(['index', 'changed', 'version'], savedStore);
+  const [json, stored, version] = await getMany<string | string[] | number | undefined>(['index', 'changed', 'version'], savedStore);
   if (typeof json !== 'string' || version !== INDEX_VERSION) return null;
   let made: MiniSearch<Indexable>;
   try {
@@ -42,7 +42,8 @@ async function loadSaved(): Promise<MiniSearch<Indexable> | null> {
   } catch {
     return null;
   }
-  const keys = Array.isArray(changed) ? changed : [];
+  // With those noted here and not written yet (a search right after a change).
+  const keys = [...new Set([...(Array.isArray(stored) ? stored : []), ...changed])];
   const [metas, texts] = await Promise.all([getMany<IndexedDoc | undefined>(keys, metaStore), getMany<string[] | undefined>(keys, textStore)]);
   keys.forEach((key, i) => apply(made, metas[i] && texts[i] ? { ...metas[i], pages: texts[i] } : key));
   return made;

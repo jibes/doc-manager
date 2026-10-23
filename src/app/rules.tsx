@@ -27,7 +27,7 @@ export default function Rules() {
     <SubFrame sub="rules">
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column }}>
-          <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} up={() => router.replace('/inbox')} />
+          <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} up={() => (router.canGoBack() ? router.back() : router.replace('/inbox'))} />
           {archive ? (
             <RulesEditor archive={archive} onError={(e) => setNotice(opError(e))} />
           ) : (

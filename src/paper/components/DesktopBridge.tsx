@@ -31,17 +31,23 @@ const editable = (el: Element | null) => !!el && (/^(INPUT|TEXTAREA)$/.test(el.t
 export function DesktopBridge() {
   useEffect(() => {
     if (!desktop) return;
-    desktop.onMenu((name) => {
+    const offMenu = desktop.onMenu((name) => {
       const active = document.activeElement;
       if ((name === 'undo' || name === 'redo') && editable(active)) return void document.execCommand(name);
       const k = KEYS[name];
       if (!k) return;
       (active ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k.key, metaKey: mac, ctrlKey: !mac, shiftKey: !!k.shift, bubbles: true, cancelable: true }));
     });
-    desktop.onUpdate(({ version, url }) => {
+    const offUpdate = desktop.onUpdate(({ version, url, failed }) => {
+      // Not "up to date" when the check didn't get an answer (offline, rate-limited).
+      if (failed) return sayRoot(t.updateFailed);
       if (!version || !url) return sayRoot(t.updateNone);
       sayRoot(t.updateAvailable(version), { label: t.updateGet, onPress: () => void Linking.openURL(url) });
     });
+    return () => {
+      offMenu();
+      offUpdate();
+    };
   }, []);
   return null;
 }

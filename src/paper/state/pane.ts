@@ -28,6 +28,8 @@ export async function showInPane(doc: PaneDoc): Promise<boolean> {
   if (!usePane.getState().split) return false;
   if (usePane.getState().doc?.id === doc.id && !doc.page) return true;
   if (await mayLeave()) usePane.setState({ doc, ...(doc.key ? { cursor: doc.key } : {}) });
+  // Kept: the cursor goes back to it.
+  else usePane.setState((s) => ({ cursor: s.doc?.key ?? s.cursor }));
   return true;
 }
 

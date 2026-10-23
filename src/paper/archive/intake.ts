@@ -1,3 +1,4 @@
+import { changedElsewhere } from './versions';
 import { create } from 'zustand';
 
 import { engine } from '@/core/engine';
@@ -103,6 +104,8 @@ async function work() {
   let read = 0;
   let failed = 0;
   let aiFailed = 0;
+  // The first reason the model failed: the same for all of them, as a rule (a key, an address, a model).
+  let aiWhy = '';
   while (queue.length) {
     const job = queue.shift()!;
     current = job.rec.id;
@@ -113,14 +116,17 @@ async function work() {
     if (!job.asked) {
       if (r.result === 'read') read++;
       else if (r.result === 'failed') failed++;
-      if (r.aiFailed) aiFailed++;
+      if (r.aiFailed) {
+        aiFailed++;
+        aiWhy ||= typeof r.aiFailed === 'string' ? r.aiFailed : '';
+      }
     }
     current = null;
     kept.current = null;
     useIntake.setState({ reading: null, finished: { id: job.rec.id, said: r.said, changed: r.changed } });
   }
   waiting();
-  const summary = failed ? t.intakeFailed(failed) : aiFailed ? t.intakeAiFailed(aiFailed) : read ? t.intakeRead(read) : null;
+  const summary = failed ? t.intakeFailed(failed) : aiFailed ? (aiWhy ? t.intakeAiFailedWhy(aiFailed, aiWhy) : t.intakeAiFailed(aiFailed)) : read ? t.intakeRead(read) : null;
   useIntake.setState({ said: summary });
   running = false;
 }
@@ -143,14 +149,17 @@ const untilSaved = (id: string) =>
     });
   });
 
-type Outcome = { result: 'read' | 'nothing' | 'failed'; said: string | null; changed: boolean; aiFailed?: boolean };
+/** `aiFailed`: the model couldn't read it (why, in words). */
+type Outcome = { result: 'read' | 'nothing' | 'failed'; said: string | null; changed: boolean; aiFailed?: boolean | string };
 
-async function readOne(job: Job): Promise<Outcome> {
+async function readOne(job: Job, again = false): Promise<Outcome> {
   const { rec, ai: byModel, asked, describe } = job;
   const handle = await engine.open(await repo.source(rec.id), passwordFor(rec.id));
   try {
     // An added document with text on every page is left as it is (a scan's text, or one asked for, is read again).
     if (!asked && !describe && !(await pagesWithoutText(handle)).length) return { result: 'nothing', said: null, changed: false };
+    // A signed one only when asked for: its signature would show the pages as changed.
+    if (!asked && handle.signed) return { result: 'nothing', said: null, changed: false };
     const name = rec.title || rec.fileName;
     const progress = (done: number, total: number) => useIntake.setState({ reading: { id: rec.id, name, done, total, ai: byModel } });
     progress(0, 0);
@@ -158,12 +167,12 @@ async function readOne(job: Job): Promise<Outcome> {
     let bytes: ArrayBuffer | string;
     let said: string | null = asked ? t.searchableDone : null;
     let found: AiDescription | undefined;
-    let aiFailed = false;
+    let aiFailed: boolean | string = false;
     if (byModel && aiReady(settings)) {
       const improved = await improveWithAi(handle, settings, progress).catch((e: unknown) => {
         // Asked for: said so. Else the device reads what has no text yet.
         if (asked) throw e;
-        aiFailed = true;
+        aiFailed = aiMessage(e);
         return undefined;
       });
       if (improved === null && asked) return { result: 'nothing', said: t.improveNothing, changed: false };
@@ -180,6 +189,12 @@ async function readOne(job: Job): Promise<Outcome> {
     if (describe && found) bytes = described(handle, bytes, found, describe.name);
     if (!(await repo.requestAccess(rec.id, true).catch(() => false))) return { result: 'failed', said: asked ? t.searchableFailed(t.writeDenied) : null, changed: false };
     await untilSaved(rec.id);
+    // Saved meanwhile (notes added in the reader) or synced from another device: read again from that file, once.
+    if (await changedElsewhere(rec.id, handle)) {
+      if (again) return { result: 'failed', said: asked ? t.changedWhileReading : null, changed: false };
+      handle.close();
+      return await readOne(job, true);
+    }
     await repo.writeFile(rec.id, bytes);
     void import('./indexer').then((m) => m.invalidate(rec.id));
     if (describe?.name && found) await nameFile(rec.id, found).catch(() => {});

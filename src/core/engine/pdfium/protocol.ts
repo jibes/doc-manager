@@ -26,7 +26,7 @@ export type Request =
   | { id: number; type: 'cancel'; target: number }
   | { id: number; type: 'close'; doc: number };
 
-export type OpenResult = { doc: number; pageCount: number; pageSizes: Size[]; metadata: DocMetadata; hasForm: boolean };
+export type OpenResult = { doc: number; pageCount: number; pageSizes: Size[]; metadata: DocMetadata; hasForm: boolean; signed: boolean };
 
 export type Response =
   | { id: number; ok: true; result: unknown }

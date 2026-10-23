@@ -255,6 +255,62 @@ describe('buildReflow', () => {
     expect(blocks[3].text).toBe('Freundliche Grüsse\nNordkorn AG');
   });
 
+  it('reads a numbered item starting with a word like a month as an item, not a date', () => {
+    const page = [
+      line('Our plan has these steps for the next year:', 0.1),
+      ...para(0.12, ['1. Marketing budget review for all teams', '2. Decision on the new office location', '3. Maintenance of the old one', '4. Novel ideas']),
+      ...para(0.25, [filler, filler, 'the end.']),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks.slice(1, 5).map((b) => [b.kind, b.marker])).toEqual([
+      ['li', '1.'],
+      ['li', '2.'],
+      ['li', '3.'],
+      ['li', '4.'],
+    ]);
+  });
+
+  it('keeps a wrapped line that only looks like an item in its paragraph', () => {
+    const page = [
+      ...para(0.1, ['Die Kirche wurde im', '19. Jahrhundert umgebaut und erhielt einen neuen Turm aus Stein', 'der heute noch steht, ein Wahrzeichen', '– und zwar für die ganze Region bis heute.']),
+      ...para(0.2, ['Viele Formulare verlangen zusätzliche Angaben.', 'z. B. die Steuernummer oder die Adresse des Arbeitgebers.']),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks[0]).toMatchObject({ kind: 'p', text: 'Die Kirche wurde im 19. Jahrhundert umgebaut und erhielt einen neuen Turm aus Stein der heute noch steht, ein Wahrzeichen – und zwar für die ganze Region bis heute.' });
+    // An abbreviation after a sentence isn't a lettered item either.
+    expect(blocks.every((b) => b.kind === 'p')).toBe(true);
+    expect(blocks.map((b) => b.text).join(' ')).toContain('z. B. die Steuernummer');
+  });
+
+  it('joins wrapped Chinese lines without spaces and ends sentences at 。', () => {
+    const cjk = '这是一个很长的中文句子用于测试重排功能是否正确';
+    const short = (t: string, y: number) => line(t, y, { rect: { x: 0.12, y, w: 0.4, h: 0.014 } });
+    const { blocks } = reflow([[line(cjk, 0.1), line(cjk, 0.12), short(`${cjk}。`, 0.14), line(cjk, 0.16), line(cjk, 0.18), short(`${cjk}。`, 0.2)]]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].text).toBe(`${cjk}${cjk}${cjk}。`);
+  });
+
+  it('reads a long document with only a few pages of text as text', () => {
+    const pages = Array.from({ length: 25 }, (_, i) => (i === 0 ? para(0.1, [filler, filler, filler, 'the end.']) : []));
+    expect(reflow(pages).status).toBe('ok');
+    expect(reflow(Array.from({ length: 3 }, () => [line('x', 0.5)])).status).toBe('no-text');
+  });
+
+  it('keeps level lines of two scanned columns apart, read one column after the other', () => {
+    const page: TextLine[] = [];
+    for (let i = 0; i < 20; i++) {
+      const y = 0.1 + i * 0.03;
+      page.push(line(`left column line ${i} with some words in it and a few more words`, y, { ocr: true, rect: { x: 0.08, y, w: 0.4, h: 0.014 } }));
+      page.push(line(`right column line ${i} with some words too and a few more words`, y, { ocr: true, rect: { x: 0.51, y, w: 0.4, h: 0.014 } }));
+    }
+    const { blocks } = reflow([page]);
+    expect(blocks.some((b) => b.kind === 'figure')).toBe(false);
+    const text = blocks.map((b) => b.text).join(' ');
+    expect(text).not.toContain('line 0 with some words in it and a few more words right');
+    // All of the left column, then the right.
+    expect(text.indexOf('left column line 19')).toBeLessThan(text.indexOf('right column line 0'));
+  });
+
   it('joins a line the recogniser cut in two on the same baseline', () => {
     const page = [
       ...para(0.1, [filler, filler]),

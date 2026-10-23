@@ -39,7 +39,7 @@ function start(handle: DocHandle, docId: string): Job {
       pages.push(...layout);
       set(job, { status: 'loading', progress: Math.min(1, (i + CHUNK) / handle.pageCount) });
     }
-    const reflow = buildReflow(pages);
+    const reflow = buildReflow(pages, handle.pageSizes);
     if (reflow.status === 'no-text' && ocrAvailable) {
       // Recognition started in an earlier session picks up where it stopped.
       const saved = await repo.loadOcr(docId, handle.pageCount).catch(() => []);
@@ -61,7 +61,7 @@ async function runOcr(job: Job, saved?: (TextLine[] | undefined)[]) {
   const publish = (running: boolean, failed = false) =>
     set(job, {
       status: 'ready',
-      reflow: buildReflow(pages.slice(0, done).map((lines) => ({ lines: lines ?? [], graphics: [] }))),
+      reflow: buildReflow(pages.slice(0, done).map((lines) => ({ lines: lines ?? [], graphics: [] })), handle.pageSizes),
       ocr: { done, total, running, failed },
       canOcr: true,
     });
@@ -72,7 +72,8 @@ async function runOcr(job: Job, saved?: (TextLine[] | undefined)[]) {
     for (; done < total; ) {
       if (!pages[done]) {
         rec ??= await createRecognizer();
-        const lines = await rec.page(handle, done);
+        // One page that can't be read (damaged, too large) leaves it blank rather than stopping at it for good.
+        const lines = await rec.page(handle, done).catch(() => [] as TextLine[]);
         pages[done] = lines;
         repo.saveOcr(docId, done, lines).catch(() => {});
       }

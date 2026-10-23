@@ -8,12 +8,13 @@ import type { Current } from '@/core/lib/fileActions';
 import { holdBrowserBack } from '@/core/lib/backGuard';
 import { goBack } from '@/core/lib/nav';
 import { invalidate } from '@/paper/archive/indexer';
+import { changedElsewhere, writeFrom } from '@/paper/archive/versions';
 import { repo, type DocRecord } from '@/core/storage';
 import { libraryActions } from '@/paper/state/library';
 import { drafting, useDrafts } from './drafts';
 
 /** A form field being typed in commits its text when it loses focus: before saving, printing or sharing. */
-const NO_STEPS: History = { undo: 0, redo: 0 };
+const NO_STEPS: History = { undo: 0, redo: 0, state: 0 };
 
 function commitField() {
   if (Platform.OS !== 'web') return;
@@ -67,7 +68,7 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
       if (!h) return false;
       setHistory(h);
       edits.current++;
-      const clean = h.undo === steps.current.savedAt;
+      const clean = h.state === steps.current.savedAt;
       dirtyNow.current = !clean;
       setDirty(!clean);
       return true;
@@ -83,16 +84,18 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     if (!(await libraryActions().ensureKept(doc.id))) return;
     // Ask for write access first, while the click or key press still counts as a user gesture.
     if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return setNotice(t.saveFailed);
+    // Changed meanwhile (synced from another device, written by another app): writing over it is asked about.
+    if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return;
     const bytes = await handle.save().catch(() => null);
     if (!bytes) return setNotice(t.saveFailed);
     // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
     const saved = edits.current;
-    if (!(await repo.writeFile(doc.id, bytes).then(() => true, () => false))) return setNotice(t.saveFailed);
+    if (!(await writeFrom(doc.id, handle, bytes).then(() => true, () => false))) return setNotice(t.saveFailed);
     // Its size as now: browsers tell a linked document's file by its name and size.
     libraryActions().patchDoc(doc.id, { bytes: bytes.byteLength });
     invalidate(doc.id);
     if (edits.current === saved) {
-      if (steps.current.handle === handle) steps.current.savedAt = steps.current.history.undo;
+      if (steps.current.handle === handle) steps.current.savedAt = steps.current.history.state;
       dirtyNow.current = false;
       setDirty(false);
     }

@@ -37,9 +37,9 @@ export const engine: DocumentEngine = {
       updateAnnotation: async () => {},
       removeAnnotation: async () => {},
       setField: async () => [],
-      step: async () => ({ undo: 0, redo: 0 }),
-      undo: async () => ({ undo: 0, redo: 0 }),
-      redo: async () => ({ undo: 0, redo: 0 }),
+      step: async () => ({ undo: 0, redo: 0, state: 0 }),
+      undo: async () => ({ undo: 0, redo: 0, state: 0 }),
+      redo: async () => ({ undo: 0, redo: 0, state: 0 }),
       save: async () => {
         throw new Error('Saving is not available in the app yet');
       },

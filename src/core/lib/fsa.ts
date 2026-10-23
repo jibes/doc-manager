@@ -80,7 +80,8 @@ export async function writeFile(h: FileHandle, data: Blob | BufferSource): Promi
   const root = (await navigator.storage.getDirectory()) as unknown as DirHandle;
   const path = await root.resolve(h);
   if (!path) throw new Error('This file can’t be written here.');
-  const worker = new Worker(URL.createObjectURL(new Blob([WRITER], { type: 'text/javascript' })));
+  const url = URL.createObjectURL(new Blob([WRITER], { type: 'text/javascript' }));
+  const worker = new Worker(url);
   try {
     const done = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
       worker.onmessage = (e) => resolve(e.data);
@@ -90,6 +91,7 @@ export async function writeFile(h: FileHandle, data: Blob | BufferSource): Promi
     if (!done.ok) throw new Error(done.error);
   } finally {
     worker.terminate();
+    URL.revokeObjectURL(url);
   }
 }
 

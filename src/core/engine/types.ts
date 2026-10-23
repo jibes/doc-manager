@@ -144,7 +144,8 @@ export type RenderOptions = {
 };
 
 /** Changes that can be undone and redone. */
-export type History = { undo: number; redo: number };
+/** Steps to undo and redo; `state`: which version of the document is shown (0 as opened), to tell the saved one by. */
+export type History = { undo: number; redo: number; state: number };
 
 export interface DocHandle {
   readonly pageCount: number;
@@ -153,6 +154,8 @@ export interface DocHandle {
   readonly metadata: DocMetadata;
   /** The PDF has an interactive form. */
   readonly hasForm: boolean;
+  /** Signed: its pages aren't changed unless asked (a text layer added after signing shows as altered). */
+  readonly signed?: boolean;
   renderPage(page: number, opts: RenderOptions): Promise<Raster>;
   outline(): Promise<OutlineItem[]>;
   /** Streams hits per page via onHits; resolves when done or aborted. */
@@ -189,6 +192,8 @@ export interface DocHandle {
   /** A page's invisible text layer, to be read again (by a model). */
   ocrLayer(page: number): Promise<OcrLayer>;
   close(): void;
+  /** The file as it was opened (core/lib/bytes fingerprint), or last written from here: whether something else changed it since. */
+  origin?: string;
 }
 
 export interface DocumentEngine {

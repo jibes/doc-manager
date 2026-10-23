@@ -92,11 +92,12 @@ export function stopStream(stream: MediaStream | null | undefined): void {
   for (const track of stream?.getTracks() ?? []) track.stop();
 }
 
+/** No camera API here: plain http (beyond localhost), or a browser without getUserMedia. Put in words by the UI. */
+export const CAMERA_UNSUPPORTED = 'camera:unsupported';
+
 /** Open the rear camera, preferring the standard lens, or `deviceId` if given. */
 export async function openCamera(deviceId: string | null): Promise<OpenCamera> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error('Camera access needs HTTPS (or localhost) and a browser with getUserMedia.');
-  }
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error(CAMERA_UNSUPPORTED);
 
   let preferred = deviceId;
   // Once camera permission has been granted, labels are visible before any

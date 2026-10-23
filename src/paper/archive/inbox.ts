@@ -180,7 +180,8 @@ export async function fileDocument(
     const handle = await engine.open({ kind: 'bytes', bytes: bytes.slice().buffer });
     try {
       // Pages without text get it (read on the device), so the filed document can be searched.
-      const searchable = await makeSearchable(handle, onProgress, undefined, p.read);
+      // Not a signed one's (its signature would show the pages as changed).
+      const searchable = handle.signed ? 'signed' : await makeSearchable(handle, onProgress, undefined, p.read);
       if (typeof searchable !== 'string') bytes = new Uint8Array(searchable);
       bytes = withInfo(bytes, infoFor(details, handle.metadata.other));
     } finally {

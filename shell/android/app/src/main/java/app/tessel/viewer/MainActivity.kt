@@ -138,7 +138,8 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        handleIntent(intent)
+        // Recreated (after process death) or relaunched from Recents: the intent is the old one, already imported.
+        if (savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) handleIntent(intent)
         // Always start fresh: the app itself restores the library and each document's position.
         web.loadUrl("${AppAssets.ORIGIN}/")
         bridge.sweep()

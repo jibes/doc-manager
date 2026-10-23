@@ -201,10 +201,12 @@ const GUTTER = 1.2;
 const BAND_GAP = 0.75;
 /** Lines on the two sides of a gutter pairing into rows this well: a table or form, read across. */
 const ALIGNED = 0.6;
+/** A median line this many line heights long is running text, not a cell. */
+const COLUMN_LINE = 10;
 
 /**
  * Recursive XY cut. A vertical gutter splits the boxes into columns read one
- * after the other, unless the two sides' lines run level (a form's labels and
+ * after the other, unless the two sides are short cells that run level (a form's labels and
  * values, a table's cells): those are rows, read across. Otherwise the widest
  * horizontal gap splits them into bands, top to bottom.
  */
@@ -220,10 +222,20 @@ export function blocks(boxes: TextBox[]): TextBox[][] {
   if (cut && cut.size >= GUTTER * h) {
     const left = boxes.filter((b) => b.x1 <= cut.at);
     const right = boxes.filter((b) => b.x0 >= cut.at);
-    if (left.length >= 2 && right.length >= 2 && levelShare(left, right) < ALIGNED) return [...blocks(left), ...blocks(right)];
+    // Level rows only make a table of short cells: typeset columns share baselines too, and are read down.
+    const cells = !isColumn(left, h) && !isColumn(right, h);
+    if (left.length >= 2 && right.length >= 2 && (!cells || levelShare(left, right) < ALIGNED)) return [...blocks(left), ...blocks(right)];
   }
   if (band && band.size >= BAND_GAP * h) return bands();
   return [boxes];
+}
+
+/** Running text: lines many line heights long that (mostly) fill their side's width, unlike a form's or table's cells. */
+function isColumn(side: TextBox[], h: number): boolean {
+  const widths = side.map((b) => b.x1 - b.x0).sort((a, b) => a - b);
+  const w = widths[widths.length >> 1];
+  const extent = Math.max(...side.map((b) => b.x1)) - Math.min(...side.map((b) => b.x0));
+  return w >= COLUMN_LINE * h && w >= 0.7 * extent;
 }
 
 /** The widest stretch along an axis that no box covers, between the first box and the last. */
