@@ -91,6 +91,12 @@ export const repo: LibraryRepo = {
   },
   async saveCover(id, cover) {
     await set(id, cover, covers);
+    // A new cover (its pages cleaned up, say): the old picture's URL is let go, the next asks for the new one.
+    const old = coverUrls.get(id);
+    if (old) {
+      coverUrls.delete(id);
+      URL.revokeObjectURL(old);
+    }
   },
   async coverUri(id) {
     const cached = coverUrls.get(id);

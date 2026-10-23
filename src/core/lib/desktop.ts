@@ -7,6 +7,8 @@
 type DesktopApi = {
   http(request: { url: string; method: string; headers: Record<string, string>; body: string }, onAbort?: (abort: () => void) => void): Promise<{ status: number; body: string }>;
   onOpen(cb: (files: { name: string; bytes: Uint8Array }[]) => void): void;
+  onMenu(cb: (name: string) => void): void;
+  onUpdate(cb: (info: { version: string | null; url: string | null }) => void): void;
 };
 
 export const desktop: DesktopApi | undefined = typeof window !== 'undefined' ? (window as unknown as { TesselDesktop?: DesktopApi }).TesselDesktop : undefined;

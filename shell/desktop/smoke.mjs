@@ -48,6 +48,17 @@ try {
   check(reply.status === 200 && asked?.body === '{"q":1}', `AI requests are made by the app (${reply.status}, ${asked?.url})`);
   // Folders: Chromium's own picker is there (the Tessel folder can be chosen as on the website).
   check(await page.evaluate(() => typeof window.showDirectoryPicker === 'function'), 'folders can be chosen');
+  // The menu bar: the app's commands, each reaching the page as its key does (⌘F opens Find).
+  const labels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.map((i) => i.label) ?? []);
+  check(['File', 'Edit', 'View'].every((l) => labels.includes(l)), `a menu bar (${labels.join(', ')})`);
+  await page.getByTestId('find-panel').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  const findBefore = await page.getByTestId('find-panel').count();
+  if (findBefore) await page.getByTestId('open-find').click();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu', 'find'));
+  check(await page.getByTestId('find-panel').waitFor({ timeout: 5000 }).then(() => true, () => false), 'a menu command does what its key does (Find)');
+  // A document in a window of its own: the app's own page, in a window of the app.
+  const [second] = await Promise.all([app.waitForEvent('window', { timeout: 15000 }), page.evaluate(() => window.open('/', '_blank'))]);
+  check(!!second && second.url().startsWith('app://tessel/'), `opens a second window of the app (${second?.url()})`);
   check(!errors.length, `no page errors (${errors.join('; ')})`);
 } finally {
   await app.close();

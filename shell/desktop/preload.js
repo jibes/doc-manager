@@ -15,4 +15,8 @@ contextBridge.exposeInMainWorld('TesselDesktop', {
     ipcRenderer.on('open', (_e, files) => cb(files));
     ipcRenderer.send('ready-for-files');
   },
+  /** A command chosen in the menu bar ('undo', 'find', 'scan', …). */
+  onMenu: (cb) => ipcRenderer.on('menu', (_e, name) => cb(name)),
+  /** A newer version is out ({ version, url }), or (asked for, none newer) { version: null }. */
+  onUpdate: (cb) => ipcRenderer.on('update', (_e, info) => cb(info)),
 });

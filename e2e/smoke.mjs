@@ -26,6 +26,23 @@ async function newContext(opts, { fsa = false } = {}) {
   return ctx;
 }
 
+/** Picks a document in a list: a right click (with a mouse it opens the row's menu, which has Select). */
+async function pick(row) {
+  await row.click({ button: 'right' });
+  const select = row.page().getByTestId('menu-ctx-select');
+  await select.waitFor({ timeout: 1500 }).then(() => select.click(), () => {});
+  // The menu fades out before the rows under it take clicks.
+  await row.page().getByTestId('more-menu').waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+}
+
+/** One of the list's other places (Inbox, Trash, …): its own button on a wide window, else in ⋯. */
+async function more(page, key) {
+  const own = page.getByTestId(`more-${key}`).locator('visible=true');
+  if (await own.count()) return own.click();
+  await page.getByTestId('docs-more').locator('visible=true').click();
+  await page.getByTestId(`action-more-${key}`).click();
+}
+
 /** Documents in the list (the app's one screen), last opened first. */
 const docRows = (page) => page.locator('[data-testid="archive-hit"]:visible');
 
@@ -69,8 +86,7 @@ async function chooseTessel(page, { stay = false, answer = 'move' } = {}) {
 }
 /** ⋯ → Inbox. */
 async function openInbox(page) {
-  await page.getByTestId('docs-more').locator('visible=true').click();
-  await page.getByTestId('action-more-inbox').click();
+  await more(page, 'inbox');
 }
 /** Add → Camera: the scanner. */
 async function openScan(page) {
@@ -852,14 +868,16 @@ async function tidy() {
   let menu = '';
   for (let i = 0; i < 60 && !/2 duplicates/.test(menu); i++) {
     await page.waitForTimeout(500);
-    await vis('docs-more').click();
-    await page.getByTestId('action-more-trash').waitFor();
-    menu = await page.getByTestId('action-sheet').innerText().catch(() => '');
-    await page.keyboard.press('Escape');
+    const own = vis('more-duplicates');
+    if (await own.count()) menu = (await own.getAttribute('aria-label')) ?? '';
+    else {
+      await vis('docs-more').click();
+      menu = await page.getByTestId('action-sheet').innerText().catch(() => '');
+      await page.keyboard.press('Escape');
+    }
   }
   check(/2 duplicates/.test(menu), `tidy: ⋯ says how many documents are there twice (${menu.replace(/\n/g, ' / ')})`);
-  await vis('docs-more').click();
-  await page.getByTestId('action-more-duplicates').click();
+  await more(page, 'duplicates');
   await vis('duplicate-group').first().waitFor();
   const groups = await vis('duplicate-group').allInnerTexts();
   const versions = groups.find((g) => /Older versions/i.test(g)) ?? '';
@@ -1232,8 +1250,7 @@ async function foldersShell() {
   check(listed.length === 2 && listed.some((r) => r.includes('Orderly Notes')) && listed.some((r) => r.includes('Visit request')) && !listed.some((r) => r.includes('Harbour Notes')), `folders-shell: the chosen Tessel folder's PDFs are listed, in its folders too, without the EPUB book (${listed.map((r) => r.split('\n')[0])})`);
   await page.screenshot({ path: `${OUT}folders-shell-sources.png` });
   const row = (title) => docRows(page).filter({ hasText: title });
-  // A long press on a phone also fires a context menu, and its release a tap: the item stays selected.
-  await row('Orderly Notes').click({ button: 'right' });
+  // A long press on a phone fires a context menu (not a mouse's), and its release a tap: the item stays selected.
   await row('Orderly Notes').dispatchEvent('contextmenu');
   await row('Orderly Notes').click();
   await page.waitForTimeout(200);
@@ -1265,7 +1282,7 @@ async function foldersShell() {
   check((await page.evaluate(() => window.__shell.shared.length)) === 1, 'folders-shell: documents can be shared to other apps');
   // ✕ ends picking, with a touch as on a phone (it ends the touch press on the row too).
   await page.waitForTimeout(900);
-  await row('Orderly Notes').click({ button: 'right' });
+  await pick(row('Orderly Notes'));
   const x = await vis('select-cancel').boundingBox();
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x.x + x.width / 2, y: x.y + x.height / 2 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
@@ -1286,7 +1303,7 @@ async function foldersShell() {
 
   // Deleted: to the Tessel folder's trash.
   await page.waitForTimeout(900);
-  await row('Visit request').click({ button: 'right' });
+  await pick(row('Visit request'));
   await vis('act-delete').click();
   await page.waitForTimeout(1500);
   const form = (await nodes()).find((n) => n.name === 'form.pdf');
@@ -2060,7 +2077,7 @@ async function syncSafety() {
   await openDocs(page);
   const keepme = docRows(page).filter({ hasText: 'keepme' });
   await keepme.waitFor({ timeout: 30000 });
-  await keepme.click({ button: 'right' });
+  await pick(keepme);
   await vis('act-delete').click();
   await page.getByText('Moved to the trash.').waitFor({ timeout: 10000 });
   check((await names('.tessel/trash')).includes('keepme.pdf') && !(await names('')).includes('keepme.pdf'), 'sync: deleting in the archive moves to its trash');
@@ -2098,8 +2115,7 @@ async function syncSafety() {
 
   // The trash (Documents → ⋯): restore one, delete one for good.
   await vis('screen-back').click();
-  await vis('docs-more').click();
-  await page.getByTestId('action-more-trash').click();
+  await more(page, 'trash');
   await vis('trash-item').first().waitFor();
   check(/30 days left|29 days left/.test(await vis('trash-item').first().innerText()), 'sync: the trash says how long each item stays');
   const before = await vis('trash-item').count();
@@ -2383,6 +2399,14 @@ async function again() {
   await page.getByTestId('details-save').click();
   await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
   await page.waitForTimeout(2600);
+  // The list's picture of it, as it is before.
+  await page.getByTestId('back').click();
+  await docRows(page).first().locator('img').first().waitFor({ timeout: 15000 }).catch(() => {});
+  const picture = () => docRows(page).first().locator('img').first().getAttribute('src').catch(() => null);
+  const pictured = await picture();
+  await docRows(page).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(2600);
   const bytes = () => page.evaluate(async () => (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Tessel')).getFileHandle('scan.pdf')).getFile()).size);
   const before = await bytes().catch(() => 0);
   await page.getByTestId('open-more').click();
@@ -2406,6 +2430,9 @@ async function again() {
   await docRows(page).first().waitFor();
   await page.waitForTimeout(800);
   check((await docRows(page).count()) === 1, 'again: no second document');
+  let repictured = pictured;
+  for (let i = 0; i < 40 && repictured === pictured; i++) repictured = await page.waitForTimeout(250).then(picture);
+  check(!!pictured && !!repictured && repictured !== pictured, 'again: the list shows its new first page');
   await ctx.close();
 }
 
@@ -2442,6 +2469,41 @@ async function desktopList() {
   await page.keyboard.press('Escape');
   await pane.getByTestId('back').click();
   check(/Choose a document/.test(await pane.innerText()), 'desktop list: closing it leaves the list alone');
+
+  // A right click: the row's menu. Details of one, then of two at once; a row dropped on Tag tags it.
+  const rowText = async (i) => (await docRows(page).nth(i).innerText()).replace(/\n/g, ' ');
+  await docRows(page).first().click({ button: 'right' });
+  await page.getByTestId('menu-ctx-details').click();
+  await page.getByTestId('many-details').waitFor();
+  await page.waitForTimeout(400);
+  await page.getByTestId('many-sender').fill('Nordkorn');
+  await page.getByTestId('many-save').click();
+  await page.getByText('Details written into 1 document.').waitFor({ timeout: 20000 }).then(() => check(true, 'desktop list: details of one, from its menu'), () => check(false, 'desktop list: details of one, from its menu'));
+  let senders = '';
+  for (let i = 0; i < 40 && !/Nordkorn/.test(senders); i++) senders = await page.waitForTimeout(250).then(() => docRows(page).allInnerTexts().then((r) => r.join(' | ')));
+  check(/Nordkorn/.test(senders), `desktop list: …written into the file and listed (${senders.replace(/\n/g, ' ')})`);
+  await pick(docRows(page).nth(0));
+  await docRows(page).nth(1).click();
+  await page.getByTestId('act-details').click();
+  await page.getByTestId('many-details').waitFor();
+  const mixed = await page.getByTestId('many-sender').getAttribute('placeholder');
+  await page.getByTestId('many-tag-input').fill('Steuer');
+  await page.getByTestId('many-tag-input').press('Enter');
+  await page.getByTestId('many-save').click();
+  await page.getByText('Details written into 2 documents.').waitFor({ timeout: 30000 }).then(() => check(true, `desktop list: details of two at once (sender: "${mixed}")`), () => check(false, 'desktop list: details of two at once'));
+  let tagged = '';
+  for (let i = 0; i < 40 && !/Steuer · 2/.test(tagged); i++) {
+    await page.waitForTimeout(300);
+    await page.getByTestId('facet-tag').click();
+    await page.getByTestId('action-sheet').waitFor({ timeout: 3000 }).catch(() => {});
+    tagged = await page.getByTestId('action-sheet').innerText().catch(() => '');
+    await page.keyboard.press('Escape');
+  }
+  check(mixed === 'Different in each' && /Steuer · 2/.test(tagged), `desktop list: a field that differs says so, and the tag is on both (${tagged.replace(/\n/g, ' / ')})`);
+  await docRows(page).first().dragTo(page.getByTestId('facet-tag'));
+  await page.getByTestId('ask-input').fill('Archiv');
+  await page.getByTestId('ask-confirm').click();
+  await page.getByText('Details written into 1 document.').waitFor({ timeout: 20000 }).then(() => check(true, 'desktop list: a row dropped on Tag gets the tag'), () => check(false, 'desktop list: a row dropped on Tag gets the tag'));
 
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.waitForTimeout(500);
@@ -2891,7 +2953,7 @@ async function batch() {
   for (let i = 0; i < 60 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
   const hit = (title) => vis('archive-hit').filter({ hasText: title });
   // Esc ends picking (as Back does on Android).
-  await hit('Orderly Notes').click({ button: 'right' });
+  await pick(hit('Orderly Notes'));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   check((await page.getByText(/selected$/).locator('visible=true').count()) === 0 && (await hit('Orderly Notes').getAttribute('aria-checked')) === null, 'batch: Esc ends picking');
@@ -2899,7 +2961,7 @@ async function batch() {
   await page.waitForTimeout(900);
   // No Select button: a right click (a long press) starts picking; a tap adds one more.
   check((await vis('select').count()) === 0, 'batch: no Select button (a long press starts picking)');
-  await hit('Orderly Notes').click({ button: 'right' });
+  await pick(hit('Orderly Notes'));
   await hit('Old title').click();
   check(/2 selected/.test(await page.getByText(/selected$/).locator('visible=true').innerText()), 'batch: documents are picked with a right click and a tap');
   check((await hit('Old title').getAttribute('aria-checked')) === 'true', 'batch: picked rows say so');
@@ -2916,7 +2978,7 @@ async function batch() {
   for (let i = 0; i < 60 && (await vis('archive-hit').count()) < 3; i++) await page.waitForTimeout(500);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(900);
-  await hit('Orderly Notes').click({ button: 'right' });
+  await pick(hit('Orderly Notes'));
   await hit('Old title').click();
   await vis('act-delete').click();
   await page.getByText('Moved 2 items to the trash.').waitFor({ timeout: 10000 });

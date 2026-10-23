@@ -18,6 +18,7 @@ import { AskDialog } from '@/paper/components/AskDialog';
 import { DropZone } from '@/paper/components/DropZone';
 import { PasswordDialog } from '@/paper/components/PasswordDialog';
 import { RootToast } from '@/paper/components/RootToast';
+import { DesktopBridge } from '@/paper/components/DesktopBridge';
 import { ShellOpen } from '@/paper/components/ShellOpen';
 import { shell } from '@/core/lib/shell';
 import { useAmbientLight } from '@/paper/state/ambient';
@@ -96,6 +97,7 @@ export default function RootLayout() {
       </DropZone>
       <ShellOpen />
       <RootToast />
+      <DesktopBridge />
       <PasswordDialog />
       <ActionSheet />
       <AskDialog />

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { fonts, radius, space } from '@/core/design/tokens';
@@ -103,15 +103,57 @@ export type DocItemProps = {
   onToggle: () => void;
   /** What else can be done with it (its ⋯ button). */
   actions?: Action[];
+  /** A right click with a mouse: its menu, where the pointer is (a long press still picks). */
+  onMenu?: (at: { x: number; y: number }) => void;
+  /** Dragged (web): the documents it carries, and the file for other apps when there is one. */
+  drag?: Drag;
 };
 
-/** A right click (web) does what a long press does. */
-export const rightClick = (fn: () => void) =>
+export type Drag = { keys: () => string[]; type: string; file: () => { name: string; url: string } | undefined; prepare: () => void };
+
+/** Lets a row or tile be dragged: into other apps as a file, onto a tag in Tessel as documents (a ref for it). */
+function useDrag(drag: Drag | undefined) {
+  const latest = useRef(drag);
+  useEffect(() => {
+    latest.current = drag;
+  });
+  const detach = useRef<() => void>(() => {});
+  // Whenever its element is there (it may be made again): the listeners on it.
+  return useCallback((view: View | null) => {
+    detach.current();
+    detach.current = () => {};
+    const node = view as unknown as HTMLElement | null;
+    if (Platform.OS !== 'web' || !node || !latest.current) return;
+    node.draggable = true;
+    const start = (e: DragEvent) => {
+      const d = latest.current;
+      if (!d || !e.dataTransfer) return;
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData(d.type, JSON.stringify(d.keys()));
+      const file = d.file();
+      if (file) e.dataTransfer.setData('DownloadURL', `application/pdf:${file.name}:${file.url}`);
+    };
+    const enter = () => latest.current?.prepare();
+    node.addEventListener('dragstart', start);
+    node.addEventListener('pointerenter', enter);
+    detach.current = () => {
+      node.removeEventListener('dragstart', start);
+      node.removeEventListener('pointerenter', enter);
+    };
+  }, []);
+}
+
+type MenuEvent = { preventDefault(): void; nativeEvent?: { pointerType?: string; clientX?: number; clientY?: number } };
+
+/** A right click (web) does what a long press does; with a mouse, and a menu given, it opens that instead. */
+export const rightClick = (fn: () => void, menu?: (at: { x: number; y: number }) => void) =>
   Platform.OS === 'web'
     ? {
-        onContextMenu: (ev: { preventDefault(): void }) => {
+        onContextMenu: (ev: MenuEvent) => {
           ev.preventDefault();
-          fn();
+          const ne = ev.nativeEvent;
+          if (menu && ne?.pointerType === 'mouse') menu({ x: ne.clientX ?? 0, y: ne.clientY ?? 0 });
+          else fn();
         },
       }
     : {};
@@ -120,8 +162,9 @@ export function DocItem(props: DocItemProps) {
   return props.layout === 'grid' ? <Tile {...props} /> : <Row {...props} />;
 }
 
-function Row({ testID, picture, title, label, meta, extra, badge, progress, busy, first, last, current, selected, onOpen, onSelect, onToggle, actions }: DocItemProps) {
+function Row({ testID, picture, title, label, meta, extra, badge, progress, busy, first, last, current, selected, onOpen, onSelect, onToggle, actions, onMenu, drag }: DocItemProps) {
   const p = usePalette();
+  const dragRef = useDrag(drag);
   const image = usePicture(picture);
   const picking = selected !== undefined;
   return (
@@ -135,6 +178,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
       ]}
     >
       <Pressable
+        ref={dragRef}
         testID={testID}
         accessibilityRole={picking ? 'checkbox' : 'button'}
         aria-checked={picking ? selected : undefined}
@@ -143,7 +187,7 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
         onPress={picking ? onToggle : onOpen}
         onLongPress={onSelect}
         delayLongPress={350}
-        {...rightClick(onSelect)}
+        {...rightClick(onSelect, picking ? undefined : onMenu)}
         style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
           styles.rowMain,
           { backgroundColor: selected ? p.hairline : hovered ? p.raised : 'transparent', opacity: pressed || busy ? 0.7 : 1 },
@@ -187,8 +231,9 @@ function Row({ testID, picture, title, label, meta, extra, badge, progress, busy
   );
 }
 
-function Tile({ width, testID, picture, title, label, meta, progress, busy, current, selected, onOpen, onSelect, onToggle }: DocItemProps) {
+function Tile({ width, testID, picture, title, label, meta, progress, busy, current, selected, onOpen, onSelect, onToggle, onMenu, drag }: DocItemProps) {
   const p = usePalette();
+  const dragRef = useDrag(drag);
   const image = usePicture(picture);
   const picking = selected !== undefined;
   const isDir = picture.kind === 'dir';
@@ -199,6 +244,7 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, curr
   const checkAt = { top: boxH - shownH + 6, right: Math.round((width - (isDir ? width : coverW)) / 2) + 6 };
   return (
     <Pressable
+      ref={dragRef}
       testID={testID}
       accessibilityRole={picking ? 'checkbox' : 'button'}
       aria-checked={picking ? selected : undefined}
@@ -207,7 +253,7 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, curr
       onPress={picking ? onToggle : onOpen}
       onLongPress={onSelect}
       delayLongPress={350}
-      {...rightClick(onSelect)}
+      {...rightClick(onSelect, picking ? undefined : onMenu)}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         { width, opacity: pressed || busy ? 0.6 : hovered ? 0.92 : 1 },
         current && { backgroundColor: p.mark, borderRadius: radius.md },

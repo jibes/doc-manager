@@ -132,7 +132,7 @@ export function DetailsPanel({
           </T>
         )}
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, flexWrap: 'wrap' }}>
-          {onSuggest && <Button testID="details-suggest" kind="quiet" icon="textView" label={asking ? t.detailsSuggesting : t.inboxSuggest} onPress={asking ? undefined : () => void suggest()} />}
+          {onSuggest && <Button testID="details-suggest" kind="quiet" icon="sparkles" label={asking ? t.detailsSuggesting : t.inboxSuggest} onPress={asking ? undefined : () => void suggest()} />}
           <Button testID="details-save" label={t.save} icon="check" onPress={busy ? undefined : save} />
         </View>
       </ScrollView>

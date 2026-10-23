@@ -5,7 +5,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ascending, FACETS, facetCounts, matches, placeOf, SORTS, sortDocs, type Facet, type Filter, type SavedView, type Sort } from '@/paper/archive/facets';
 import { allDocs, refreshSoon, searchAll, snippetsFor, useIndex, warmSearch } from '@/paper/archive/indexer';
-import { HitRow, openDoc } from '@/paper/archive/Results';
+import { HitRow, openDoc, openInWindow } from '@/paper/archive/Results';
+import { ManyDetails } from '@/paper/archive/ManyDetails';
+import { writeDetailsMany } from '@/paper/archive/manyDetails';
+import { DOCS_TYPE, dragFile, prepareDrag } from '@/paper/archive/dragOut';
+import { MoreMenu, type MenuItem } from '@/paper/reader/MoreMenu';
 import { QuickLook } from '@/paper/archive/QuickLook';
 import { Palette, type PaletteItem } from '@/paper/components/Palette';
 import { duplicateGroups } from '@/paper/archive/duplicates';
@@ -71,6 +75,8 @@ const asHit = (doc: IndexedDoc): Hit => ({ doc, score: 0, page: 0, snippet: null
 const ROOMY = 640;
 /** Window width from which a document opens beside the list, and the list's width then. */
 const SPLIT_MIN = 1300;
+/** Window width from which the ⋯ menu's items are buttons of their own. */
+const EXPAND_MORE = 900;
 const LIST_W = 500;
 const isEmpty = (f: Filter) => FACETS.every((k) => !f[k]);
 /** What the screen shows: the search, filters and the order. */
@@ -137,7 +143,7 @@ export default function Documents() {
       { key: 'add-files', icon: 'documents' as IconName, label: t.addFiles, onPress: () => void addFiles(aiSet && ai) },
       // A file only to look at (kept when something is saved into it).
       { key: 'add-open', icon: 'pageView' as IconName, label: t.addOpen, onPress: async () => void openFiles(await pickPdfs()) },
-      ...(aiSet ? [{ key: 'add-ai', icon: (ai ? 'check' : 'textView') as IconName, label: ai ? t.addAiOn : t.addAiOff, onPress: () => addMenu(!ai) }] : []),
+      ...(aiSet ? [{ key: 'add-ai', icon: (ai ? 'check' : 'sparkles') as IconName, label: ai ? t.addAiOn : t.addAiOff, onPress: () => addMenu(!ai) }] : []),
     ]);
   const [query, setQuery] = useState(params.q ?? '');
   const [filter, setFilter] = useState<Filter>({});
@@ -390,8 +396,7 @@ export default function Documents() {
     setAll((a) => a.filter((d) => !keys.has(d.key)));
     setFound((f) => f && { ...f, hits: f.hits.filter((h) => !keys.has(h.doc.key)) });
   };
-  const rename = async () => {
-    const d = picked[0];
+  const rename = async (d = picked[0]) => {
     // The list shows titles, the dialog the file's name: it says which one changes (a title is changed in Details).
     const titled = !!d.title && d.title !== d.name.replace(/\.pdf$/i, '');
     const name = (await ask({ title: t.renameFile, body: titled ? t.renameFileBody(d.title) : undefined, input: d.name.replace(/\.pdf$/i, ''), placeholder: t.newName, confirm: t.rename }))?.trim();
@@ -458,6 +463,7 @@ export default function Documents() {
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (mod && key === 'k') return e.preventDefault(), setPalette(true);
       if (mod && key === 'n' && scanSupported) return e.preventDefault(), router.push('/scan');
+      if (mod && key === 'o') return e.preventDefault(), void pickPdfs().then((items) => void (items.length && openFiles(items)));
       const target = e.target as HTMLElement | null;
       // The document beside the list has its own keys.
       if (target?.closest?.('[data-testid="doc-pane"]')) return;
@@ -479,6 +485,35 @@ export default function Documents() {
     if (Platform.OS !== 'web' || !cursor) return;
     document.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: 'nearest' });
   }, [cursor]);
+
+  // Several documents' details at once (picked, or one from its menu), and a right click's menu.
+  const [many, setMany] = useState<IndexedDoc[] | null>(null);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; hit: Hit } | null>(null);
+  const byKey = (keys: string[]) => keys.map((k) => all.find((d) => d.key === k)).filter((d): d is IndexedDoc => !!d);
+  const menuItems = (h: Hit): MenuItem[] => {
+    const d = h.doc;
+    const editable = d.place.kind === 'folder' && folders.canEdit(d.place.root, d.place.entry);
+    return [
+      { key: 'ctx-open', icon: 'documents', label: t.ctxOpen, onPress: () => void openDoc(d, undefined, '').catch(fail) },
+      ...(Platform.OS === 'web' ? [{ key: 'ctx-window', icon: 'copy' as IconName, label: t.ctxWindow, onPress: () => void openInWindow(d).catch(fail) }] : []),
+      ...(!split ? [{ key: 'ctx-look', icon: 'search' as IconName, label: t.ctxLook, hint: t.keySpace, onPress: () => setLook(d) }] : []),
+      { key: 'ctx-details', icon: 'tag', label: t.ctxDetails, onPress: () => setMany([d]) },
+      ...(folders.canShare ? [{ key: 'ctx-share', icon: 'share' as IconName, label: t.share, onPress: () => void batch(() => shareAll([d])) }] : []),
+      ...(editable ? [{ key: 'ctx-rename', icon: 'pencil' as IconName, label: t.rename, onPress: () => void rename(d) }] : []),
+      // Not a long press: picked as it says, whatever was pressed just before.
+      { key: 'ctx-select', icon: 'select', label: t.ctxSelect, onPress: () => setSelected((sel) => new Set([...(sel ?? []), d.key])) },
+      { key: 'ctx-delete', icon: 'trash', label: onlyHere([d]) ? t.remove : t.delete, hint: shortcut('⌫'), onPress: () => void remove([d]) },
+    ];
+  };
+  // Documents dropped on the Tag chip: the tag chosen there (else asked for) added to each.
+  const tagDropped = async (keys: string[]) => {
+    const docs = byKey(keys);
+    if (!docs.length) return;
+    const tag = filter.tag ?? (await ask({ title: t.tagDocs(docs.length), input: '', placeholder: t.tagName, confirm: t.save }))?.trim();
+    if (!tag) return;
+    const failed = await writeDetailsMany(docs, { add: [tag] });
+    say(failed ? t.detailsManyFailed(failed) : t.detailsManySaved(docs.length));
+  };
 
   // ⌘K: documents by title, what to filter by, and every action of the screen.
   const paletteItems = (): PaletteItem[] => [
@@ -523,8 +558,9 @@ export default function Documents() {
           {/* While picking, the bar with the count stays over the top (below); the header stays in its place under it. */}
           <AppHeader tab="documents">
             <LayoutToggle />
-            {onlyMore ? (
-              <IconButton testID={onlyMore.key} icon={onlyMore.icon} label={onlyMore.label} onPress={onlyMore.onPress} />
+            {onlyMore || winWidth >= EXPAND_MORE ? (
+              // A wide window has room for each of them: one click, no ⋯ menu.
+              moreItems.map((it) => <IconButton key={it.key} testID={it.key} icon={it.icon} label={it.label} onPress={it.onPress} />)
             ) : (
               moreItems.length > 1 && <IconButton testID="docs-more" icon="more" label={t.more} onPress={() => showActions(t.more, moreItems)} />
             )}
@@ -598,7 +634,16 @@ export default function Documents() {
               // Room for every filter: each one click away (those without values in these documents left out).
               <>
                 {FACETS.filter((f) => counts[f].length > 0 || filter[f]).map((f) => (
-                  <Chip key={f} testID={`facet-${f}`} icon={facetIcon[f]} label={filter[f] ?? facetName[f]} on={!!filter[f]} more onPress={() => choose(f)} />
+                  <Chip
+                    key={f}
+                    testID={`facet-${f}`}
+                    icon={facetIcon[f]}
+                    label={filter[f] ?? facetName[f]}
+                    on={!!filter[f]}
+                    more
+                    onPress={() => choose(f)}
+                    onDropDocs={f === 'tag' ? (keys) => void tagDropped(keys) : undefined}
+                  />
                 ))}
                 {active > 0 && <Chip testID="facet-clear" icon="close" label={t.clearFilters} onPress={() => setFilter({})} />}
               </>
@@ -661,6 +706,14 @@ export default function Documents() {
                   onSelect={() => hold(h.doc.key)}
                   onToggle={() => tap(h.doc.key)}
                   onError={say}
+                  onMenu={(at) => setMenu({ at, hit: h })}
+                  drag={{
+                    type: DOCS_TYPE,
+                    // A row picked carries all the picked ones.
+                    keys: () => (selected?.has(h.doc.key) ? [...selected] : [h.doc.key]),
+                    file: () => dragFile(h.doc.key),
+                    prepare: () => prepareDrag(h.doc),
+                  }}
                 />
               ))}
             </DocList>
@@ -701,6 +754,7 @@ export default function Documents() {
             disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
             onPress={() => void rename()}
           />
+ <Action testID="act-details" icon="tag" label={t.details} disabled={!picked.length} onPress={() => setMany(picked)} />
           <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!picked.length || picked.some((d) => d.place.kind === 'folder' && !folders.canEdit(d.place.root, d.place.entry))} onPress={() => void remove()} />
         </ActionBar>
       )}
@@ -718,6 +772,20 @@ export default function Documents() {
       )}
       <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} above={selected ? BAR_ROOM : 0} />
       </View>
+      {split && (
+        <View style={{ flex: 1 }} testID="doc-pane">
+          {pane ? (
+            <ReadView key={pane.id} id={pane.id} page={pane.page} q={pane.q} onClose={closePane} />
+          ) : (
+            <View style={styles.paneEmpty}>
+              <Icon name="documents" size={36} color={p.hairline} />
+              <T v="label" color={p.muted}>
+                {t.paneEmpty}
+              </T>
+            </View>
+          )}
+        </View>
+      )}
       {look && (
         <QuickLook
           doc={look}
@@ -733,19 +801,18 @@ export default function Documents() {
         />
       )}
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
-      {split && (
-        <View style={{ flex: 1 }} testID="doc-pane">
-          {pane ? (
-            <ReadView key={pane.id} id={pane.id} page={pane.page} q={pane.q} onClose={closePane} />
-          ) : (
-            <View style={styles.paneEmpty}>
-              <Icon name="documents" size={36} color={p.hairline} />
-              <T v="label" color={p.muted}>
-                {t.paneEmpty}
-              </T>
-            </View>
-          )}
-        </View>
+      {menu && <MoreMenu palette={p} at={menu.at} items={menuItems(menu.hit)} onClose={() => setMenu(null)} />}
+      {many && (
+        <ManyDetails
+          key={many.map((d) => d.key).join()}
+          docs={many}
+          onClose={() => setMany(null)}
+          onDone={(message) => {
+            setMany(null);
+            setSelected(null);
+            say(message);
+          }}
+        />
       )}
       </View>
     </AppFrame>
@@ -777,14 +844,66 @@ function ChipRow({ wrap, children }: { wrap: boolean; children: ReactNode }) {
 }
 
 /** A small pill: somewhere to go (the inbox, sync issues), the filter button, or a filter in use. */
-function Chip({ testID, icon, label, count, on, more, onPress }: { testID: string; icon?: IconName; label: string; count?: number; on?: boolean; more?: boolean; onPress: () => void }) {
+function Chip({
+  testID,
+  icon,
+  label,
+  count,
+  on,
+  more,
+  onPress,
+  onDropDocs,
+}: {
+  testID: string;
+  icon?: IconName;
+  label: string;
+  count?: number;
+  on?: boolean;
+  more?: boolean;
+  onPress: () => void;
+  /** Documents dragged from the list and dropped here (web). */
+  onDropDocs?: (keys: string[]) => void;
+}) {
   const p = usePalette();
+  const ref = useRef<View>(null);
+  const [over, setOver] = useState(false);
+  const dropped = useRef(onDropDocs);
+  useEffect(() => {
+    dropped.current = onDropDocs;
+  });
+  const target = !!onDropDocs;
+  useEffect(() => {
+    const node = ref.current as unknown as HTMLElement | null;
+    if (Platform.OS !== 'web' || !target || !node) return;
+    const ours = (e: DragEvent) => !!e.dataTransfer?.types.includes(DOCS_TYPE);
+    const enter = (e: DragEvent) => ours(e) && (e.preventDefault(), setOver(true));
+    const leave = () => setOver(false);
+    const drop = (e: DragEvent) => {
+      setOver(false);
+      if (!ours(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const keys = JSON.parse(e.dataTransfer!.getData(DOCS_TYPE) || '[]') as string[];
+      if (keys.length) dropped.current?.(keys);
+    };
+    node.addEventListener('dragenter', enter);
+    node.addEventListener('dragover', enter);
+    node.addEventListener('dragleave', leave);
+    node.addEventListener('drop', drop);
+    return () => {
+      node.removeEventListener('dragenter', enter);
+      node.removeEventListener('dragover', enter);
+      node.removeEventListener('dragleave', leave);
+      node.removeEventListener('drop', drop);
+    };
+  }, [target]);
   return (
     <Pressable
+      ref={ref}
       testID={testID}
       accessibilityRole="button"
       onPress={onPress}
-      style={[styles.chip, { backgroundColor: on ? p.mark : 'transparent', borderColor: on ? p.markRing : p.hairline }]}
+      style={[styles.chip, { backgroundColor: on || over ? p.mark : 'transparent', borderColor: on || over ? p.markRing : p.hairline }]}
     >
       {icon && <Icon name={icon} size={15} color={p.ink} />}
       <T v="label" color={p.ink} numberOfLines={1} style={{ maxWidth: 200 }}>

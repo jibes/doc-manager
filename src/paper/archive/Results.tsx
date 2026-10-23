@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { DocItem, type Layout } from '@/paper/components/DocItems';
+import { DocItem, type Drag, type Layout } from '@/paper/components/DocItems';
+import { BASE } from '@/core/lib/base';
 import { T } from '@/paper/components/primitives';
 import { fonts } from '@/core/design/tokens';
 import { errorText, t } from '@/core/i18n';
@@ -49,6 +50,13 @@ export async function openDoc(doc: IndexedDoc, page: number | undefined, query: 
   if (!(await showInPane({ id, ...params, key: doc.key }))) router.push({ pathname: '/read/[id]', params: { id, ...params } });
 }
 
+/** Opens a document in a window of its own (a tab on the website), beside this one. */
+export async function openInWindow(doc: IndexedDoc) {
+  const { place } = doc;
+  const id = place.kind === 'library' ? place.id : (await importFromFolder(place))?.id;
+  if (id) window.open(`${location.origin}${BASE}/read/${encodeURIComponent(id)}`, '_blank');
+}
+
 /** One document found, as every list shows documents: its picture, title, details and place, the words around the match and its page. */
 export function HitRow({
   hit: h,
@@ -62,6 +70,8 @@ export function HitRow({
   onSelect,
   onToggle,
   onError,
+  onMenu,
+  drag,
 }: {
   hit: Hit;
   query: string;
@@ -75,6 +85,8 @@ export function HitRow({
   onSelect: () => void;
   onToggle: () => void;
   onError: (message: string) => void;
+  onMenu?: (at: { x: number; y: number }) => void;
+  drag?: Drag;
 }) {
   const p = usePalette();
   const { place } = h.doc;
@@ -112,6 +124,8 @@ export function HitRow({
       onOpen={() => void openDoc(h.doc, h.snippet ? h.page : undefined, query).catch((e) => onError(errorText(e)))}
       onSelect={onSelect}
       onToggle={onToggle}
+      onMenu={onMenu}
+      drag={drag}
     />
   );
 }

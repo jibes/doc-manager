@@ -152,8 +152,9 @@ export function Reader({
     afterReload = null;
   }, []);
   const [savingDetails, setSavingDetails] = useState(false);
-  // Indexing shares the PDF engine: it waits while a document is open.
-  useEffect(() => pauseIndexing(), []);
+  // Indexing shares the PDF engine: it waits while a document is open (not beside the list, which it fills: the
+  // engine draws pages first anyway).
+  useEffect(() => (onClose ? undefined : pauseIndexing()), [onClose]);
   const writeDetails = async (details: Details) => {
     // Saved into the file: a document only viewed is kept first.
     if (!(await libraryActions().ensureKept(doc.id))) return;
@@ -890,7 +891,7 @@ export function Reader({
     { key: 'details', icon: 'tag', label: t.details, onPress: () => (docked && detailsOpen ? closeDetails() : openDetails()) },
     ...(outside && !doc.viewed && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty && !intakeBusy ? [{ key: 'searchable', icon: 'search' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
-    ...(canImprove && (improvable || textless) && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'textView' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
+    ...(canImprove && (improvable || textless) && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'sparkles' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
     ...(Platform.OS === 'web' && (improvable || textless) && !edits.dirty && !intakeBusy && !preparing ? [{ key: 'again', icon: 'scan' as const, label: t.again, onPress: () => void cleanUp() }] : []),
     ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
     { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },

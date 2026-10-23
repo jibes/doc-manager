@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { Icon, type IconName } from '@/paper/components/Icon';
@@ -8,8 +8,11 @@ import { t } from '@/core/i18n';
 
 export type MenuItem = { key: string; icon: IconName; label: string; hint?: string; onPress: () => void };
 
-/** Small popover anchored under the top bar's ⋯ button. */
-export function MoreMenu({ palette: p, top, items, onClose }: { palette: Palette; top: number; items: MenuItem[]; onClose: () => void }) {
+/** Small popover anchored under the top bar's ⋯ button, or (`at`) where the pointer was right-clicked. */
+export function MoreMenu({ palette: p, top = 0, at, items, onClose }: { palette: Palette; top?: number; at?: { x: number; y: number }; items: MenuItem[]; onClose: () => void }) {
+  const { width, height } = useWindowDimensions();
+  // Kept in the window: it opens to the left or upwards where there is no room.
+  const place = at ? { left: Math.max(space.sm, Math.min(at.x, width - MENU_W - space.sm)), top: Math.max(space.sm, Math.min(at.y, height - items.length * ITEM_H - space.lg)), right: 'auto' as const } : { top };
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       <Pressable accessibilityLabel={t.close} style={StyleSheet.absoluteFill} onPress={onClose} />
@@ -18,7 +21,7 @@ export function MoreMenu({ palette: p, top, items, onClose }: { palette: Palette
         exiting={FadeOut.duration(100)}
         testID="more-menu"
         accessibilityRole="menu"
-        style={[styles.menu, { top, backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
+        style={[styles.menu, place, { backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
       >
         {items.map((it) => (
           <Pressable
@@ -47,6 +50,9 @@ export function MoreMenu({ palette: p, top, items, onClose }: { palette: Palette
     </View>
   );
 }
+
+const MENU_W = 240;
+const ITEM_H = 40;
 
 const styles = StyleSheet.create({
   menu: { position: 'absolute', right: space.sm, minWidth: 200, padding: space.xs, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
