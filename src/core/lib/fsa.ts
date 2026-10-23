@@ -57,11 +57,29 @@ const WRITER = `onmessage = async ({ data: { path, data } }) => {
   try {
     let dir = await navigator.storage.getDirectory();
     for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
-    const file = await (await dir.getFileHandle(path[path.length - 1], { create: true })).createSyncAccessHandle();
-    file.truncate(0);
-    file.write(new Uint8Array(await data.arrayBuffer()), { at: 0 });
-    file.flush();
-    file.close();
+    const name = path[path.length - 1];
+    const bytes = new Uint8Array(await data.arrayBuffer());
+    const put = async (h) => {
+      const file = await h.createSyncAccessHandle();
+      file.truncate(0);
+      file.write(bytes, { at: 0 });
+      file.flush();
+      file.close();
+    };
+    // Whole or not at all: written beside it first, then moved over it (a tab closed midway leaves the old file).
+    const tmp = await dir.getFileHandle(name + '.tessel-writing', { create: true });
+    await put(tmp);
+    let moved = false;
+    if (typeof tmp.move === 'function') {
+      try {
+        await tmp.move(name);
+        moved = true;
+      } catch {}
+    }
+    if (!moved) {
+      await put(await dir.getFileHandle(name, { create: true }));
+      await dir.removeEntry(name + '.tessel-writing').catch(() => {});
+    }
     postMessage({ ok: true });
   } catch (e) {
     postMessage({ ok: false, error: String(e) });

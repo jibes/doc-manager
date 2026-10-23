@@ -309,9 +309,9 @@ class Bridge(private val activity: MainActivity) {
     private fun online(): Boolean =
         runCatching { activity.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null }.getOrDefault(true)
 
-    /** This device, the local network (private or link-local addresses) or a .local name. */
+    /** This device, the local network (private or link-local addresses) or a local name (see localName). */
     private fun local(host: String): Boolean {
-        if (host == "localhost" || host.endsWith(".local") || host.endsWith(".localhost")) return true
+        if (localName(host)) return true
         // Only an address written as numbers is judged by them (a name is never looked up here).
         val literal = host.contains(':') || host.all { it.isDigit() || it == '.' }
         if (!literal) return false
@@ -323,9 +323,20 @@ class Bridge(private val activity: MainActivity) {
     }
 
     /**
+     * A name only the local network knows: a single label ("nas"), localhost, or one under a suffix kept for
+     * homes and private networks (.local, .lan, .home.arpa, .internal). An address written as numbers is none.
+     */
+    private fun localName(host: String): Boolean {
+        val h = host.lowercase().trimEnd('.')
+        if (h.contains(':') || h.all { it.isDigit() || it == '.' }) return false
+        return !h.contains('.') || LOCAL_SUFFIXES.any { h.endsWith(it) }
+    }
+
+    /**
      * Names are looked up by the system first, and by Cloudflare's DNS over HTTPS when it doesn't know them:
      * a browser has its own secure DNS, so an address it reaches (a just-made workers.dev name, one a Private
-     * DNS filter drops) can be unknown to the system resolver the app uses.
+     * DNS filter drops) can be unknown to the system resolver the app uses. Local names never go to Cloudflare:
+     * it can't know them, and they'd tell it about the user's network.
      */
     private val client: OkHttpClient by lazy {
         val doh = DnsOverHttps.Builder()
@@ -341,6 +352,7 @@ class Bridge(private val activity: MainActivity) {
                     try {
                         Dns.SYSTEM.lookup(hostname)
                     } catch (e: UnknownHostException) {
+                        if (localName(hostname)) throw e
                         try {
                             doh.lookup(hostname)
                         } catch (d: IOException) {
@@ -422,5 +434,7 @@ class Bridge(private val activity: MainActivity) {
         const val KEEP_INCOMING = 16
         /** Documents handed to another app at once: more make the hand-over too big for Android. */
         const val MAX_SHARE = 300
+        /** Name suffixes of this device and local networks (see localName). */
+        val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".lan", ".home.arpa", ".internal")
     }
 }

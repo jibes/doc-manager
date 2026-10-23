@@ -46,10 +46,26 @@ function remember(key: string, c: Cached): Thumb {
   return thumb;
 }
 
+/** The part of a key naming the file (without its size and date). */
+const fileOf = (key: string) => key.slice(0, key.lastIndexOf('|', key.lastIndexOf('|') - 1) + 1);
+
+/** Cached keys by file, listed once: finding a file's older thumbnails then never lists them all again. */
+let byFile: Promise<Map<string, Set<string>>> | null = null;
+const cachedKeys = () =>
+  (byFile ??= keys(store)
+    .catch(() => [])
+    .then((all) => {
+      const out = new Map<string, Set<string>>();
+      for (const k of all) if (typeof k === 'string') out.set(fileOf(k), (out.get(fileOf(k)) ?? new Set()).add(k));
+      return out;
+    }));
+
 /** A file's thumbnails from before it changed (its key names its size and date): no longer wanted. */
 async function dropOlder(key: string) {
-  const file = key.slice(0, key.lastIndexOf('|', key.lastIndexOf('|') - 1) + 1);
-  const stale = (await keys(store)).filter((k) => typeof k === 'string' && k !== key && k.startsWith(file));
+  const known = await cachedKeys();
+  const file = fileOf(key);
+  const stale = [...(known.get(file) ?? [])].filter((k) => k !== key);
+  known.set(file, new Set([key]));
   if (stale.length) await delMany(stale, store);
 }
 

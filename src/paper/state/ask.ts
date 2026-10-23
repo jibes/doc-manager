@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 
 /** A question for the user: a name to type (input) or a yes/no (confirm). */
-export type Ask = { title: string; body?: string; input?: string; placeholder?: string; confirm: string; destructive?: boolean };
+export type Ask = { title: string; body?: string; input?: string; placeholder?: string; confirm: string; destructive?: boolean; other?: string };
+
+/** The answer when the second choice (`other`) was taken. */
+export const OTHER = '\u0001other';
 type Request = Ask & { resolve: (answer: string | null) => void };
 
 /** One pending question at a time; the dialog in the root layout answers it. */

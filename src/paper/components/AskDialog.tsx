@@ -4,7 +4,7 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { elevation, fonts, radius, space } from '@/core/design/tokens';
 import { t } from '@/core/i18n';
-import { useAsk } from '@/paper/state/ask';
+import { OTHER, useAsk } from '@/paper/state/ask';
 import { usePalette } from '@/paper/state/prefs';
 import { Button, T } from './primitives';
 import { useModal } from './useModal';
@@ -82,6 +82,7 @@ function Card() {
         )}
         <View style={styles.actions}>
           <Button testID="ask-cancel" label={t.cancel} kind="quiet" onPress={() => request.resolve(null)} />
+          {request.other && <Button testID="ask-other" label={request.other} kind="quiet" onPress={() => request.resolve(OTHER)} />}
           <Button testID="ask-confirm" label={request.confirm} onPress={submit} style={request.destructive ? { backgroundColor: p.markRing } : undefined} />
         </View>
       </View>

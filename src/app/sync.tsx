@@ -3,11 +3,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { allDocs, forget, refreshSoon, useIndex, type Conflict } from '@/paper/archive/indexer';
+import { forget, refreshSoon, useIndex, type Conflict } from '@/paper/archive/indexer';
 import { useThrottled } from '@/core/lib/useThrottled';
-import { openDoc, whereIs } from '@/paper/archive/Results';
-import type { IndexedDoc } from '@/paper/archive/search';
-import { conflictTime, duplicates } from '@/paper/archive/sync';
+import { openDoc } from '@/paper/archive/Results';
+import { conflictTime } from '@/paper/archive/sync';
 import { discard, trashes } from '@/paper/archive/trash';
 import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Icon } from '@/paper/components/Icon';
@@ -22,7 +21,6 @@ import { ask } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 /** Groups shown at first, and added by "Show more". */
-const PAGE = 20;
 
 /** A conflict copy with the file it conflicts with (null when that one is gone). */
 type Pair = { conflict: Conflict; original: FolderEntry | null };
@@ -45,10 +43,8 @@ export default function Sync() {
   const changed = useThrottled(useIndex((s) => s.changed), 1500);
   useFocusEffect(useCallback(() => refreshSoon(), []));
   const [pairs, setPairs] = useState<Pair[] | null>(null);
-  const [groups, setGroups] = useState<IndexedDoc[][]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [round, setRound] = useState(0);
-  const [limit, setLimit] = useState(PAGE);
   const archive = usePrefs((s) => s.archive);
 
   useEffect(() => {
@@ -59,7 +55,6 @@ export default function Sync() {
         return { conflict: c, original: here.find((e) => e.name === c.name.original) ?? null };
       }),
     ).then((list) => alive && setPairs(list));
-    allDocs().then((docs) => alive && setGroups(duplicates(docs, archive)));
     return () => {
       alive = false;
     };
@@ -111,22 +106,13 @@ export default function Sync() {
       await folders.rename(root, dir, entry, both);
       return t.syncKeptBoth(both);
     }, () => dropPair(pair));
-  const keepOne = (group: IndexedDoc[], keep: IndexedDoc) =>
-    act(async () => {
-      for (const d of group) if (d !== keep && d.place.kind === 'folder') await discard(d.place.root, d.place.dir, [d.place.entry]);
-      return t.syncKept;
-    }, () => {
-      forget(group.filter((d) => d !== keep).map((d) => d.key));
-      setGroups((gs) => gs.filter((g) => g !== group));
-    });
-
   const shownPairs = pairs ?? [];
   return (
     <SubFrame sub="sync">
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column, gap: space.lg }}>
           <ScreenHeader title={t.syncTitle} up={() => goTab('documents')} />
-          {pairs && !shownPairs.length && !groups.length && <T color={p.muted}>{t.syncNothing}</T>}
+          {pairs && !shownPairs.length && <T color={p.muted}>{t.syncNothing}</T>}
 
           {shownPairs.length > 0 && (
             <View style={{ gap: space.sm }}>
@@ -169,39 +155,6 @@ export default function Sync() {
             </View>
           )}
 
-          {groups.length > 0 && (
-            <View style={{ gap: space.sm }}>
-              <T v="kicker" color={p.muted}>
-                {t.syncDuplicates(groups.length)}
-              </T>
-              <T v="caption" color={p.muted}>
-                {t.syncDuplicatesNote}
-              </T>
-              {groups.slice(0, limit).map((group) => (
-                <View key={group[0].hash} testID="sync-duplicate" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                  <T style={styles.title}>{group[0].title || group[0].name}</T>
-                  {group.map((d) =>
-                    d.place.kind === 'folder' ? (
-                      <Version
-                        key={d.key}
-                        label={d.name}
-                        where={whereIs(d.place)}
-                        entry={d.place.entry}
-                        onOpen={() => void openDoc(d, undefined, '').catch((e) => setNotice(opError(e)))}
-                        onKeep={() => void keepOne(group, d)}
-                        testID="sync-keep-one"
-                      />
-                    ) : null,
-                  )}
-                </View>
-              ))}
-              {groups.length > limit && (
-                <View style={{ flexDirection: 'row' }}>
-                  <Button kind="quiet" label={t.showMore} onPress={() => setLimit(limit + PAGE)} />
-                </View>
-              )}
-            </View>
-          )}
         </View>
       </ScrollView>
       <Toast message={notice} onDismiss={() => setNotice(null)} />

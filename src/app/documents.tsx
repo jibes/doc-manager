@@ -100,7 +100,8 @@ export default function Documents() {
   const archive = usePrefs((s) => s.archive);
   const inboxHere = usePrefs((s) => s.inboxHere);
   const inboxCount = useInboxCount((s) => s.count);
-  const syncIssues = useIndex((s) => s.conflicts.length + s.duplicates);
+  // Conflict copies only: files there twice are under Duplicates.
+  const syncIssues = useIndex((s) => s.conflicts.length);
   const winWidth = useMainWidth();
   const pane = usePane((s) => s.doc);
   // Changes not saved yet in the document beside the list: it stays (the window made narrower doesn't drop them).

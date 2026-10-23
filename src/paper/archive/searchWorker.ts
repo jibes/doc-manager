@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { createStore, delMany, entries, getMany, set, setMany, values } from 'idb-keyval';
+import { createStore, delMany, getMany, keys as allKeys, set, setMany, values } from 'idb-keyval';
 import MiniSearch from 'minisearch';
 
 import { createIndex, indexOptions, rank, snippetFor, type Indexable, type IndexedDoc } from './search';
@@ -16,6 +16,8 @@ const textStore = createStore('tessel-text', 'pages');
 const savedStore = createStore('tessel-search', 'saved');
 /** Saved this long after the last change. */
 const SAVE_MS = 20_000;
+/** Documents whose text is read at once when the index is built afresh. */
+const BUILD_BATCH = 50;
 
 let index: MiniSearch<Indexable> | null = null;
 let building: Promise<MiniSearch<Indexable>> | null = null;
@@ -52,9 +54,12 @@ async function loadSaved(): Promise<MiniSearch<Indexable> | null> {
 async function buildFresh(): Promise<MiniSearch<Indexable>> {
   const made = createIndex();
   const metas = new Map((await values<IndexedDoc>(metaStore)).map((d) => [d.key, d]));
-  for (const [key, pages] of await entries<string, string[]>(textStore)) {
-    const meta = metas.get(key);
-    if (meta) made.add({ ...meta, pages });
+  // The text a few documents at a time (each up to megabytes): never all of it in memory at once.
+  const all = (await allKeys<string>(textStore)).filter((k) => metas.has(k));
+  for (let i = 0; i < all.length; i += BUILD_BATCH) {
+    const batch = all.slice(i, i + BUILD_BATCH);
+    const texts = await getMany<string[] | undefined>(batch, textStore);
+    batch.forEach((key, j) => texts[j] && made.add({ ...metas.get(key)!, pages: texts[j] }));
   }
   return made;
 }

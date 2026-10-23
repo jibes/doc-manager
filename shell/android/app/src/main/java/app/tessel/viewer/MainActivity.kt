@@ -159,6 +159,9 @@ class MainActivity : ComponentActivity() {
             textZoom = 100
             userAgentString = "$userAgentString TesselShell/${BuildConfig.VERSION_NAME}"
         }
+        // The bridge is in every frame of the page, so only the app's own origin may ever be shown: navigations
+        // elsewhere (main frame or frame) go out to the browser above, and the app embeds no third-party frames.
+        // Keep it that way: a foreign frame here would get the user's folders.
         addJavascriptInterface(bridge, "TesselShell")
         webViewClient = Client()
         webChromeClient = Chrome()
@@ -337,11 +340,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        /** Links to the web open in the browser (or the matching app); the app itself stays in the WebView. */
+        /**
+         * Links to the web (and mailto:) open in the browser or the matching app; the app itself stays in the WebView.
+         * Anything else (intent:, file:, content:, javascript:…) is neither loaded nor handed on: a page could otherwise
+         * start another app's activity or reach local files through it.
+         */
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            if (request.url.host == AppAssets.HOST) return false
+            val url = request.url
+            val scheme = url.scheme?.lowercase()
+            if (scheme == "https" && url.host == AppAssets.HOST) return false
+            if (scheme != "http" && scheme != "https" && scheme != "mailto") return true
             try {
-                startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                startActivity(Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE))
             } catch (_: ActivityNotFoundException) {
             }
             return true

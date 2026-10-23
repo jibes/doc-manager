@@ -353,13 +353,22 @@ class Folders(private val context: Context) {
         return f
     }
 
-    fun mkdir(root: String, dir: String?, name: String): String = when (val at = place(root, dir)) {
-        is TreePlace -> DocumentsContract.createDocument(resolver, at.dir, Document.MIME_TYPE_DIR, name)?.toString() ?: throw IllegalStateException("Can't create $name")
-        is PathPlace -> freeName(at.dir, name).also { if (!it.mkdir()) throw IllegalStateException("Can't create $name") }.let { Uri.fromFile(it).toString() }
+    /** A name for one item in a folder: never a path (or the folder itself, or its parent). */
+    private fun checkName(name: String) {
+        require(name.isNotEmpty() && name != "." && name != ".." && name.none { it == '/' || it == '\\' || it == '\u0000' }) { "Bad name" }
+    }
+
+    fun mkdir(root: String, dir: String?, name: String): String {
+        checkName(name)
+        return when (val at = place(root, dir)) {
+            is TreePlace -> DocumentsContract.createDocument(resolver, at.dir, Document.MIME_TYPE_DIR, name)?.toString() ?: throw IllegalStateException("Can't create $name")
+            is PathPlace -> freeName(at.dir, name).also { if (!it.mkdir()) throw IllegalStateException("Can't create $name") }.let { Uri.fromFile(it).toString() }
+        }
     }
 
     /** A new file with these contents; a taken name gets " (2)" or the provider's own suffix. Returns its URI and name. */
     fun create(root: String, dir: String?, name: String, mime: String, source: File): JSONObject {
+        checkName(name)
         val uri = when (val at = place(root, dir)) {
             is TreePlace -> DocumentsContract.createDocument(resolver, at.dir, mime, name) ?: throw IllegalStateException("Can't create $name")
             is PathPlace -> Uri.fromFile(freeName(at.dir, name).also { if (!it.createNewFile()) throw IllegalStateException("Can't create $name") })
@@ -432,6 +441,7 @@ class Folders(private val context: Context) {
 
     /** Returns the renamed item's URI (providers may give it a new one). */
     fun rename(uri: Uri, name: String): String {
+        checkName(name)
         check(uri)
         if (uri.scheme == "file") {
             val f = File(uri.path!!)
@@ -460,6 +470,7 @@ class Folders(private val context: Context) {
         for ((uri, name, isDir) in items) {
             runCatching {
                 check(uri)
+                checkName(name)
                 // Into itself, a copy would copy its own copy again and again (until the storage is full).
                 if (isDir && within(at, uri)) throw IllegalArgumentException("inside-itself")
                 when {

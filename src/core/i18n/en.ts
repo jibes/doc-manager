@@ -167,6 +167,7 @@ export const en = {
   saveFailed: 'Couldn’t save the changes.',
   unsavedTitle: 'Unsaved changes',
   unsavedLeave: 'Leave without saving? Your changes to this PDF will be lost.',
+  unsavedSaveFirst: 'Save your changes to this PDF before leaving?',
   changedTitle: 'Changed elsewhere',
   changedBody: 'This PDF was changed since you opened it, on another device or by another app. Saving writes your version over that one.',
   changedOverwrite: 'Save over it',

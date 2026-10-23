@@ -153,6 +153,7 @@ export const de: Strings = {
   saveFailed: 'Die Änderungen konnten nicht gespeichert werden.',
   unsavedTitle: 'Ungespeicherte Änderungen',
   unsavedLeave: 'Ohne Speichern verlassen? Deine Änderungen an diesem PDF gehen verloren.',
+  unsavedSaveFirst: 'Deine Änderungen an diesem PDF vor dem Verlassen speichern?',
   changedTitle: 'Anderswo geändert',
   changedBody: 'Dieses PDF wurde geändert, seit du es geöffnet hast – auf einem anderen Gerät oder von einer anderen App. Speichern schreibt deine Fassung darüber.',
   changedOverwrite: 'Darüber speichern',

@@ -143,6 +143,17 @@ async function copyEntry(from: DirHandle, name: string, isDir: boolean, into: Di
 }
 
 /**
+ * Moves (or renames) an entry in place, no bytes copied: Chromium (its own file system and picked folders) and
+ * Safari (its own) can. False where the browser can't (older ones, folders, across file systems): then copy.
+ */
+async function moveEntry(from: DirHandle, name: string, isDir: boolean, as: string, into?: DirHandle): Promise<boolean> {
+  const h = isDir ? await from.getDirectoryHandle(name) : await from.getFileHandle(name);
+  const move = (h as unknown as { move?: (...to: unknown[]) => Promise<void> }).move;
+  if (!move) return false;
+  return move.apply(h, into ? [into, as] : [as]).then(() => true, () => false);
+}
+
+/**
  * Browsers: Tessel's own folder in the browser's file system (the Tessel folder where no other is chosen), and in
  * desktop Chromium folders the user picked, kept as handles (the browser may ask again after a restart).
  */
@@ -208,10 +219,8 @@ const browserFolders: FoldersApi = {
   async rename(root, dir, e, name) {
     const parent = await writable(root, dir);
     if (await exists(parent, name)) throw new Error(`exists:${name}`);
-    // Chromium can rename in place; elsewhere (or for folders it can't move) copy, then remove the old one.
-    const h = e.kind === 'dir' ? await parent.getDirectoryHandle(e.name) : await parent.getFileHandle(e.name);
-    const move = (h as unknown as { move?: (name: string) => Promise<void> }).move;
-    if (move && (await move.call(h, name).then(() => true, () => false))) return undefined;
+    // Renamed in place where the browser can; elsewhere copied, then the old one removed.
+    if (await moveEntry(parent, e.name, e.kind === 'dir', name)) return undefined;
     await copyEntry(parent, e.name, e.kind === 'dir', parent, name);
     await parent.removeEntry(e.name, { recursive: true });
     return undefined;
@@ -232,7 +241,10 @@ const browserFolders: FoldersApi = {
     const dest = await writable(to.root, to.dir);
     for (const [i, e] of list.entries()) {
       try {
-        await copyEntry(src, e.name, e.kind === 'dir', dest, await freeName(dest, e.name, e.kind === 'dir'));
+        const as = await freeName(dest, e.name, e.kind === 'dir');
+        // Moved in place where the browser can (a large archive isn't copied byte by byte).
+        if (move && (await moveEntry(src, e.name, e.kind === 'dir', as, dest))) continue;
+        await copyEntry(src, e.name, e.kind === 'dir', dest, as);
         if (move) await src.removeEntry(e.name, { recursive: true });
       } catch (err) {
         if (!i) throw err;

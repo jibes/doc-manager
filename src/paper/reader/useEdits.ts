@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 import type { DocHandle, History } from '@/core/engine/types';
 import { t } from '@/core/i18n';
-import { ask } from '@/paper/state/ask';
+import { ask, OTHER } from '@/paper/state/ask';
 import type { Current } from '@/core/lib/fileActions';
 import { holdBrowserBack } from '@/core/lib/backGuard';
 import { goBack } from '@/core/lib/nav';
@@ -78,19 +78,24 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
   const undo = useCallback(() => travel(true), [travel]);
   const redo = useCallback(() => travel(false), [travel]);
 
+  /** True once saved. */
   const save = useCallback(async () => {
+    const fail = () => {
+      setNotice(t.saveFailed);
+      return false;
+    };
     commitField();
     // A document only viewed is kept first (the answer is a gesture too, for the write access below).
-    if (!(await libraryActions().ensureKept(doc.id))) return;
+    if (!(await libraryActions().ensureKept(doc.id))) return false;
     // Ask for write access first, while the click or key press still counts as a user gesture.
-    if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return setNotice(t.saveFailed);
+    if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return fail();
     // Changed meanwhile (synced from another device, written by another app): writing over it is asked about.
-    if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return;
+    if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return false;
     const bytes = await handle.save().catch(() => null);
-    if (!bytes) return setNotice(t.saveFailed);
+    if (!bytes) return fail();
     // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
     const saved = edits.current;
-    if (!(await writeFrom(doc.id, handle, bytes).then(() => true, () => false))) return setNotice(t.saveFailed);
+    if (!(await writeFrom(doc.id, handle, bytes).then(() => true, () => false))) return fail();
     // Its size as now: browsers tell a linked document's file by its name and size.
     libraryActions().patchDoc(doc.id, { bytes: bytes.byteLength });
     invalidate(doc.id);
@@ -100,6 +105,7 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
       setDirty(false);
     }
     setNotice(doc.linked ? t.savedInPlace(doc.fileName) : t.savedCopy);
+    return true;
   }, [doc.id, doc.linked, doc.fileName, handle]);
 
   /** For share / download / print: the document with its edits, saved or not (undefined: as it was opened). */
@@ -111,13 +117,17 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
 
   const leave = useCallback(() => {
     if (!dirtyNow.current && !drafting()) return close();
-    void ask({ title: t.unsavedTitle, body: t.unsavedLeave, confirm: t.discard, destructive: true }).then((answer) => {
+    // Saving first is the usual answer; leaving without, the other one. Text still typed in the details isn't
+    // in the PDF's changes: then it's only discard or stay.
+    const edited = dirtyNow.current;
+    void ask({ title: t.unsavedTitle, body: edited ? t.unsavedSaveFirst : t.unsavedLeave, ...(edited ? { confirm: t.save, other: t.discard } : { confirm: t.discard, destructive: true }) }).then(async (answer) => {
       if (answer === null) return;
+      if (edited && answer !== OTHER && !(await save())) return;
       useDrafts.setState({ field: false, details: false });
       release.current();
       close();
     });
-  }, [close]);
+  }, [close, save]);
 
   const leaveRef = useRef(leave);
   useEffect(() => {

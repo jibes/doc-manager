@@ -24,6 +24,12 @@ import { duplicates, parseConflict, syncTemporary, type ConflictName } from './s
 /** Pages read per document, and characters kept per page. */
 const MAX_PAGES = 200;
 const MAX_PAGE_CHARS = 20_000;
+/**
+ * Bigger files are indexed by name and details only: reading one holds it in memory a few times over, which can
+ * take the Android WebView down (every launch, as the failure was never recorded).
+ */
+const MAX_BYTES = 150 * 1024 * 1024;
+const tooBig = (x: { size: number }) => x.size > MAX_BYTES;
 /** Folder depth walked (a symlink loop or a huge tree stops here). */
 const MAX_DEPTH = 12;
 /** A full walk again after this long, when the app comes back. */
@@ -332,6 +338,8 @@ async function bytesOf(place: Place): Promise<ArrayBuffer> {
 async function read(c: Candidate): Promise<Indexable | null> {
   const base = { key: c.key, place: c.place, name: c.name, size: c.size, modified: c.modified };
   const empty = { title: '', sender: '', type: '', tags: [] as string[], date: '', pages: [] as string[] };
+  // Recorded without its text (and without a hash: it isn't read), so it isn't tried again until it changes.
+  if (tooBig(c)) return { ...base, ...empty };
   const bytes = await bytesOf(c.place).catch(() => null);
   if (!bytes) return null;
   const hash = await contentHash(bytes);
@@ -430,7 +438,7 @@ async function run(): Promise<void> {
   const todo = list.filter((c) => {
     const known = docs.get(c.key);
     // Records from before content hashes are read again once.
-    const read = !known || known.size !== c.size || known.modified !== c.modified || !known.hash || !known.share;
+    const read = !known || known.size !== c.size || known.modified !== c.modified || ((!known.hash || !known.share) && !tooBig(c));
     // Only where it is changed (found to be in the inbox, the folder renamed): no need to read it again.
     if (!read && known && JSON.stringify(known.place) !== JSON.stringify(c.place)) moved({ ...known, place: c.place, name: c.name });
     return read;

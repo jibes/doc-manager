@@ -1,4 +1,4 @@
-import { createStore, del, delMany, entries, get, getMany, keys, set, values } from 'idb-keyval';
+import { createStore, del, entries, get, getMany, promisifyRequest, set, values } from 'idb-keyval';
 
 import type { TextLine } from '@/core/engine/types';
 import { ensurePermission, isFileHandle, isGranted, writeFile, type FileHandle } from '@/core/lib/fsa';
@@ -17,6 +17,8 @@ const coverUrls = new Map<string, string>();
 const viewed = new Map<string, Blob | FileHandle>();
 const viewedOcr = new Map<string, TextLine[]>();
 const ocrKey = (id: string, page: number) => `${id}#${page}`;
+/** A document's recognised pages, deleted as one range (not by listing every page of every document). */
+const dropOcr = (id: string) => ocr('readwrite', (s) => promisifyRequest(s.delete(IDBKeyRange.bound(`${id}#`, `${id}#\uffff`))));
 
 // Ask the browser not to evict the library under storage pressure.
 navigator.storage?.persist?.().catch(() => {});
@@ -25,8 +27,7 @@ export const repo: LibraryRepo = {
   list: () => values<DocRecord>(meta),
   put: (rec) => set(rec.id, rec, meta),
   async remove(id) {
-    const pages = (await keys<string>(ocr)).filter((k) => k.startsWith(`${id}#`));
-    await Promise.all([del(id, meta), del(id, files), del(id, covers), delMany(pages, ocr)]);
+    await Promise.all([del(id, meta), del(id, files), del(id, covers), dropOcr(id)]);
     const url = coverUrls.get(id);
     if (url) URL.revokeObjectURL(url);
     coverUrls.delete(id);
@@ -113,7 +114,7 @@ export const repo: LibraryRepo = {
   },
   async clearOcr(id) {
     for (const k of viewedOcr.keys()) if (k.startsWith(`${id}#`)) viewedOcr.delete(k);
-    await delMany((await keys<string>(ocr)).filter((k) => k.startsWith(`${id}#`)), ocr);
+    await dropOcr(id);
   },
   async saveOcr(id, page, lines) {
     if (viewed.has(id)) return void viewedOcr.set(ocrKey(id, page), lines);

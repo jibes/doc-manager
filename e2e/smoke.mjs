@@ -616,7 +616,8 @@ async function annotations() {
   await page.waitForTimeout(400);
   check((await page.getByTestId('save').isVisible()) && /\/read\//.test(page.url()), 'annotations: staying keeps the edits (and the address)');
   await page.goBack();
-  await page.getByTestId('ask-confirm').click();
+  check((await page.getByTestId('ask-confirm').innerText()) === 'Save' && (await page.getByTestId('ask-other').count()) === 1, 'annotations: leaving offers Save first, and leaving without');
+  await page.getByTestId('ask-other').click();
   await docRows(page).first().waitFor({ timeout: 5000 });
   check(true, 'annotations: discarding them goes back');
   await ctx.close();
@@ -2099,12 +2100,12 @@ async function syncSafety() {
   await page.goto(BASE);
   await openDocs(page);
   await vis('sync-banner').waitFor({ timeout: 60000 }).catch(() => {});
-  for (let i = 0; i < 40 && !/2 sync issues/.test(await vis('sync-banner').innerText().catch(() => '')); i++) await page.waitForTimeout(500);
+  for (let i = 0; i < 40 && !/1 sync issue/.test(await vis('sync-banner').innerText().catch(() => '')); i++) await page.waitForTimeout(500);
   const banner = await vis('sync-banner').innerText().catch(() => '');
-  check(/2 sync issues/.test(banner), `sync: a conflict copy and a duplicate are noticed (${banner})`);
+  check(/1 sync issue/.test(banner), `sync: a conflict copy is noticed; files there twice are left to Duplicates (${banner})`);
   await vis('sync-banner').click();
   await vis('sync-conflict').waitFor();
-  check((await vis('sync-conflict').count()) === 1 && (await vis('sync-duplicate').count()) === 1, 'sync: listed to resolve');
+  check((await vis('sync-conflict').count()) === 1, 'sync: listed to resolve');
   const copySize = await sizeOf('2026/letter.sync-conflict-20261013-213005-ABCDEF7.pdf');
   await vis('sync-keep-copy').click();
   await page.getByText('Kept. The other version is in the trash.').waitFor({ timeout: 10000 });
@@ -2113,15 +2114,16 @@ async function syncSafety() {
     `sync: keeping the other version puts it in place, the first in the trash (${await names('2026')})`,
   );
   check((await vis('sync-conflict').count()) === 0, 'sync: a resolved conflict leaves the list at once');
-  await vis('sync-duplicate').getByTestId('sync-keep-one').first().click();
-  await page.waitForTimeout(150);
-  check((await vis('sync-duplicate').count()) === 0, 'sync: a resolved duplicate leaves the list at once');
-  await page.waitForTimeout(650);
-  const left = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
-  check(left.length === 1, `sync: keeping one duplicate trashes the others (${left})`);
   // And stays gone while the folders are read again.
   await page.waitForTimeout(3000);
-  check((await vis('sync-duplicate').count()) === 0 && (await vis('sync-conflict').count()) === 0, 'sync: resolved items stay resolved');
+  check((await vis('sync-conflict').count()) === 0, 'sync: resolved items stay resolved');
+  // Files there twice are under Duplicates (not a sync issue): one kept, the others to the trash.
+  await vis('screen-back').click();
+  await more(page, 'duplicates');
+  await vis('duplicate-resolve').first().click();
+  await page.waitForTimeout(800);
+  const left = [...(await names('')), ...(await names('Copies'))].filter((n) => n.startsWith('dup'));
+  check(left.length === 1, `sync: removing a duplicate trashes the other copy (${left})`);
 
   // The trash (Documents → ⋯): restore one, delete one for good.
   await vis('screen-back').click();
