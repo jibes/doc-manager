@@ -1505,6 +1505,9 @@ async function aiReading() {
   await vis('home-settings').click();
   await vis('ai-api-openai').click();
   await vis('ai-url').fill('https://ai.test/v1');
+  // Another service: the key is asked for again (it isn't sent to a new address).
+  check((await vis('ai-key').inputValue()) === '', 'ai: changing the API and address clears the key');
+  await vis('ai-key').fill('sk-test');
   failing = true;
   await page.goto(BASE);
   await openScan(page);
