@@ -175,7 +175,7 @@ jobs:
             echo "**Tessel $VERSION for Android.** Download the APK below and open it to install"
             echo "(allow installs from your browser or file manager when asked). To get updates automatically,"
             echo "add this repository in [Obtainium](https://github.com/ImranR98/Obtainium)."
-            if [ -f "docs/releases/$VERSION.md" ]; then echo; echo "## What's new"; echo; cat "docs/releases/$VERSION.md"; fi
+            if [ -f "docs/releases/$VERSION.md" ]; then echo; echo "## What's new"; echo; sed '1{/^# /d}' "docs/releases/$VERSION.md"; fi
           } > "$RUNNER_TEMP/notes.md"
       - uses: softprops/action-gh-release@v2
         with:
