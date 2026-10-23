@@ -230,7 +230,7 @@ export const en = {
   appearanceAutoA11y: 'Auto: follows your system’s light or dark mode',
   appearanceAutoSensorA11y: 'Auto: follows dark mode and the light around you',
   appearanceTitle: 'Appearance',
-  appearanceNote: 'In Dark, pages are shown slightly dimmed and warm, so a white page doesn’t glare.',
+  appearanceNote: 'In Dark, a page’s white is the app’s own soft white, so it neither glares nor looks grey.',
   appearanceNoteSystem: 'Auto follows your system’s light or dark mode.',
   appearanceNoteSensor: 'Auto is Dark when your system is in dark mode or the room is dim.',
   invertColours: 'Invert colours',

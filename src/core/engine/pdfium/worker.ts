@@ -71,7 +71,11 @@ type Doc = {
   password: string;
   undo: Snapshot[];
   redo: Snapshot[];
+  /** Per page: what its paper needs to come out white (a scan's grey or yellowed paper), once looked at. */
+  paper: Map<number, Gain | null>;
 };
+/** Per channel (R, G, B) factor that takes a scan's paper to white. */
+type Gain = [number, number, number];
 type SearchJob = Extract<Request, { type: 'search' }> & { cursor: number; textPtr: number };
 type Job = Exclude<Request, { type: 'cancel' }> | SearchJob;
 
@@ -179,7 +183,7 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
   const meta = (tag: string) => readUtf16((b, l) => M.FPDF_GetMetaText(ptr, tag, b, l)).trim() || undefined;
   const doc = nextDoc++;
   const { formInfo, form } = formOf(ptr);
-  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [] });
+  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [], paper: new Map() });
   // Entries kept as they are when Tessel rewrites the details.
   const other: Record<string, string> = {};
   for (const key of ['Creator', 'Producer', 'CreationDate', 'Trapped']) {
@@ -197,6 +201,67 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
 }
 
 /** Renders a page (or the `clip` region of it) so the output is `width` pixels wide. */
+// ---------- a scan's paper, white ----------
+
+/** A page is a scan when one picture covers most of it. */
+const SCAN_COVER = 0.7;
+/** Small render the paper is measured on. */
+const PAPER_PROBE = 160;
+/** Paper is what most of the page is: this share of its pixels near the brightest common tone. */
+const PAPER_SHARE = 0.25;
+const PAPER_NEAR = 14;
+/** Grey or yellowed paper is lifted at most this much; darker or coloured paper (or a photo) is left as it is. */
+const MAX_PAPER_GAIN = 1.45;
+const PAPER_CAST = 18;
+
+function coveredByImage(d: Doc, page: number, index: number): boolean {
+  const { width, height } = d.pageSizes[index];
+  return withScratch(16, (s) => {
+    const n = M.FPDFPage_CountObjects(page);
+    for (let i = 0; i < n; i++) {
+      const obj = M.FPDFPage_GetObject(page, i);
+      if (M.FPDFPageObj_GetType(obj) !== FPDF_PAGEOBJ_IMAGE || !M.FPDFPageObj_GetBounds(obj, s, s + 4, s + 8, s + 12)) continue;
+      const [l, b, r, t] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(s + o, 'float'));
+      if (((r - l) * (t - b)) / (width * height) >= SCAN_COVER) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * A scanned page's paper (greyish, yellowed: how the scanner saw it) and the gain that makes it white, as typed
+ * pages are; null when the page isn't a scan, its paper is white already, or it isn't paper (a photo, coloured paper).
+ */
+function paperGain(d: Doc, index: number, page: number): Gain | null {
+  if (d.paper.has(index)) return d.paper.get(index)!;
+  let gain: Gain | null = null;
+  if (coveredByImage(d, page, index)) {
+    const img = draw(d, page, index, PAPER_PROBE, { x: 0, y: 0, w: 1, h: 1 }, null);
+    const px = img.data;
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < px.length; i += 4) hist[Math.round(0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2])]++;
+    // The paper: the most common light tone.
+    let peak = 128;
+    for (let v = 128; v < 256; v++) if (hist[v] > hist[peak]) peak = v;
+    const sum = [0, 0, 0];
+    let count = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      if (Math.abs(l - peak) > PAPER_NEAR) continue;
+      sum[0] += px[i];
+      sum[1] += px[i + 1];
+      sum[2] += px[i + 2];
+      count++;
+    }
+    const paper = sum.map((v) => v / Math.max(1, count));
+    const cast = Math.max(...paper) - Math.min(...paper);
+    const needs = paper.map((v) => 255 / Math.max(1, v)) as Gain;
+    if (count >= (px.length / 4) * PAPER_SHARE && cast <= PAPER_CAST && Math.max(...needs) <= MAX_PAPER_GAIN && Math.min(...paper) < 250) gain = needs;
+  }
+  d.paper.set(index, gain);
+  return gain;
+}
+
 function rasterize(docId: number, pageIndex: number, width: number, clip?: NormRect): ImageData {
   const d = getDoc(docId);
   const size = d.pageSizes[pageIndex];
@@ -210,13 +275,25 @@ function rasterize(docId: number, pageIndex: number, width: number, clip?: NormR
   }
   w = Math.max(1, w);
   h = Math.max(1, h);
+  const page = M.FPDF_LoadPage(d.ptr, pageIndex);
+  if (!page) throw new Error(`Could not load page ${pageIndex + 1}`);
+  if (d.form) M.FORM_OnAfterLoadPage(page, d.form);
+  try {
+    return draw(d, page, pageIndex, w, region, paperGain(d, pageIndex, page), h);
+  } finally {
+    if (d.form) M.FORM_OnBeforeClosePage(page, d.form);
+    M.FPDF_ClosePage(page);
+  }
+}
+
+/** Draws a loaded page (`region` of it, `w` pixels wide), its scanned paper made white with `gain`. */
+function draw(d: Doc, page: number, index: number, w: number, region: NormRect, gain: Gain | null, height?: number): ImageData {
+  const size = d.pageSizes[index];
+  const h = height ?? Math.max(1, Math.round((w * size.height * region.h) / (size.width * region.w)));
   // Full-page size at this scale; the bitmap is a window onto it.
   const fullW = Math.round(w / region.w);
   const fullH = Math.round(h / region.h);
-  const page = M.FPDF_LoadPage(d.ptr, pageIndex);
-  if (!page) throw new Error(`Could not load page ${pageIndex + 1}`);
   const bmp = M.FPDFBitmap_CreateEx(w, h, FPDFBitmap_BGRA, 0, 0);
-  if (d.form) M.FORM_OnAfterLoadPage(page, d.form);
   try {
     M.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
     const [x0, y0] = [-Math.round(region.x * fullW), -Math.round(region.y * fullH)];
@@ -229,11 +306,17 @@ function rasterize(docId: number, pageIndex: number, width: number, clip?: NormR
     const out = new Uint8ClampedArray(w * h * 4);
     if (stride === w * 4) out.set(src.subarray(p, p + out.length));
     else for (let y = 0; y < h; y++) out.set(src.subarray(p + y * stride, p + y * stride + w * 4), y * w * 4);
+    if (gain) {
+      const [r, g, b] = gain;
+      for (let i = 0; i < out.length; i += 4) {
+        out[i] *= r;
+        out[i + 1] *= g;
+        out[i + 2] *= b;
+      }
+    }
     return new ImageData(out, w, h);
   } finally {
     M.FPDFBitmap_Destroy(bmp);
-    if (d.form) M.FORM_OnBeforeClosePage(page, d.form);
-    M.FPDF_ClosePage(page);
   }
 }
 
@@ -769,6 +852,28 @@ function sameLine(a: NormRect, b: NormRect): boolean {
  */
 function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   const d = getDoc(docId);
+  // One font for every word (a font per word made thousands of them: big files, slow pages).
+  const font = M.FPDFText_LoadStandardFont(d.ptr, 'Helvetica');
+  if (!font) throw new Error('Could not load the text layer font');
+  try {
+    writeTextLayer(d, pages, font);
+  } finally {
+    M.FPDFFont_Close(font);
+  }
+  const w = M.PDFiumExt_OpenFileWriter();
+  try {
+    if (!M.FPDF_SaveAsCopy(d.ptr, w, FPDF_INCREMENTAL)) throw new Error('Could not save the PDF');
+    const n = M.PDFiumExt_GetFileWriterSize(w);
+    return withScratch(n, (p) => {
+      M.PDFiumExt_GetFileWriterData(w, p, n);
+      return heap().slice(p, p + n).buffer;
+    });
+  } finally {
+    M.PDFiumExt_CloseFileWriter(w);
+  }
+}
+
+function writeTextLayer(d: Doc, pages: PageWords[], font: number) {
   for (const { page: pageIndex, words, turn = 0, replace } of pages) {
     if (!words.length && !replace) continue;
     const page = M.FPDF_LoadPage(d.ptr, pageIndex);
@@ -794,9 +899,25 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
       };
       const { width, height } = d.pageSizes[pageIndex];
       const ptH = turn % 2 ? width : height;
-      words.forEach((w, i) => {
-        const next = words[i + 1];
-        const text = next && sameLine(w.box, next.box) ? `${w.text} ` : w.text;
+      const ptW = turn % 2 ? height : width;
+      // One text object per line, not per word: this PDFium gives every text object a font of its own, and a page of
+      // small print has thousands of words (files of many megabytes, pages slow to open).
+      const lines: { text: string; box: NormRect }[] = [];
+      for (const w of words) {
+        const last = lines[lines.length - 1];
+        // A wide gap (another column, a table's next cell) starts a line of its own.
+        const gap = last ? (w.box.x - (last.box.x + last.box.w)) * ptW : 0;
+        if (last && sameLine(last.box, w.box) && w.box.x >= last.box.x && gap < last.box.h * ptH * 3) {
+          const x1 = Math.max(last.box.x + last.box.w, w.box.x + w.box.w);
+          const y0 = Math.min(last.box.y, w.box.y);
+          const y1 = Math.max(last.box.y + last.box.h, w.box.y + w.box.h);
+          last.text += ` ${w.text}`;
+          last.box = { x: last.box.x, y: y0, w: x1 - last.box.x, h: y1 - y0 };
+        } else lines.push({ text: w.text, box: w.box });
+      }
+      lines.forEach((w, i) => {
+        // Copying text across lines keeps a space between them.
+        const text = i < lines.length - 1 ? `${w.text} ` : w.text;
         const { x, y, w: bw, h: bh } = w.box;
         // Baseline near the bottom of the box; letters fill most of a detected line's height.
         const base = y + bh * 0.8;
@@ -805,7 +926,7 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
         const size = bh * ptH * 0.75;
         const length = Math.hypot(x1 - x0, y1 - y0);
         if (!(size > 0.5) || !(length > 0) || ![x0, y0, x1, y1].every(Number.isFinite)) return;
-        const obj = M.FPDFPageObj_NewTextObj(d.ptr, 'Helvetica', size);
+        const obj = M.FPDFPageObj_CreateTextObj(d.ptr, font, size);
         if (!obj) return;
         const n = (text.length + 1) * 2;
         const set = withScratch(n, (p) => {
@@ -832,17 +953,6 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
     } finally {
       M.FPDF_ClosePage(page);
     }
-  }
-  const w = M.PDFiumExt_OpenFileWriter();
-  try {
-    if (!M.FPDF_SaveAsCopy(d.ptr, w, FPDF_INCREMENTAL)) throw new Error('Could not save the PDF');
-    const n = M.PDFiumExt_GetFileWriterSize(w);
-    return withScratch(n, (p) => {
-      M.PDFiumExt_GetFileWriterData(w, p, n);
-      return heap().slice(p, p + n).buffer;
-    });
-  } finally {
-    M.PDFiumExt_CloseFileWriter(w);
   }
 }
 

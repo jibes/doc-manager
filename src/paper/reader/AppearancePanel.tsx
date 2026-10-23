@@ -11,7 +11,7 @@ import { Panel } from './Panel';
 
 type Choice = Appearance;
 const LABEL: Record<Choice, () => string> = { light: () => t.appearanceLight, dark: () => t.appearanceDark, auto: () => t.appearanceAuto };
-/** Ink on the preview page: printed black, dimmed with the page in Dark. */
+/** Ink on the preview page: printed black, toned with the page in Dark. */
 const PAGE_INK: Record<ThemeName, string> = { light: '#1B1A17', dark: '#26231F' };
 
 function Swatch({ name, selected, onPress }: { name: Choice; selected: boolean; onPress: () => void }) {

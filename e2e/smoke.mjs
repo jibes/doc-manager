@@ -2864,7 +2864,7 @@ async function tabs() {
   await ctx.close();
 }
 
-// Appearance: Light / Dark / Auto; in Dark pages are dimmed, not inverted; "Invert colours" is per document.
+// Appearance: Light / Dark / Auto; in Dark pages are toned to the app's white, not inverted; "Invert colours" is per document.
 async function appearance() {
   const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
   // Someone who chose Black before 1.4 gets Dark.
@@ -2884,7 +2884,7 @@ async function appearance() {
   const filter = () => page.evaluate(() => [...document.querySelectorAll('canvas')].find((c) => c.offsetParent && c.width > 200)?.style.filter ?? '');
   await page.waitForFunction(() => [...document.querySelectorAll('canvas')].some((c) => c.offsetParent && c.width > 200), null, { timeout: 20000 });
   const dim = await filter();
-  check(/brightness\(0\.7/.test(dim) && !/invert/.test(dim), `appearance: in Dark, pages are dimmed, not inverted (${dim})`);
+  check(/brightness\(0\.92/.test(dim) && !/invert/.test(dim), `appearance: in Dark, pages are the app’s white, not inverted (${dim})`);
   await page.getByTestId('open-appearance').click();
   await page.getByTestId('invert-toggle').click();
   await page.keyboard.press('Escape');

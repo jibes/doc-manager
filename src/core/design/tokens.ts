@@ -29,7 +29,7 @@ export type Palette = {
   scrim: string;
   /** Chrome glass over the reading surface. */
   glass: string;
-  /** Pages as printed: untouched in Light; in Dark slightly dimmed and warm, so a white page doesn't glare. */
+  /** Pages as printed: untouched in Light; in Dark their white is the app's own (soft) white, so a page doesn't glare. */
   page: PageLook;
   /** Pages with "Invert colours" (per document): light text on a dark page. */
   inverted: PageLook;
@@ -77,8 +77,8 @@ export const palettes: Record<ThemeName, Palette> = {
     markRing: '#FFB238',
     scrim: 'rgba(0,0,0,0.45)',
     glass: 'rgba(34,35,39,0.80)',
-    // About 70 %: the page's white sits just below the app's light text, with a touch of warmth.
-    page: { cssFilter: 'brightness(0.7) sepia(0.14)', blend: { color: '#B5AE9F', mode: 'multiply' }, base: '#B5AE9F' },
+    // The page's white is the app's own white (its light text), not a dimmed grey that reads as a poor scan.
+    page: { cssFilter: 'brightness(0.92) sepia(0.6)', blend: { color: '#ECE7DC', mode: 'multiply' }, base: '#ECE7DC' },
     inverted: { cssFilter: 'invert(0.86) hue-rotate(180deg) contrast(0.94)', blend: { color: '#DCDCDC', mode: 'difference' }, base: '#2B2B2B' },
     shadow: 'rgba(0,0,0,0.5)',
   },

@@ -214,7 +214,7 @@ export const de: Strings = {
   appearanceAutoA11y: 'Auto: folgt dem hellen oder dunklen Modus des Systems',
   appearanceAutoSensorA11y: 'Auto: folgt dem dunklen Modus und dem Umgebungslicht',
   appearanceTitle: 'Darstellung',
-  appearanceNote: 'In Dunkel werden Seiten leicht gedimmt und warm gezeigt, damit eine weiße Seite nicht blendet.',
+  appearanceNote: 'In Dunkel ist das Weiß einer Seite das sanfte Weiß der App: Es blendet nicht und wirkt nicht grau.',
   appearanceNoteSystem: 'Auto folgt dem hellen oder dunklen Modus des Systems.',
   appearanceNoteSensor: 'Auto ist dunkel, wenn das System im dunklen Modus ist oder es im Raum dämmrig ist.',
   invertColours: 'Farben umkehren',
