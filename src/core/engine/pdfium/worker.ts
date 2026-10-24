@@ -6,6 +6,7 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
 import { mergeGraphics } from '../geometry';
+import { GLYPHLESS, GLYPHLESS_WIDTH } from './glyphless';
 import type { Annotation, FormField, FormValue, Graphic, NormRect, OcrLayer, OutlineItem, PageWords, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
@@ -845,37 +846,40 @@ function save(docId: number): ArrayBuffer {
 // ---------- recognised text ----------
 
 const FPDF_TEXTRENDERMODE_INVISIBLE = 3;
-
-/** The next word continues this one's line: overlaps it vertically by half and starts to its right. */
-function sameLine(a: NormRect, b: NormRect): boolean {
-  const overlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-  return overlap > 0.5 * Math.min(a.h, b.h) && b.x >= a.x + a.w / 2;
-}
+const FPDF_FONT_TRUETYPE = 2;
 
 /**
  * Invisible text over each word recognised on a page (as a scanner's text layer), so the page can be searched,
  * selected and copied. Boxes are normalized to the page as shown (rotation applied); each word is stretched to
- * its box along the line's direction, whatever the page's rotation. Returns the file with the text appended as
- * an incremental update.
+ * its box along the line's direction, whatever the page's rotation. Returns the file written anew.
  */
 function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   const d = getDoc(docId);
   // Changed from the first page written (a page that fails later leaves the others' text in the document).
   d.edited = true;
-  // One font for every word (a font per word made thousands of them: big files, slow pages).
-  const font = M.FPDFText_LoadStandardFont(d.ptr, 'Helvetica');
-  if (!font) throw new Error('Could not load the text layer font');
+  // One font for every word: an embedded one, which this PDFium shares between text objects (a standard font it
+  // writes again for each: a page of small print made thousands of them). Empty glyphs: a few kilobytes.
+  const data = Uint8Array.from(atob(GLYPHLESS), (c) => c.charCodeAt(0));
+  const buf = malloc(data.length);
+  heap().set(data, buf);
+  const embedded = M.FPDFText_LoadFont(d.ptr, buf, data.length, FPDF_FONT_TRUETYPE, true);
+  const font = embedded || M.FPDFText_LoadStandardFont(d.ptr, 'Helvetica');
+  if (!font) {
+    M.pdfium.wasmExports.free(buf);
+    throw new Error('Could not load the text layer font');
+  }
   try {
-    writeTextLayer(d, pages, font);
+    writeTextLayer(d, pages, font, !!embedded);
   } finally {
     M.FPDFFont_Close(font);
+    M.pdfium.wasmExports.free(buf);
   }
   // The file written anew (as Save does): the layers it replaced leave the file, rather than staying behind in
   // earlier revisions (a document read again and again grew by megabytes each time). A signed one is updated.
   return save(docId);
 }
 
-function writeTextLayer(d: Doc, pages: PageWords[], font: number) {
+function writeTextLayer(d: Doc, pages: PageWords[], font: number, glyphless: boolean) {
   for (const { page: pageIndex, words, turn = 0, replace } of pages) {
     if (!words.length && !replace) continue;
     const page = M.FPDF_LoadPage(d.ptr, pageIndex);
@@ -901,25 +905,11 @@ function writeTextLayer(d: Doc, pages: PageWords[], font: number) {
       };
       const { width, height } = d.pageSizes[pageIndex];
       const ptH = turn % 2 ? width : height;
-      const ptW = turn % 2 ? height : width;
-      // One text object per line, not per word: this PDFium gives every text object a font of its own, and a page of
-      // small print has thousands of words (files of many megabytes, pages slow to open).
-      const lines: { text: string; box: NormRect }[] = [];
-      for (const w of words) {
-        const last = lines[lines.length - 1];
-        // A wide gap (another column, a table's next cell) starts a line of its own.
-        const gap = last ? (w.box.x - (last.box.x + last.box.w)) * ptW : 0;
-        if (last && sameLine(last.box, w.box) && w.box.x >= last.box.x && gap < last.box.h * ptH * 3) {
-          const x1 = Math.max(last.box.x + last.box.w, w.box.x + w.box.w);
-          const y0 = Math.min(last.box.y, w.box.y);
-          const y1 = Math.max(last.box.y + last.box.h, w.box.y + w.box.h);
-          last.text += ` ${w.text}`;
-          last.box = { x: last.box.x, y: y0, w: x1 - last.box.x, h: y1 - y0 };
-        } else lines.push({ text: w.text, box: w.box });
-      }
-      lines.forEach((w, i) => {
-        // Copying text across lines keeps a space between them.
-        const text = i < lines.length - 1 ? `${w.text} ` : w.text;
+      // A text object per word, where the word is on the scan: selecting and highlighting follow the words
+      // (a line's object, in a font of other widths, drifted from them and ran across columns).
+      words.forEach((w, i) => {
+        // Copied text keeps a space after each word (PDFium breaks the lines by where they are).
+        const text = i < words.length - 1 ? `${w.text} ` : w.text;
         const { x, y, w: bw, h: bh } = w.box;
         // Baseline near the bottom of the box; letters fill most of a detected line's height.
         const base = y + bh * 0.8;
@@ -936,11 +926,14 @@ function writeTextLayer(d: Doc, pages: PageWords[], font: number) {
           return M.FPDFText_SetText(obj, p);
         });
         M.FPDFTextObj_SetTextRenderMode(obj, FPDF_TEXTRENDERMODE_INVISIBLE);
-        // Its natural width at this size (the trailing space excluded), to stretch it onto the box.
-        const natural = withScratch(16, (b) => {
-          if (!M.FPDFPageObj_GetBounds(obj, b, b + 4, b + 8, b + 12)) return 0;
-          return M.pdfium.getValue(b + 8, 'float') - M.pdfium.getValue(b, 'float');
-        });
+        // Its natural width at this size (the trailing space excluded), to stretch it onto the box: the empty
+        // glyphs have no bounds, only their one width.
+        const natural = glyphless
+          ? [...w.text].length * size * GLYPHLESS_WIDTH
+          : withScratch(16, (b) => {
+              if (!M.FPDFPageObj_GetBounds(obj, b, b + 4, b + 8, b + 12)) return 0;
+              return M.pdfium.getValue(b + 8, 'float') - M.pdfium.getValue(b, 'float');
+            });
         if (!set || !(natural > 0)) {
           M.FPDFPageObj_Destroy(obj);
           return;
