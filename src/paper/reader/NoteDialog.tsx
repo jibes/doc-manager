@@ -7,7 +7,8 @@ import { useModal } from '@/paper/components/useModal';
 import { elevation, fonts, radius, space, type Palette } from '@/core/design/tokens';
 import { t } from '@/core/i18n';
 
-export type NoteRequest = { initial: string; quote: string; resolve: (text: string | null) => void };
+/** `id`: each request its own (a new one starts from its own text, not the last one's). */
+export type NoteRequest = { id: number; initial: string; quote: string; resolve: (text: string | null) => void };
 
 /** Writes or edits the comment on a highlight. */
 export function NoteDialog({ request, palette: p }: { request: NoteRequest | null; palette: Palette }) {
@@ -16,7 +17,7 @@ export function NoteDialog({ request, palette: p }: { request: NoteRequest | nul
     <Animated.View entering={FadeIn.duration(160)} style={[StyleSheet.absoluteFill, styles.backdrop, { backgroundColor: p.scrim }]}>
       <Pressable accessibilityLabel={t.cancel} style={StyleSheet.absoluteFill} onPress={() => request.resolve(null)} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.center} pointerEvents="box-none">
-        <Card request={request} palette={p} />
+        <Card key={request.id} request={request} palette={p} />
       </KeyboardAvoidingView>
     </Animated.View>
   );

@@ -323,7 +323,8 @@ ipcMain.handle('http', async (e, { id, url, method, headers, body }) => {
   const stop = new AbortController();
   running.set(key, stop);
   try {
-    const res = await net.fetch(url, { method, headers, body, signal: stop.signal });
+    // Not followed: a redirect could take the key and the pages elsewhere (the address was checked, not where it sends).
+    const res = await net.fetch(url, { method, headers, body, signal: stop.signal, redirect: 'manual' });
     return { status: res.status, body: await res.text() };
   } finally {
     // A request after a reload can have the same id: only its own entry goes.

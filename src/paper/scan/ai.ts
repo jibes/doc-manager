@@ -181,7 +181,10 @@ function* objects(text: string): Generator<[number, number]> {
  * object that parses and looks like a result.
  */
 export function parseResult(text: string, pageCount: number): AiResult {
-  const reply = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const paired = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Thinking whose opening tag was the prompt's (some served models): what comes after it is the reply.
+  const close = paired.toLowerCase().lastIndexOf('</think>');
+  const reply = close < 0 ? paired : paired.slice(close + '</think>'.length);
   let raw: Partial<AiResult> | undefined;
   for (const [a, b] of objects(reply)) {
     try {
@@ -267,7 +270,8 @@ async function request(url: string, init: { headers: Record<string, string>; bod
     return new Response(r.body, { status: r.status });
   }
   if (!shell)
-    return fetch(url, { method: 'POST', ...init }).catch((e: unknown) => {
+    // A redirect isn't followed (it could take the key and the pages elsewhere): it fails as no answer does.
+    return fetch(url, { method: 'POST', ...init, redirect: 'error' }).catch((e: unknown) => {
       // No answer at all (offline, a wrong address, or the browser's rules against the request): said as such.
       if (e instanceof TypeError) throw new Error(`${AI_UNREACHABLE}:${new URL(url).host}`);
       throw e;

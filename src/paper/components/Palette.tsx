@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
@@ -33,6 +33,13 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
     return [...hits.filter((it) => it.label.toLocaleLowerCase().startsWith(q)), ...hits.filter((it) => !it.label.toLocaleLowerCase().startsWith(q))].slice(0, SHOWN);
   }, [items, query]);
   const at = Math.min(active, Math.max(0, found.length - 1));
+  // The row picked with ↑ ↓ kept in sight (the list scrolls below its last visible row).
+  const list = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const el = list.current as unknown as HTMLElement | null;
+    el?.querySelector?.('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [at]);
   const go = (it: PaletteItem | undefined) => {
     if (!it) return;
     onClose();
@@ -70,7 +77,7 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
             style={[styles.input, { color: p.ink }]}
           />
         </View>
-        <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={list} style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
           {found.length ? (
             found.map((it, i) => (
               <Pressable

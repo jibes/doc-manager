@@ -29,6 +29,7 @@ import { schedule, startIndexing, useIndex } from '@/paper/archive/indexer';
 import { flushOpened, syncOpened } from '@/paper/archive/opened';
 import { loadCache } from '@/paper/state/cache';
 import { refreshInboxCount } from '@/paper/archive/inbox';
+import { purge } from '@/paper/archive/trash';
 import { readAdded, resumeReading } from '@/paper/archive/intake';
 import { showInPane } from '@/paper/state/pane';
 import { t } from '@/core/i18n';
@@ -53,6 +54,9 @@ async function dropped(items: ImportItem[]) {
 }
 
 /** The debug log: on as Settings says; errors (and where the app was) always. */
+/** A while after the start, the trash is emptied of what it has kept long enough. */
+const PURGE_AFTER_MS = 30_000;
+
 function useLog() {
   const on = usePrefs((s) => s.debugLog);
   useEffect(() => setLogging(on), [on]);
@@ -115,11 +119,16 @@ export default function RootLayout() {
     const unlibrary = useLibrary.subscribe((s, prev) => {
       if (s.docs.length !== prev.docs.length) schedule();
     });
+    // What has been in the trash longer than it keeps things goes, without the Trash screen being opened.
+    const purging = setTimeout(() => {
+      const archive = usePrefs.getState().archive;
+      if (archive) void purge(archive).catch(() => {});
+    }, PURGE_AFTER_MS);
     // Another Tessel folder, or this device now sorting the inbox: what waits there, counted again.
     const unprefs = usePrefs.subscribe((s, prev) => {
       if (s.archive !== prev.archive || s.inboxHere !== prev.inboxHere) void refreshInboxCount();
     });
-    return () => (unpicker(), unlibrary(), unprefs());
+    return () => (unpicker(), unlibrary(), unprefs(), clearTimeout(purging));
   }, []);
 
   useEffect(() => {

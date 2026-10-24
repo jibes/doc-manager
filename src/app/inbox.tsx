@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { create } from 'zustand';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,6 +39,9 @@ const detailsOf = (p: Proposal, e: Edits = {}): Details => ({
 });
 
 /** The inbox: each new document with its proposed details and destination, to check and file. */
+/** What was typed into the inbox's cards, by file (until filed or the app closes). */
+const useInboxEdits = create<{ edits: Record<string, Edits> }>(() => ({ edits: {} }));
+
 export default function Inbox() {
   const p = usePalette();
   const column = useColumnWidth();
@@ -50,7 +54,9 @@ export default function Inbox() {
   const [dir, setDir] = useState<string | undefined>(undefined);
   const [items, setItems] = useState<Proposal[] | null>(null);
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
-  const [edits, setEdits] = useState<Record<string, Edits>>({});
+  // Kept while the app runs: leaving the inbox (Back, a document opened) doesn't lose what was typed.
+  const edits = useInboxEdits((st) => st.edits);
+  const setEdits = (change: (all: Record<string, Edits>) => Record<string, Edits>) => useInboxEdits.setState((st) => ({ edits: change(st.edits) }));
   const [busy, setBusy] = useState<Set<string>>(new Set());
   // Being filed now (a second tap, or File all, leaves them be).
   const filing = useRef(new Set<string>());

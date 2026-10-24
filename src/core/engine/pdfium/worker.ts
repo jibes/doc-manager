@@ -529,6 +529,23 @@ function continues(run: { rect: NormRect; right: number }, rc: NormRect): { left
 /** The second half of a character outside the Basic Multilingual Plane (an emoji, 𝔸): it has no box of its own. */
 const lowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
 
+/**
+ * A glyph's box as the page's content has it (before the page's own rotation; y down): text runs along it as
+ * written, so a page turned a quarter (/Rotate 90) reads its lines as lines, not a run per glyph.
+ */
+const rawBox = (l: number, t: number, r: number, b: number): NormRect => ({ x: l, y: -t, w: r - l, h: t - b });
+const shown = (norm: Norm, raw: NormRect) => norm(raw.x, -raw.y, raw.x + raw.w, -(raw.y + raw.h));
+const sameRow = (a: NormRect, b: NormRect) => Math.abs(a.y + a.h / 2 - (b.y + b.h / 2)) < Math.min(a.h, b.h) * 0.5;
+
+/** A run (its box as the content has it) taking in a glyph's; its box on the page shown follows. */
+function extend(run: { rect: NormRect; raw: NormRect; right: number }, rc: NormRect, norm: Norm) {
+  const g = { rect: run.raw, right: run.right };
+  grow(g, rc);
+  run.raw = g.rect;
+  run.right = g.right;
+  run.rect = shown(norm, run.raw);
+}
+
 /** A run widened to take in a glyph's box, on either side. */
 function grow(run: { rect: NormRect; right: number }, rc: NormRect) {
   const x0 = Math.min(run.rect.x, rc.x);
@@ -545,7 +562,7 @@ function pageText(docId: number, pageIndex: number): TextRun[] {
   return withTextPage(d, pageIndex, [], (_page, text, norm) => {
     const runs: TextRun[] = [];
     const n = M.FPDFText_CountChars(text);
-    let cur: (TextRun & { right: number }) | null = null;
+    let cur: (TextRun & { raw: NormRect; right: number }) | null = null;
     const flush = (eol: boolean) => {
       if (cur && cur.text.trim()) runs.push({ text: cur.text.replace(/\s+$/, ''), rect: cur.rect, eol });
       cur = null;
@@ -569,17 +586,16 @@ function pageText(docId: number, pageIndex: number): TextRun[] {
           if (cur && ch === ' ') cur.text += ' ';
           continue;
         }
-        const rc = norm(l, t, r, b);
-        const c = cur as (TextRun & { right: number }) | null;
-        const on = c && continues(c, rc);
+        const rc = rawBox(l, t, r, b);
+        const c = cur as (TextRun & { raw: NormRect; right: number }) | null;
+        const on = c && continues({ rect: c.raw, right: c.right }, rc);
         if (c && on) {
-          if (on.gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+          if (on.gap > c.raw.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
           c.text += ch;
-          grow(c, rc);
+          extend(c, rc, norm);
         } else {
-          const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
-          flush(!!c && !sameLine);
-          cur = { text: ch, rect: rc, eol: false, right: rc.x + rc.w };
+          flush(!!c && !sameRow(rc, c.raw));
+          cur = { text: ch, rect: norm(l, t, r, b), raw: rc, eol: false, right: rc.x + rc.w };
         }
       }
     });
@@ -631,7 +647,7 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
   const roles = structRoles(page);
   const lines: TextLine[] = [];
   const n = M.FPDFText_CountChars(text);
-  let cur: (TextLine & { right: number }) | null = null;
+  let cur: (TextLine & { raw: NormRect; right: number }) | null = null;
   const flush = () => {
     const c = cur;
     cur = null;
@@ -678,13 +694,13 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
         if (cur && ch === ' ') cur.text += ' ';
         continue;
       }
-      const rc = norm(l, t, r, b);
-      const c = cur as (TextLine & { right: number }) | null;
-      const on = c && c.sid === role?.sid && continues(c, rc);
+      const rc = rawBox(l, t, r, b);
+      const c = cur as (TextLine & { raw: NormRect; right: number }) | null;
+      const on = c && c.sid === role?.sid && continues({ rect: c.raw, right: c.right }, rc);
       if (c && on) {
-        if (on.gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+        if (on.gap > c.raw.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
         c.text += ch;
-        grow(c, rc);
+        extend(c, rc, norm);
       } else {
         flush();
         // Typography from the line's first glyph.
@@ -696,7 +712,8 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
         cur = {
           ocr: !!obj && M.FPDFTextObj_GetTextRenderMode(obj) === FPDF_TEXTRENDERMODE_INVISIBLE,
           text: ch,
-          rect: rc,
+          rect: norm(l, t, r, b),
+          raw: rc,
           right: rc.x + rc.w,
           size: Math.round(M.FPDFText_GetFontSize(text, i) * 10) / 10,
           bold: weight >= 600 || (f & 0x40000) !== 0 || /bold|black|heavy|semibold/i.test(fontName),

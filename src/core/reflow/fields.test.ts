@@ -36,6 +36,11 @@ describe('withFields', () => {
     expect(out[0].text).toBe('Name: Ada, Lovelace');
   });
 
+  it('puts a value without a label where it is among the lines', () => {
+    const out = withFields([line('Top', 0.1, 0.1), line('Bottom', 0.1, 0.5)], [field({ type: 'text', rect: { x: 0.3, y: 0.3, w: 0.3, h: 0.03 }, value: 'Middle' })]);
+    expect(out.map((l) => l.text)).toEqual(['Top', 'Middle', 'Bottom']);
+  });
+
   it('gives a value without a label a line of its own', () => {
     const out = withFields([line('Title', 0.1, 0.1)], [field({ type: 'text', rect: { x: 0.3, y: 0.5, w: 0.3, h: 0.03 }, value: 'alone' })]);
     expect(out.at(-1)).toMatchObject({ text: 'alone', rect: { x: 0.3, y: 0.5 } });

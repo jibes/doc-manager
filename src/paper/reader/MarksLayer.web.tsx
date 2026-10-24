@@ -11,7 +11,9 @@ type Props = { hits: SearchHit[]; active: SearchHit | null | undefined; width: n
  */
 export const MarksLayer = memo(function MarksLayer({ hits, active, width, height, palette }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // Flat rectangles need no sharp pixels: at most about 2 MP, however far the page is zoomed (a full-resolution
+  // canvas per page took hundreds of MB at 400 %).
+  const dpr = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(2e6 / Math.max(1, width * height)));
 
   useLayoutEffect(() => {
     const c = ref.current;

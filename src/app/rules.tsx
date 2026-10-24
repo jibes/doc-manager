@@ -60,8 +60,10 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
     if (template === null || slash || template.trim() === rules.template) return;
     changeRules(archive, (r) => ({ ...r, template: template.trim() || r.template })).then(() => setTemplate(null), onError);
   };
+  // A rule fills in something: words to match alone would do nothing.
+  const complete = !!draft.match.trim() && !!(draft.sender.trim() || draft.type.trim() || draft.tags.trim());
   const add = () => {
-    if (!draft.match.trim()) return;
+    if (!complete) return;
     const rule: Rule = { id: `r-${Date.now().toString(36)}`, match: draft.match.trim(), sender: draft.sender.trim(), type: draft.type.trim(), tags: tagsOf(draft.tags) };
     changeRules(archive, (r) => ({ ...r, rules: [...r.rules, rule] })).then(() => setDraft({ match: '', sender: '', type: '', tags: '' }), onError);
   };
@@ -73,7 +75,7 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
   return (
     <View style={{ gap: space.sm }}>
       <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-        <Field label={t.rulesTemplate} value={template ?? rules.template} onChange={setTemplate} testID="rules-template" />
+        <Field label={t.rulesTemplate} value={template ?? rules.template} onChange={setTemplate} onDone={saveTemplate} testID="rules-template" />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
           <T v="caption" color={slash ? p.markRing : p.muted} style={{ flex: 1 }} testID="rules-template-note">
             {slash ? t.rulesTemplateNoSlash : t.rulesTemplateNote}
@@ -104,7 +106,7 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
         </View>
         <Field label={t.detailTags} value={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} testID="rule-tags" placeholder={t.inboxTags} />
         <View style={styles.actions}>
-          <Button testID="rule-add" kind="quiet" icon="plus" label={t.ruleAdd} onPress={add} disabled={!draft.match.trim()} />
+          <Button testID="rule-add" kind="quiet" icon="plus" label={t.ruleAdd} onPress={add} disabled={!complete} />
         </View>
       </View>
       <T v="caption" color={p.muted}>

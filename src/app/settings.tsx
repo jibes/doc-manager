@@ -15,7 +15,7 @@ import { aiMessage, opError, t } from '@/core/i18n';
 import { flatten, hasFolders } from '@/paper/archive/flatten';
 import { APP_ROOT_ID } from '@/core/lib/nesting';
 import { folders } from '@/core/lib/folders';
-import { changeTessel, documentsHere, importFolder } from '@/paper/archive/tessel';
+import { changeTessel, documentsHere, importFolder, isTessel } from '@/paper/archive/tessel';
 import { shell } from '@/core/lib/shell';
 import { showActions, type Action } from '@/paper/state/actions';
 import { forget, viewedCount } from '@/paper/state/viewed';
@@ -126,12 +126,19 @@ export default function Settings() {
   };
   const choose = async () => {
     const r = await folders.add().catch(() => void setError(t.opFailed));
-    if (r && r.id !== archive) await changeTo(r.id);
+    if (!r) return;
+    // The Tessel folder picked again: nothing changes (moving it into itself renamed every document).
+    if (await isTessel(r.id)) {
+      if (r.id !== archive) await folders.forget(r.id).catch(() => {});
+      return setError(t.tesselSame);
+    }
+    await changeTo(r.id);
   };
   const unlock = async () => {
-    await folders.unlock(tesselRoot, true).catch(() => false);
+    const ok = await folders.unlock(tesselRoot, true).catch(() => false);
     refresh();
     schedule(300);
+    return ok;
   };
   // What a tap on the Tessel folder offers: one choice runs at once, two are asked.
   const tesselOptions: Action[] = [
@@ -139,7 +146,13 @@ export default function Settings() {
     ...(archive ? [{ key: 'tessel-device', icon: 'folder' as const, label: shell ? t.tesselUseAppFolder : t.tesselUseBrowser, onPress: () => void changeTo(null) }] : []),
   ];
   const onTessel = () => {
-    if (where?.locked) return void unlock();
+    // Access not given (or the folder gone): the other choices, rather than nothing.
+    if (where?.locked)
+      return void unlock().then((ok) => {
+        if (ok) return;
+        setError(t.writeDenied);
+        if (tesselOptions.length) showActions(t.tesselFolderTitle, tesselOptions);
+      });
     if (tesselOptions.length === 1) return tesselOptions[0].onPress();
     showActions(t.tesselFolderTitle, tesselOptions);
   };

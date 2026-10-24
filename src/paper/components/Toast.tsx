@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeInDown, FadeInUp, FadeOutDown, FadeOutUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,11 +28,16 @@ export function Toast({
 }) {
   const p = usePalette();
   const insets = useSafeAreaInsets();
+  // Five seconds from when it is said: a screen drawn again meanwhile (a new onDismiss each time) doesn't restart them.
+  const dismiss = useRef(onDismiss);
+  useEffect(() => {
+    dismiss.current = onDismiss;
+  }, [onDismiss]);
   useEffect(() => {
     if (!message) return;
-    const t = setTimeout(onDismiss, 5000);
+    const t = setTimeout(() => dismiss.current(), 5000);
     return () => clearTimeout(t);
-  }, [message, id, onDismiss]);
+  }, [message, id]);
   if (!message) return null;
   return (
     // Only the toast takes taps: what is beside it (a row of actions) stays usable. Without a button of its own it

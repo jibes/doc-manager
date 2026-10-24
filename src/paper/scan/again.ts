@@ -26,8 +26,6 @@ const JPEG_QUALITY = 0.92;
 export async function scanAgain(doc: DocRecord, handle: DocHandle, filter: FilterId, onProgress?: (done: number, total: number) => void): Promise<void> {
   const scan = useScan.getState();
   await scan.restore();
-  scan.setReplaces({ id: doc.id, title: doc.title, details: detailsOf(handle, doc.title), other: handle.metadata.other });
-  scan.setTitle(doc.title);
   for (let p = 0; p < handle.pageCount; p++) {
     onProgress?.(p, handle.pageCount);
     const { width: w, height: h } = handle.pageSizes[p];
@@ -40,6 +38,10 @@ export async function scanAgain(doc: DocRecord, handle: DocHandle, filter: Filte
     const quad = fallbackQuad(raster.width, raster.height, true);
     scan.add({ source, width: raster.width, height: raster.height, detected: null, sharpness: null, spec: defaultSpec(quad, filter) });
   }
+  // Only with all its pages in: stopped part way (the app closed), the draft is a scan of its own, not one that
+  // would replace the document with some of its pages.
+  scan.setReplaces({ id: doc.id, title: doc.title, details: detailsOf(handle, doc.title), other: handle.metadata.other });
+  scan.setTitle(doc.title);
 }
 
 /**

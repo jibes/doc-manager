@@ -5,7 +5,24 @@ import { usePalette } from '@/paper/state/prefs';
 import { T } from './primitives';
 
 /** A labelled one-line text field. */
-export function Field({ label, value, onChange, testID, placeholder, error }: { label: string; value: string; onChange: (v: string) => void; testID: string; placeholder?: string; error?: boolean }) {
+export function Field({
+  label,
+  value,
+  onChange,
+  testID,
+  placeholder,
+  error,
+  onDone,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  testID: string;
+  placeholder?: string;
+  error?: boolean;
+  /** Typing finished (Enter, or the field left). */
+  onDone?: () => void;
+}) {
   const p = usePalette();
   return (
     <View style={{ flex: 1, minWidth: 140, gap: 2 }}>
@@ -16,6 +33,8 @@ export function Field({ label, value, onChange, testID, placeholder, error }: { 
         testID={testID}
         value={value}
         onChangeText={onChange}
+        onSubmitEditing={onDone}
+        onBlur={onDone}
         placeholder={placeholder}
         accessibilityLabel={label}
         placeholderTextColor={p.muted}

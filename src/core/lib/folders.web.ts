@@ -178,6 +178,11 @@ const browserFolders: FoldersApi = {
     return { id, name: handle.name, kind: 'folder' };
   },
   forget: (id) => del(id, store),
+  async same(a, b) {
+    if (a === b) return true;
+    const [x, y] = await Promise.all([folderHandle(a).catch(() => null), folderHandle(b).catch(() => null)]);
+    return !!x && !!y && (await (x as unknown as FileSystemHandle).isSameEntry(y as unknown as FileSystemHandle).catch(() => false));
+  },
   async nestings(roots) {
     const saved = new Map(await savedFolders());
     const known = roots.filter((r) => saved.has(r.id)).map((r) => ({ id: r.id, handle: saved.get(r.id)!.handle }));

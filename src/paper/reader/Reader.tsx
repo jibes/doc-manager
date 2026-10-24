@@ -84,6 +84,8 @@ const clampText = (s: number) => Math.min(1.8, Math.max(0.75, Math.round(s * 20)
 const JUMP_MS = 800;
 /** A click on a highlight opens its menu once no second click (selecting a word, a line) follows. */
 const DOUBLE_CLICK_MS = 280;
+/** Note dialogs asked so far (each its own). */
+let noteSeq = 0;
 
 /** Writes the details into the document's file (write access asked first); what went wrong, or null. */
 async function detailsWritten(id: string, handle: DocHandle, details: Details): Promise<string | null> {
@@ -122,7 +124,10 @@ export function Reader({
   /** Open at this page, with this search (from a search across documents), instead of where it was left. */
   at?: { page: number; query?: string };
 }) {
-  const [start] = useState(() => (at ? { page: Math.max(0, Math.min(at.page, handle.pageCount - 1)), offset: 0 } : doc.position));
+  // Where it was left, within the pages it has now (the file may have fewer since: changed on another device).
+  const [start] = useState(() =>
+    at ? { page: Math.max(0, Math.min(at.page, handle.pageCount - 1)), offset: 0 } : doc.position && { ...doc.position, page: Math.max(0, Math.min(doc.position.page, handle.pageCount - 1)) },
+  );
   const p = usePalette();
   // "Invert colours" (per document): the pages, their thumbnails and text view figures; the app keeps its own colours.
   const pageP = useMemo(() => (doc.invert ? { ...p, page: p.inverted } : p), [p, doc.invert]);
@@ -246,8 +251,9 @@ export function Reader({
   }, [me]);
   const cleanUp = async () => {
     if (!(await libraryActions().ensureKept(doc.id))) return;
+    await useScan.getState().restore();
+    // The scan as restored (a draft from before a reload), not as it was before.
     const scan = useScan.getState();
-    await scan.restore();
     if (scan.pages.length) {
       if ((await ask({ title: t.againBusyTitle, body: t.againBusy(scan.pages.length), confirm: t.scanDiscard, destructive: true })) === null) return;
       scan.clear();
@@ -324,14 +330,23 @@ export function Reader({
   const [findFocus, setFindFocus] = useState(false);
   // Bumped to put the keyboard in the field of a Find that is open already (beside the pages).
   const [findAsked, setFindAsked] = useState(0);
+  // Another panel in the place of Details (a window too narrow to dock both): details typed and not saved are asked
+  // about first, as closing them is.
+  const switchPanel = useCallback(
+    async (next: PanelName) => {
+      if (!docked && panel === 'details' && next !== 'details' && useDrafts.getState().details && !(await discardDetails())) return;
+      setPanel(next);
+    },
+    [docked, panel],
+  );
   const openFind = useCallback(
     (focus: boolean) => {
       setFindFocus(focus);
-      if (!docked) return setPanel('find');
+      if (!docked) return void switchPanel('find');
       setPrefs({ side: { ...usePrefs.getState().side, find: true } });
       if (focus) setFindAsked((n) => n + 1);
     },
-    [docked, setPrefs],
+    [docked, setPrefs, switchPanel],
   );
   const findOpen = docked ? side.find : panel === 'find';
   const detailsOpen = docked ? side.details : panel === 'details';
@@ -529,18 +544,24 @@ export function Reader({
     };
   }, [findOpen, notesShown, handle, annotVersion]);
 
+  // One note asked at a time: one asked before is answered as cancelled (its caller isn't left waiting).
+  const noteWaiting = useRef<((text: string | null) => void) | null>(null);
   const askNote = useCallback(
     (initial: string, quote: string) =>
-      new Promise<string | null>((resolve) =>
+      new Promise<string | null>((resolve) => {
+        noteWaiting.current?.(null);
+        noteWaiting.current = resolve;
         setNoteRequest({
+          id: ++noteSeq,
           initial,
           quote,
           resolve: (text) => {
+            if (noteWaiting.current === resolve) noteWaiting.current = null;
             setNoteRequest(null);
             resolve(text);
           },
-        }),
-      ),
+        });
+      }),
     [],
   );
   const annotated = useCallback(
@@ -757,7 +778,8 @@ export function Reader({
     const onShortcut = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      if (useAsk.getState().request || !(mod || key === 'F3')) return;
+      // A question or a note being typed has the keys (a note dialog's Save is a button the page's keys would pass).
+      if (useAsk.getState().request || noteRequest || !(mod || key === 'F3')) return;
       // ⌘Z, ⇧⌘Z (Ctrl+Y): the document's changes; a field being typed in has its own.
       const field = e.target as HTMLElement | null;
       if (mod && (key === 'z' || key === 'y') && !/^(INPUT|TEXTAREA|SELECT)$/.test(field?.tagName ?? '') && !field?.closest?.('.fl')) {
@@ -783,7 +805,7 @@ export function Reader({
       // Typing, or a form's checkbox or radio (Space ticks it).
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '') || !!target?.closest?.('.fl');
       // A question being asked has the keys (Esc answers it itself).
-      if (useAsk.getState().request || e.defaultPrevented) return;
+      if (useAsk.getState().request || noteRequest || e.defaultPrevented) return;
       // Beside the list: keys typed in the list (its search) are the list's, and ↑ ↓ go through the documents.
       if (embedded && target && target !== document.body && !target.closest?.('[data-testid="reader"]')) return;
       if (embedded && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;
@@ -864,7 +886,7 @@ export function Reader({
       window.removeEventListener('mousemove', onMove);
       cancelAnimationFrame(raf);
     };
-  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, onPageNote, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs, embedded, findOpen, travel, closeFind, openFind]);
+  }, [vp, focused, zoom, panel, page, doc, handle.pageCount, goToPage, scrollTo, setZoom, onPageNote, stepHit, searchActive, onQuery, switchView, view, edits, closeSomething, textScale, setPrefs, embedded, findOpen, travel, closeFind, openFind, noteRequest]);
 
   // ---------- pinch (native) ----------
   // The pages scale about where the fingers started; on release the zoom keeps that point there.
@@ -911,7 +933,7 @@ export function Reader({
   }, [pillsShown, pillsV]);
   const bottomStyle = useAnimatedStyle(() => ({ opacity: pillsV.value, transform: [{ translateY: (1 - pillsV.value) * 10 }] }));
 
-  const togglePanel = (name: Exclude<PanelName, null>) => setPanel((x) => (x === name ? null : name));
+  const togglePanel = (name: Exclude<PanelName, null>) => void switchPanel(panel === name ? null : name);
   // Pages with notes: marked on the scrubber and among the pages.
   const noted = useMemo(() => [...new Set((annots ?? []).filter((a) => a.contents.trim()).map((a) => a.page))], [annots]);
   const chapters = useMemo(() => (outline ?? []).filter((o) => o.depth === 0 && o.page >= 0), [outline]);

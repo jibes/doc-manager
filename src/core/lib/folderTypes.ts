@@ -56,6 +56,8 @@ export type FoldersApi = {
   forget(id: string): Promise<void>;
   /** Which of these folders lie inside others (so their files are listed once). */
   nestings(roots: FolderRoot[]): Promise<Nesting[]>;
+  /** Whether two places are the same folder (picked twice, each pick its own ID); where unknown, absent. */
+  same?(a: string, b: string): Promise<boolean>;
   /**
    * Android app: Documents/Tessel, where documents that would otherwise be hidden copies inside the app (scans,
    * files opened from other apps) are kept as real files. Null where there is no such folder (browsers).

@@ -272,3 +272,10 @@ describe('output formats', () => {
     expect(() => openAiReply(JSON.stringify({ error: { message: 'Model not found' } }))).toThrow('Model not found');
   });
 });
+
+describe('parseResult after thinking', () => {
+  it('reads the reply after thinking whose opening tag was in the prompt', () => {
+    const r = parseResult('Okay, the shape is {"title":"Short and specific","pages":[]} … </think>\n{"title":"Rechnung 1","pages":[]}', 1);
+    expect(r.title).toBe('Rechnung 1');
+  });
+});

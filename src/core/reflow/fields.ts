@@ -39,7 +39,11 @@ export function withFields(lines: TextLine[], fields: FormField[]): TextLine[] {
       else if (valued.has(best)) best.text = `${best.text}, ${value}`;
       else best.text = `${best.text.replace(/\s*:?\s*$/, '')}: ${value}`;
       if (!mark) valued.set(best, f.rect.x + f.rect.w);
-    } else out.push({ text: value, rect: f.rect, size, bold: false, italic: false, hyphen: false });
+    } else {
+      // Where it is: before the first line below it (reading order follows the lines' order within a column).
+      const at = out.findIndex((l) => l.rect.y > f.rect.y);
+      out.splice(at < 0 ? out.length : at, 0, { text: value, rect: f.rect, size, bold: false, italic: false, hyphen: false });
+    }
   }
   return out;
 }

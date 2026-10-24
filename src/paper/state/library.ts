@@ -223,8 +223,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
   const moveCopies = async () => {
     const failedAt = Number(readStored(MOVE_FAILED) ?? 0);
     if (Date.now() - failedAt < MOVE_RETRY_MS) return;
-    const app = await folders.appFolder().catch(() => null);
-    if (!app) return;
+    // The chosen Tessel folder's inbox (synced to the other devices), else this device's own folder.
+    const tessel = usePrefs.getState().archive;
+    const app = tessel ? null : await folders.appFolder().catch(() => null);
+    const to = tessel ? { root: tessel, dir: await inboxDir(tessel).catch(() => undefined) } : app ? { root: app.id } : null;
+    if (!to) return;
     // One that can't be moved doesn't keep the others where they are.
     let failed = false;
     for (const d of get().docs) {
@@ -237,7 +240,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       }
       if (src.kind !== 'bytes') continue;
       try {
-        const made = await folders.create({ root: app.id }, d.fileName, new Blob([src.bytes], { type: 'application/pdf' }));
+        const made = await folders.create(to, d.fileName, new Blob([src.bytes], { type: 'application/pdf' }));
         if (made.uri) await repo.relink(d.id, made.uri);
         else if (made.handle) await repo.saveFile(d.id, made.handle);
         else continue;
@@ -416,8 +419,6 @@ export const useLibrary = create<LibraryState>((set, get) => {
         const label = item.name;
         set((s) => ({ importing: [...s.importing, label] }));
         try {
-          // Into the Tessel folder where it can go; else the library keeps its copy (as settle does).
-          item = await intoAppFolder(item).catch(() => item);
           const source = item.file
             ? ({ kind: 'bytes', bytes: await item.file.arrayBuffer() } as const)
             : ({ kind: 'uri', uri: item.uri! } as const);
@@ -430,6 +431,13 @@ export const useLibrary = create<LibraryState>((set, get) => {
           const opened = await openWithPassword(item.name, (pw) => engine.renderCover(source, COVER_WIDTH, pw));
           if (!opened) continue; // password prompt dismissed
           const { cover, handle } = opened.value;
+          // Into the Tessel folder where it can go (else the library keeps its copy, as settle does): once it opened,
+          // so a file that can't be added (a book, damaged, its password not given) leaves nothing there to sync.
+          item = await intoAppFolder(item).catch(() => {
+            // Said, not silent: it is in this browser only, and reaches no other device until access is allowed.
+            if (usePrefs.getState().archive) set({ error: t.notInTessel(item.name) });
+            return item;
+          });
           const first = handle.pageSizes[0] ?? { width: 1, height: 1.414 };
           const id = newId();
           const rec: DocRecord = {

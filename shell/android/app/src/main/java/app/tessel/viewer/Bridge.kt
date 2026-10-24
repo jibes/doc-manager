@@ -347,6 +347,10 @@ class Bridge(private val activity: MainActivity) {
             .bootstrapDnsHosts(InetAddress.getByName("1.1.1.1"), InetAddress.getByName("1.0.0.1"))
             .build()
         OkHttpClient.Builder()
+            // A redirect isn't followed: it could take the key and the pages elsewhere, even to plain http
+            // (the address was checked, not where it sends). The page reports it as the server's answer.
+            .followRedirects(false)
+            .followSslRedirects(false)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
             .dns(object : Dns {

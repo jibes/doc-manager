@@ -40,7 +40,8 @@ export default function ScanPage() {
     if (loaded && !page) goBack();
   }, [loaded, page]);
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    // Only while this screen is shown (cropping a page above it, ← → would switch the page being cropped).
+    if (Platform.OS !== 'web' || !focused) return;
     const key = (e: KeyboardEvent) => {
       if ((e.target as Element | null)?.closest?.('input, textarea')) return;
       const all = useScan.getState().pages;
@@ -50,7 +51,7 @@ export default function ScanPage() {
     };
     addEventListener('keydown', key);
     return () => removeEventListener('keydown', key);
-  }, [id, open]);
+  }, [id, open, focused]);
 
   if (Platform.OS !== 'web') return <Unsupported />;
   if (!page) return <View style={styles.screen} />;

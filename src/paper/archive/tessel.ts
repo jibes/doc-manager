@@ -1,4 +1,5 @@
 import { folders, type FolderEntry } from '@/core/lib/folders';
+import { log } from '@/core/lib/log';
 import { APP_ROOT_ID } from '@/core/lib/nesting';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
@@ -9,6 +10,7 @@ import { INBOX, inboxDir } from './dirs';
 import { flatten, hasFolders } from './flatten';
 import { allDocs, forget, schedule } from './indexer';
 import { readAdded } from './intake';
+import { moveTrash } from './trash';
 import { setArchive } from './views';
 
 /**
@@ -19,6 +21,9 @@ export const tesselRoot = () => usePrefs.getState().archive ?? APP_ROOT_ID;
 
 /** The documents Tessel lists from a folder (the index knows them). */
 const docsIn = async (root: string) => (await allDocs()).filter((d) => d.place.kind === 'folder' && d.place.root === root);
+
+/** Whether a folder just picked is the Tessel folder itself (picked again: another ID for the same folder). */
+export const isTessel = async (id: string) => id === tesselRoot() || !!(await folders.same?.(id, tesselRoot()).catch(() => false));
 
 /** How many documents the Tessel folder has now (what changing it would leave behind or move). */
 export const documentsHere = async () => (await docsIn(tesselRoot())).length;
@@ -37,6 +42,12 @@ async function recordsOf(root: string): Promise<string[]> {
 
 const pdfs = (list: FolderEntry[]) => list.filter((e) => e.kind !== 'dir');
 
+/** What a Tessel folder keeps for every device besides its documents (each device's own state isn't moved). */
+const SETTINGS = [
+  ['.tessel', 'rules.json'],
+  ['.tessel', 'views.json'],
+];
+
 /**
  * Makes `to` the Tessel folder (null: this device's own). `move`: its documents go along (the inbox's to the new
  * inbox; old folders flattened first); else they stay where they are and stop being listed. Where each was left
@@ -47,11 +58,23 @@ export async function changeTessel(to: string | null, move: boolean): Promise<nu
   const from = tesselRoot();
   const target = to ?? APP_ROOT_ID;
   if (from === target) return 0;
+  // One inside the other: moving would move documents into (or out of) a folder of the same tree.
+  const roots = (await folders.roots(false).catch(() => [])).filter((r) => r.id === from || r.id === target);
+  if ((await folders.nestings(roots).catch(() => [])).length) throw new Error('inside-itself');
   const stale = await recordsOf(from);
   const listed = (await docsIn(from)).map((d) => d.key);
   let moved = 0;
   if (move) {
     if (!(await folders.unlock(target, true).catch(() => false))) throw new Error('denied');
+    // The rules and saved views go along where the new folder has none (copied: the old folder keeps working).
+    for (const path of SETTINGS) {
+      const text = await folders.readText(from, path).catch(() => null);
+      if (text && !(await folders.readText(target, path).catch(() => null))) await folders.writeText(target, path, text);
+    }
+  }
+  // The new folder is the Tessel folder before anything moves: a folder that can't take it is told before.
+  await setArchive(to);
+  if (move) {
     if (await hasFolders(from)) await flatten(from);
     const top = pdfs(await folders.list(from));
     if (top.length) await folders.transfer({ root: from }, top, { root: target }, true);
@@ -60,8 +83,8 @@ export async function changeTessel(to: string | null, move: boolean): Promise<nu
     const waiting = inbox ? pdfs(await folders.list(from, inbox.id)) : [];
     if (waiting.length) await folders.transfer({ root: from, dir: inbox!.id }, waiting, { root: target, dir: await inboxDir(target) }, true);
     moved += waiting.length;
+    await moveTrash(from, target).catch((e: unknown) => log.warn('tessel', 'trash not moved', e));
   }
-  await setArchive(to);
   // Out of the list at once (the new folder's come as it is read).
   forget(listed);
   // The records of the files there: found again, by their content, where they are listed now.
@@ -79,6 +102,9 @@ export async function importFolder(onProgress: (done: number, total: number) => 
   const picked = await folders.add();
   if (!picked) return null;
   try {
+    // The Tessel folder itself, or one inside it or around it: its own documents would come in again.
+    const roots = (await folders.roots(false).catch(() => [])).filter((r) => r.id === picked.id || r.id === tesselRoot());
+    if ((await isTessel(picked.id)) || (await folders.nestings(roots).catch(() => [])).length) throw new Error('inside-itself');
     const found: { dir?: string; entry: FolderEntry }[] = [];
     const walk = async (dir: string | undefined, depth: number) => {
       for (const e of await folders.list(picked.id, dir)) {
@@ -98,7 +124,8 @@ export async function importFolder(onProgress: (done: number, total: number) => 
     }
     return done;
   } finally {
-    await folders.forget(picked.id).catch(() => {});
+    // Let go of, unless it is the Tessel folder's own (the same ID where a folder has one: the Android app's).
+    if (picked.id !== tesselRoot()) await folders.forget(picked.id).catch(() => {});
     schedule(300);
   }
 }

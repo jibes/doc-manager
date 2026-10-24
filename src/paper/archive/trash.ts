@@ -247,3 +247,23 @@ export async function purge(root: string): Promise<void> {
   const old = expired(await loadTrash(root));
   if (old.length) await deleteForever(root, old.map((t) => t.name));
 }
+
+/**
+ * The trash of one Tessel folder into another's (the Tessel folder changed, its documents moved along): what was
+ * deleted can still be put back, and is purged on time, there.
+ */
+export async function moveTrash(from: string, to: string): Promise<void> {
+  const src = await folders.dirAt(from, TRASH, false);
+  if (!src) return;
+  const items = await folders.list(from, src);
+  if (!items.length) return;
+  const dst = await folders.dirAt(to, TRASH, true);
+  if (dst === null) throw new Error('denied');
+  const before = new Set((await folders.list(to, dst ?? undefined)).map((e) => e.name));
+  await folders.transfer({ root: from, dir: src }, items, { root: to, dir: dst ?? undefined }, true);
+  // What arrived under its own name is recorded there as it was (one renamed on the way isn't: it is listed unrecorded).
+  const recorded = ((await readManifest(from)) ?? []).filter((t) => items.some((e) => e.name === t.name) && !before.has(t.name));
+  if (recorded.length) await changeManifest(to, (now) => [...now, ...recorded.map((t) => ({ ...t, root: to }))]);
+  await changeManifest(from, (now) => now.filter((t) => !recorded.some((r) => r.name === t.name)));
+}
+
