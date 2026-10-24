@@ -262,7 +262,8 @@ function Tile({ width, testID, picture, title, label, meta, progress, busy, curr
       {...rightClick(onSelect, picking ? undefined : onMenu)}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         { width, opacity: pressed || busy ? 0.6 : hovered ? 0.92 : 1 },
-        current && { backgroundColor: p.mark, borderRadius: radius.md },
+        // A little room around the picture and the name, taken from around the tile (its neighbours stay put).
+        current && { backgroundColor: p.mark, borderRadius: radius.md, width: width + CURRENT_PAD * 2, padding: CURRENT_PAD, margin: -CURRENT_PAD },
       ]}
     >
       <View style={{ height: boxH, justifyContent: 'flex-end', alignItems: 'center' }}>
@@ -319,6 +320,9 @@ export function DocList({ layout, gap, children, testID }: { layout: Layout; gap
 
 /** Long words in narrow tiles break at syllables (in the page's language), not mid-letter. */
 const hyphenate = (Platform.OS === 'web' ? { hyphens: 'auto', overflowWrap: 'anywhere' } : {}) as object;
+
+/** Room around a tile's picture and name inside its highlight. */
+const CURRENT_PAD = 8;
 
 const styles = StyleSheet.create({
   // The row's own background (picked, hovered) reaches its right edge: the ⋯ button keeps its own margin.
