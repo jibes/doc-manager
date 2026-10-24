@@ -2698,7 +2698,8 @@ async function debugLog() {
   await page.getByTestId('note-input').fill('Logged');
   await page.getByTestId('note-save').click();
   await page.getByTestId('save').click();
-  await page.waitForTimeout(1500);
+  // Past the next flush: one on leaving the page may not finish before it goes.
+  await page.waitForTimeout(4000);
   await page.goto(BASE);
   await vis('home-settings').click();
   await vis('debug-log-note').waitFor();
