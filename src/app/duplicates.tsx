@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { deleteAll, deletesForGood, undoDelete } from '@/paper/archive/batch';
-import { duplicateGroups, type DuplicateGroup } from '@/paper/archive/duplicates';
+import { checkVersions, duplicateGroups, type DuplicateGroup } from '@/paper/archive/duplicates';
 import { placeOf } from '@/paper/archive/facets';
 import { allDocs, refreshSoon, useIndex } from '@/paper/archive/indexer';
 import { openDoc, whereIs } from '@/paper/archive/Results';
@@ -14,12 +14,21 @@ import { Button, T } from '@/paper/components/primitives';
 import { ScreenHeader } from '@/paper/components/ScreenHeader';
 import { Toast } from '@/paper/components/Toast';
 import { useNotice } from '@/paper/components/useNotice';
+import { folders } from '@/core/lib/folders';
+import { repo } from '@/core/storage';
 import { fonts, radius, space } from '@/core/design/tokens';
 import { opError, t } from '@/core/i18n';
 import { useThrottled } from '@/core/lib/useThrottled';
 import { ask } from '@/paper/state/ask';
 import { closePane, usePane } from '@/paper/state/pane';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
+
+/** A document's bytes, for telling versions apart (null when it can't be read). */
+async function bytesOf(d: IndexedDoc): Promise<ArrayBuffer | null> {
+  if (d.place.kind === 'folder') return (await folders.read(d.place.root, d.place.entry)).arrayBuffer();
+  const src = await repo.source(d.place.id);
+  return src.kind === 'bytes' ? src.bytes : null;
+}
 
 const name = (d: IndexedDoc) => realTitle(d.title) || d.name.replace(/\.pdf$/i, '');
 const where = (d: IndexedDoc) => (d.place.kind === 'folder' ? whereIs(d.place) : t.placeTessel);
@@ -38,7 +47,15 @@ export default function Duplicates() {
   useEffect(() => refreshSoon(), []);
   useEffect(() => {
     let alive = true;
-    allDocs().then((docs) => alive && setGroups(duplicateGroups(docs, (d) => placeOf(d, archive) === 'tessel')));
+    // Older versions only where the newer file really starts with the older one's bytes (else two filled-in
+    // copies of one form would pass for versions of each other).
+    const inTessel = (d: IndexedDoc) => placeOf(d, archive) === 'tessel';
+    void allDocs()
+      .then(async (docs) => {
+        const isVersion = await checkVersions(docs.filter(inTessel), bytesOf);
+        if (alive) setGroups(duplicateGroups(docs, inTessel, isVersion));
+      })
+      .catch(() => alive && setGroups([]));
     return () => {
       alive = false;
     };

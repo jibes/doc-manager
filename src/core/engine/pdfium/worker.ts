@@ -6,7 +6,7 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 
 import { mergeGraphics } from '../geometry';
-import { GLYPHLESS, GLYPHLESS_WIDTH } from './glyphless';
+import { GLYPHLESS_WIDTH, layerFont, layerWord } from './glyphless';
 import type { Annotation, FormField, FormValue, Graphic, NormRect, OcrLayer, OutlineItem, PageWords, PageLayout, PageLink, SearchHit, Size, TextLine, TextRun } from '../types';
 import type { OpenResult, Request, Response } from './protocol';
 
@@ -872,18 +872,20 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   // Changed from the first page written (a page that fails later leaves the others' text in the document).
   d.edited = true;
   // One font for every word: an embedded one, which this PDFium shares between text objects (a standard font it
-  // writes again for each: a page of small print made thousands of them). Empty glyphs: a few kilobytes.
-  const data = Uint8Array.from(atob(GLYPHLESS), (c) => c.charCodeAt(0));
-  const buf = malloc(data.length);
-  heap().set(data, buf);
-  const embedded = M.FPDFText_LoadFont(d.ptr, buf, data.length, FPDF_FONT_TRUETYPE, true);
+  // writes again for each: a page of small print made thousands of them). Made for exactly the characters
+  // written (any script): a few kilobytes. The words as they are written, with the space after each.
+  const written = pages.map(({ words }) => words.map((w) => layerWord(w.text)));
+  const made = layerFont(written.flat().map((w) => `${w} `));
+  const buf = malloc(made.data.length);
+  heap().set(made.data, buf);
+  const embedded = M.FPDFText_LoadFont(d.ptr, buf, made.data.length, FPDF_FONT_TRUETYPE, true);
   const font = embedded || M.FPDFText_LoadStandardFont(d.ptr, 'Helvetica');
   if (!font) {
     M.pdfium.wasmExports.free(buf);
     throw new Error('Could not load the text layer font');
   }
   try {
-    writeTextLayer(d, pages, font, !!embedded);
+    writeTextLayer(d, pages, written, font, embedded ? made.charcodes : null);
   } finally {
     M.FPDFFont_Close(font);
     M.pdfium.wasmExports.free(buf);
@@ -893,8 +895,12 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   return save(docId);
 }
 
-function writeTextLayer(d: Doc, pages: PageWords[], font: number, glyphless: boolean) {
-  for (const { page: pageIndex, words, turn = 0, replace } of pages) {
+/**
+ * `written`: each page's words as written (layerWord). `charcodes`: their codes in the layer's own font, set as
+ * they are (PDFium finds no code for a character beyond the BMP from its text); null in a standard font.
+ */
+function writeTextLayer(d: Doc, pages: PageWords[], written: string[][], font: number, charcodes: ((text: string) => number[]) | null) {
+  for (const [n, { page: pageIndex, words, turn = 0, replace }] of pages.entries()) {
     if (!words.length && !replace) continue;
     const page = M.FPDF_LoadPage(d.ptr, pageIndex);
     if (!page) continue;
@@ -922,8 +928,9 @@ function writeTextLayer(d: Doc, pages: PageWords[], font: number, glyphless: boo
       // A text object per word, where the word is on the scan: selecting and highlighting follow the words
       // (a line's object, in a font of other widths, drifted from them and ran across columns).
       words.forEach((w, i) => {
+        const word = written[n][i];
         // Copied text keeps a space after each word (PDFium breaks the lines by where they are).
-        const text = i < words.length - 1 ? `${w.text} ` : w.text;
+        const text = i < words.length - 1 ? `${word} ` : word;
         const { x, y, w: bw, h: bh } = w.box;
         // Baseline near the bottom of the box; letters fill most of a detected line's height.
         const base = y + bh * 0.8;
@@ -934,16 +941,21 @@ function writeTextLayer(d: Doc, pages: PageWords[], font: number, glyphless: boo
         if (!(size > 0.5) || !(length > 0) || ![x0, y0, x1, y1].every(Number.isFinite)) return;
         const obj = M.FPDFPageObj_CreateTextObj(d.ptr, font, size);
         if (!obj) return;
-        const n = (text.length + 1) * 2;
-        const set = withScratch(n, (p) => {
-          M.pdfium.stringToUTF16(text, p, n);
-          return M.FPDFText_SetText(obj, p);
-        });
+        const codes = charcodes?.(text);
+        const set = codes
+          ? withScratch(codes.length * 4 || 4, (p) => {
+              new Uint32Array(heap().buffer, p, codes.length).set(codes);
+              return M.FPDFText_SetCharcodes(obj, p, codes.length);
+            })
+          : withScratch((text.length + 1) * 2, (p) => {
+              M.pdfium.stringToUTF16(text, p, (text.length + 1) * 2);
+              return M.FPDFText_SetText(obj, p);
+            });
         M.FPDFTextObj_SetTextRenderMode(obj, FPDF_TEXTRENDERMODE_INVISIBLE);
-        // Its natural width at this size (the trailing space excluded), to stretch it onto the box: the empty
-        // glyphs have no bounds, only their one width.
-        const natural = glyphless
-          ? [...w.text].length * size * GLYPHLESS_WIDTH
+        // Its natural width at this size (the trailing space excluded), to stretch it onto the box: every
+        // character of the layer's font has the one width.
+        const natural = codes
+          ? [...word].length * size * GLYPHLESS_WIDTH
           : withScratch(16, (b) => {
               if (!M.FPDFPageObj_GetBounds(obj, b, b + 4, b + 8, b + 12)) return 0;
               return M.pdfium.getValue(b + 8, 'float') - M.pdfium.getValue(b, 'float');
@@ -991,7 +1003,8 @@ function ocrLayer(docId: number, pageIndex: number): OcrLayer {
       for (let i = 0; i < n; i++) {
         const obj = M.FPDFPage_GetObject(page, i);
         if (M.FPDFPageObj_GetType(obj) !== FPDF_PAGEOBJ_TEXT || M.FPDFTextObj_GetTextRenderMode(obj) !== FPDF_TEXTRENDERMODE_INVISIBLE) continue;
-        const str = objectText(obj, text).replace(/\s+/g, ' ').trim();
+        // Characters an earlier layer's font had no glyph for come back as U+0000: not text.
+        const str = objectText(obj, text).replace(/\0/g, '').replace(/\s+/g, ' ').trim();
         if (!str) continue;
         // Upright on the page as shown: its baseline runs left to right.
         if (M.FPDFPageObj_GetMatrix(obj, s)) {
@@ -1009,7 +1022,11 @@ function ocrLayer(docId: number, pageIndex: number): OcrLayer {
     // Everything the page's text holds, against what the layer holds: more is text of the page's own.
     let all = 0;
     const count = M.FPDFText_CountChars(text);
-    for (let i = 0; i < count; i++) if (String.fromCharCode(M.FPDFText_GetUnicode(text, i)).trim()) all++;
+    // (Per UTF-16 unit, as the layer's text is counted: the page holds an emoji as its two halves.)
+    for (let i = 0; i < count; i++) {
+      const code = M.FPDFText_GetUnicode(text, i);
+      if (code && String.fromCodePoint(code).trim()) all++;
+    }
     return { words, other: other || all > inLayer + 3 };
   });
 }

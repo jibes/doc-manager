@@ -262,7 +262,8 @@ export default function Documents() {
   }, [searching, found, all, sort, reverse, bestFirst, archive, openedAt]);
   const doubled = useMemo(() => {
     const inTessel = (d: IndexedDoc) => placeOf(d, archive) === 'tessel';
-    return duplicateGroups(all, inTessel).length;
+    // Possible older versions counted too (the Duplicates screen reads the files to tell): it is the way there.
+    return duplicateGroups(all, inTessel, () => true).length;
   }, [all, archive]);
   // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
   const moreItems = [

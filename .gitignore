@@ -56,3 +56,4 @@ shell/android/app/build/
 shell/android/local.properties
 shell/android/app/src/main/assets/www/
 *.keystore
+e2e/_walk/
