@@ -75,6 +75,16 @@ describe('AI reading', () => {
     expect(() => parseResult('no json', 1)).toThrow();
   });
 
+  it('finds the JSON after thinking aloud and before a note with braces', () => {
+    const json = '{"title":"Rechnung","date":"","sender":"","type":"","keywords":[],"pages":[{"page":1,"lines":[{"id":"1.1","text":"a } b"}],"added":[]}]}';
+    expect(parseResult(`<think>The output must be {"title": ...} with pages.</think>\n${json}`, 1).title).toBe('Rechnung');
+    const r = parseResult(`Use {braces like this\n\`\`\`json\n${json}\n\`\`\`\nNote: for line {1.2} I guessed.`, 1);
+    expect(r.pages[0].lines).toEqual([{ id: '1.1', text: 'a } b' }]);
+    // An object that parses but isn't a result is skipped.
+    expect(parseResult(`{"note": 1} ${json}`, 1).title).toBe('Rechnung');
+    expect(() => parseResult('Note: {1.2}', 1)).toThrow(AI_NO_JSON);
+  });
+
   it('places each page’s reading by its number, not by its place in the list', () => {
     // Page 1 left out (blank); the third entry names its page only through its lines' ids.
     const reply = JSON.stringify({

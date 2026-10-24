@@ -52,6 +52,12 @@ export function latest(files: Map<string, number>[]): Map<string, number> {
   return out;
 }
 
+/** Brings another's times into `into` where later (another tab of this device writes the same file). */
+export function mergeOpened(into: Map<string, number>, from: Map<string, number>): Map<string, number> {
+  for (const [k, at] of from) if (at > (into.get(k) ?? 0)) into.set(k, at);
+  return into;
+}
+
 /** The most recent `KEEP` of them, as written. */
 export function serializeOpened(times: Map<string, number>): string {
   const kept = [...times].sort((a, b) => b[1] - a[1]).slice(0, KEEP);
@@ -104,7 +110,11 @@ function schedule() {
 async function writeMine() {
   const archive = usePrefs.getState().archive;
   if (!archive || !mine || readFrom !== archive) return;
-  await folders.writeText(archive, [...DIR, `${deviceId()}.json`], serializeOpened(mine)).catch((e: unknown) => log.warn('opened', 'not written', e));
+  const path = [...DIR, `${deviceId()}.json`];
+  // Another tab of this browser writes this file too: what it wrote since is kept.
+  const text = await folders.readText(archive, path).catch(() => null);
+  if (text) mergeOpened(mine, parseOpened(text));
+  await folders.writeText(archive, path, serializeOpened(mine)).catch((e: unknown) => log.warn('opened', 'not written', e));
 }
 
 /** Written now (the app going to the background, the window closing). */

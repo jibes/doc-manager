@@ -25,10 +25,13 @@ export type AiSettings = {
 
 export const DEFAULT_AI: AiSettings = { api: 'anthropic', url: '', key: '', model: '' };
 
-/** This device, the local network (private and link-local addresses) or a .local name. */
+/** Names only a home network knows (a router's or a NAS's): as the Android app treats them. */
+const LOCAL_SUFFIXES = ['.localhost', '.local', '.lan', '.home.arpa', '.internal', '.fritz.box'];
+
+/** This device, the local network (private and link-local addresses) or a local name (one word, .local, .lan, …). */
 export function localHost(host: string): boolean {
-  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (h === 'localhost' || LOCAL_SUFFIXES.some((s) => h.endsWith(s)) || (!h.includes('.') && !h.includes(':'))) return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(h);
   if (v4) {
     const [a, b] = [+v4[1], +v4[2]];
@@ -148,17 +151,50 @@ const base64 = async (blob: Blob) => {
   return btoa(s);
 };
 
-/** The first JSON object in a reply (a model without structured output may wrap it in prose or a code fence). */
-export function parseResult(text: string, pageCount: number): AiResult {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start < 0 || end < start) throw new Error(AI_NO_JSON);
-  let raw: Partial<AiResult>;
-  try {
-    raw = JSON.parse(text.slice(start, end + 1)) as Partial<AiResult>;
-  } catch {
-    throw new Error(AI_NO_JSON);
+/** Balanced `{…}` spans at the top level of a text, in order (braces inside JSON strings don't count). */
+function* objects(text: string): Generator<[number, number]> {
+  for (let start = text.indexOf('{'); start >= 0; ) {
+    let depth = 0;
+    let quoted = false;
+    let end = -1;
+    for (let i = start; i < text.length && end < 0; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '\\') i++;
+        else if (c === '"') quoted = false;
+      } else if (c === '"') quoted = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) end = i;
+    }
+    // An unclosed brace in prose ("use {x") mustn't hide the object after it.
+    if (end < 0) start = text.indexOf('{', start + 1);
+    else {
+      yield [start, end + 1];
+      start = text.indexOf('{', end + 1);
+    }
   }
+}
+
+/**
+ * The reply's JSON object. A model without structured output may wrap it in prose or a code fence, think aloud
+ * first (`<think>…</think>`, which may quote the schema) or add a note with braces after it: the first top-level
+ * object that parses and looks like a result.
+ */
+export function parseResult(text: string, pageCount: number): AiResult {
+  const reply = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  let raw: Partial<AiResult> | undefined;
+  for (const [a, b] of objects(reply)) {
+    try {
+      const v = JSON.parse(reply.slice(a, b)) as unknown;
+      if (v && typeof v === 'object' && ('pages' in v || 'title' in v)) {
+        raw = v as Partial<AiResult>;
+        break;
+      }
+    } catch {
+      // Not JSON (a note in braces): try the next one.
+    }
+  }
+  if (!raw) throw new Error(AI_NO_JSON);
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   type Entry = Partial<AiResult['pages'][number]> & { page?: unknown };
   const entries = (Array.isArray(raw.pages) ? raw.pages : []) as Entry[];

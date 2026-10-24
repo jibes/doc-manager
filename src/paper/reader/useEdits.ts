@@ -91,6 +91,8 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return fail();
     // Changed meanwhile (synced from another device, written by another app): writing over it is asked about.
     if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return false;
+    // The version written: an undo while it is being written still knows which one is on disk.
+    const writing = steps.current.handle === handle ? steps.current.history.state : null;
     const bytes = await handle.save().catch(() => null);
     if (!bytes) return fail();
     // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
@@ -99,8 +101,10 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     // Its size as now: browsers tell a linked document's file by its name and size.
     libraryActions().patchDoc(doc.id, { bytes: bytes.byteLength });
     invalidate(doc.id);
-    if (edits.current === saved) {
-      if (steps.current.handle === handle) steps.current.savedAt = steps.current.history.state;
+    if (writing !== null && steps.current.handle === handle) steps.current.savedAt = writing;
+    // Unsaved still when something changed meanwhile (an edit, or an undo away from what was written).
+    const clean = edits.current === saved || (writing !== null && steps.current.history.state === writing);
+    if (clean) {
       dirtyNow.current = false;
       setDirty(false);
     }
@@ -119,8 +123,10 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     if (!dirtyNow.current && !drafting()) return close();
     // Saving first is the usual answer; leaving without, the other one. Text still typed in the details isn't
     // in the PDF's changes: then it's only discard or stay.
-    const edited = dirtyNow.current;
-    void ask({ title: t.unsavedTitle, body: edited ? t.unsavedSaveFirst : t.unsavedLeave, ...(edited ? { confirm: t.save, other: t.discard } : { confirm: t.discard, destructive: true }) }).then(async (answer) => {
+    // A field being typed in is a change to the PDF too (saving commits it); typed details are not.
+    const edited = dirtyNow.current || useDrafts.getState().field;
+    const details = useDrafts.getState().details;
+    void ask({ title: t.unsavedTitle, body: edited ? (details ? t.unsavedSaveFirstDetails : t.unsavedSaveFirst) : t.unsavedLeave, ...(edited ? { confirm: t.save, other: t.discard } : { confirm: t.discard, destructive: true }) }).then(async (answer) => {
       if (answer === null) return;
       if (edited && answer !== OTHER && !(await save())) return;
       useDrafts.setState({ field: false, details: false });
@@ -153,5 +159,8 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     return () => unhold();
   }, [unsaved, focused]);
 
-  return { dirty, unsaved, markDirty, step, history, undo, redo, save, current, leave, notice, clearNotice };
+  /** Changes not saved as of now (not only as of the last render): a field committed by this very click too. */
+  const dirtyAtOnce = useCallback(() => dirtyNow.current || useDrafts.getState().field, []);
+
+  return { dirty, dirtyAtOnce, unsaved, markDirty, step, history, undo, redo, save, current, leave, notice, clearNotice };
 }

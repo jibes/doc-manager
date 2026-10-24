@@ -41,6 +41,8 @@ export function ocrLines(blocks: OcrBlock[], imgW: number, imgH: number, pageWid
           bold: false,
           italic: false,
           hyphen: /[-­‐]$/.test(text),
+          // Recognised from the picture: reflow measures its type from the line boxes, like a scan's own text layer.
+          ocr: true,
         });
       }
     }

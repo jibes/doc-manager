@@ -175,7 +175,10 @@ export async function fileDocument(
   onProgress?: (done: number, total: number) => void,
   follow?: (from: FolderEntry, to: FolderEntry) => Promise<void>,
 ): Promise<FolderEntry> {
-  let bytes = new Uint8Array(await (await folders.read(archive, p.entry)).arrayBuffer());
+  const blob = await folders.read(archive, p.entry);
+  // What was read, to tell a newer file of that name delivered while this one is filed (OCR takes minutes).
+  const read = { size: blob.size, modified: 'lastModified' in blob ? (blob as File).lastModified : p.entry.modified };
+  let bytes = new Uint8Array(await blob.arrayBuffer());
   if (!readTrailer(bytes).encrypted) {
     const handle = await engine.open({ kind: 'bytes', bytes: bytes.slice().buffer });
     try {
@@ -192,9 +195,13 @@ export async function fileDocument(
   const dir = await ensureDir(archive, path.slice(0, -1));
   const filed = await folders.create({ root: archive, dir }, path[path.length - 1], new Blob([out], { type: 'application/pdf' }));
   await follow?.(p.entry, filed).catch(() => {});
-  // Only once the copy is safely written.
-  await folders.delete(archive, inbox, [p.entry]);
+  // Only once the copy is safely written, and only the file that was read: one changed since stays.
+  const now = (await folders.list(archive, inbox)).find((e) => e.name === p.entry.name);
   schedule(1000);
+  if (!now) return filed;
+  if (now.size !== read.size || now.modified !== read.modified)
+    throw new Error(`Filed as ${filed.name}, but “${p.entry.name}” changed in the inbox meanwhile: the new one stays there`);
+  await folders.delete(archive, inbox, [now]);
   return filed;
 }
 

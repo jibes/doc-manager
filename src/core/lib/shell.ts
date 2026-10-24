@@ -82,12 +82,14 @@ export async function stageForShell(file: Blob, name: string, mime: string): Pro
 }
 
 let nextRequest = 0;
+/** This page load's mark on its request ids: the app outlives a reload, and an old id must not be taken for a new one. */
+const LOAD = Math.random().toString(36).slice(2, 7);
 
 /** Slower or interactive shell work (folders, permissions, writing back); see Bridge.request. `signal` stops it. */
 export function shellRequest<T>(method: string, args: object = {}, signal?: AbortSignal): Promise<T> {
   if (!shell) return Promise.reject(new Error('No shell'));
   if (signal?.aborted) return Promise.reject(signal.reason);
-  const id = `r${++nextRequest}`;
+  const id = `r${LOAD}-${++nextRequest}`;
   return new Promise<T>((resolve, reject) => {
     const done = () => {
       window.removeEventListener('tessel-shell-reply', onReply);

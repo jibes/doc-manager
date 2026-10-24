@@ -435,6 +435,6 @@ class Bridge(private val activity: MainActivity) {
         /** Documents handed to another app at once: more make the hand-over too big for Android. */
         const val MAX_SHARE = 300
         /** Name suffixes of this device and local networks (see localName). */
-        val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".lan", ".home.arpa", ".internal")
+        val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".lan", ".home.arpa", ".internal", ".fritz.box")
     }
 }

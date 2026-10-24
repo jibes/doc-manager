@@ -19,6 +19,7 @@ describe('ocrLines', () => {
     expect(out[0].size).toBe(30);
     expect(out[1].size).toBe(out[2].size);
     expect(out[2].hyphen).toBe(true);
+    expect(out.every((l) => l.ocr)).toBe(true);
     expect(out[1].rect).toEqual({ x: 0.1, y: 0.09, w: 0.8, h: 0.015 });
   });
 });

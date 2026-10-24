@@ -184,7 +184,13 @@ async function forget(root: string, names: string[]) {
  * under their own name again when it is free. What couldn't be put back stays in the trash (and its entry too).
  */
 export async function restore(root: string, items: Trashed[]): Promise<void> {
-  const trash = (await folders.dirAt(root, TRASH, false)) ?? undefined;
+  const trash = await folders.dirAt(root, TRASH, false);
+  // No trash folder: nothing to put back, the entries are only forgotten (`undefined` would be the root's files).
+  if (trash === null) {
+    await forget(root, items.map((i) => i.name));
+    await loadTrash(root);
+    return;
+  }
   const files = await folders.list(root, trash);
   const done: string[] = [];
   let failed: unknown;
@@ -223,9 +229,12 @@ export async function restore(root: string, items: Trashed[]): Promise<void> {
 
 /** Deletes items in the trash for good. */
 export async function deleteForever(root: string, names: string[]): Promise<void> {
-  const trash = (await folders.dirAt(root, TRASH, false)) ?? undefined;
-  const files = (await folders.list(root, trash)).filter((f) => names.includes(f.name));
-  if (files.length) await folders.delete(root, trash, files);
+  const trash = await folders.dirAt(root, TRASH, false);
+  // No trash folder: its entries are only forgotten (`undefined` would be the root, and its files of those names).
+  if (trash !== null) {
+    const files = (await folders.list(root, trash)).filter((f) => names.includes(f.name));
+    if (files.length) await folders.delete(root, trash, files);
+  }
   await forget(root, names);
   await loadTrash(root);
 }

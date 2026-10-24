@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Graphic, TextLine } from '@/core/engine/types';
-import { blockAt, buildReflow } from './build';
+import { blockAt, buildReflow, ocrPages } from './build';
 
 /** A body line at a given vertical position (0..1), 11pt, full measure. */
 const line = (text: string, y: number, o: Partial<TextLine> = {}): TextLine => ({
@@ -309,6 +309,47 @@ describe('buildReflow', () => {
     expect(text).not.toContain('line 0 with some words in it and a few more words right');
     // All of the left column, then the right.
     expect(text.indexOf('left column line 19')).toBeLessThan(text.indexOf('right column line 0'));
+  });
+
+  it('reflows a scanned page of two narrow columns of prose rather than showing it as a form', () => {
+    const words = 'Die Gemeinde informiert über die neuen Öffnungszeiten der Bibliothek und das Programm im Herbst'.split(' ');
+    const page: TextLine[] = [];
+    for (let col = 0; col < 2; col++)
+      for (let r = 0; r < 30; r++) {
+        let s = '';
+        for (let k = r * 3 + col; s.length < 40; k++) s += `${words[k % words.length]} `;
+        const y = 0.1 + r * 0.025;
+        page.push(line(s.trim() + (r % 6 === 5 ? '.' : ''), y, { ocr: true, rect: { x: 0.08 + col * 0.45, y, w: 0.38 - (r % 6 === 5 ? 0.1 : 0), h: 0.015 } }));
+      }
+    const { blocks } = buildReflow([{ lines: page, graphics: [] }], [{ width: 595, height: 842 }]);
+    expect(blocks.some((b) => b.kind === 'figure')).toBe(false);
+    expect(blocks.filter((b) => b.kind === 'p').length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('starts a bullet list after an intro without a colon', () => {
+    const short = (text: string, y: number) => line(text, y, { rect: { x: 0.12, y, w: 0.3, h: 0.014 } });
+    const page = [
+      line('Wir haben die folgenden Unterlagen von Ihnen erhalten und danken Ihnen herzlich für die rasche Zusendung', 0.2),
+      short('der Dokumente', 0.22),
+      ...['• Lohnausweis 2025', '▪ Kontoauszug Dezember', '■ Steuerbescheid'].map((t, i) => short(t, 0.24 + i * STEP)),
+    ];
+    const { blocks } = reflow([page]);
+    expect(blocks.map((b) => [b.kind, b.text])).toEqual([
+      ['p', 'Wir haben die folgenden Unterlagen von Ihnen erhalten und danken Ihnen herzlich für die rasche Zusendung der Dokumente'],
+      ['li', 'Lohnausweis 2025'],
+      ['li', 'Kontoauszug Dezember'],
+      ['li', 'Steuerbescheid'],
+    ]);
+  });
+
+  it('recognises the scanned pages of a document with a typed cover, and every page of one without text', () => {
+    const picture: Graphic = { rect: { x: 0, y: 0, w: 1, h: 1 }, image: true, parts: 1 };
+    const cover = { lines: para(0.1, [filler, 'the cover ends.']), graphics: [] };
+    const scan = { lines: [], graphics: [picture] };
+    // A blank page (no picture) of a typed document is left alone.
+    expect(ocrPages([cover, scan, { lines: [], graphics: [] }, scan])).toEqual([1, 3]);
+    expect(ocrPages([{ lines: [line('3', 0.95)], graphics: [] }, { lines: [], graphics: [] }])).toEqual([0, 1]);
+    expect(ocrPages([cover])).toEqual([]);
   });
 
   it('joins a line the recogniser cut in two on the same baseline', () => {

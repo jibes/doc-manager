@@ -20,8 +20,6 @@ import type { FolderEntry } from '@/core/lib/folderTypes';
 import { ask } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 
-/** Groups shown at first, and added by "Show more". */
-
 /** A conflict copy with the file it conflicts with (null when that one is gone). */
 type Pair = { conflict: Conflict; original: FolderEntry | null };
 
@@ -33,7 +31,7 @@ const open = (root: string, rootName: string, entry: FolderEntry) =>
     '',
   );
 
-/** Sync issues: documents changed on two devices at once (Syncthing's conflict copies), and documents filed twice. */
+/** Sync issues: documents changed on two devices at once (Syncthing's conflict copies). Files there twice: Duplicates. */
 export default function Sync() {
   const p = usePalette();
   const column = useColumnWidth();

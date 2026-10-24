@@ -445,31 +445,42 @@ function AiSection() {
   const [status, setStatus] = useState<string | null>(null);
   // The test under way: a change to the settings stops it (its answer would be about the old ones).
   const [running, setRunning] = useState<AbortController | null>(null);
+  // The address being typed: saved when the field is left, so the key isn't cleared by a half-typed host.
+  const [draftUrl, setDraftUrl] = useState<string | null>(null);
   const testing = running !== null;
   const set = (patch: Partial<typeof ai>) => {
     running?.abort();
     setRunning(null);
-    const next = { ...ai, ...patch };
+    const next = { ...ai, ...(draftUrl !== null && { url: draftUrl }), ...patch };
+    setDraftUrl(null);
     // A key belongs to the service it was made for: with another API or address it would be sent to someone else.
     const host = aiUrl(ai)?.host;
     const moved = !!ai.key && !!host && (next.api !== ai.api || aiUrl(next)?.host !== host);
     if (moved) next.key = '';
     setStatus(moved ? t.aiKeyCleared : null);
     setPrefs({ ai: next });
+    return next;
+  };
+  const commitUrl = () => {
+    if (draftUrl === ai.url) setDraftUrl(null);
+    else if (draftUrl !== null) set({});
   };
   const test = async () => {
+    // An address still being typed is tested as it stands (and saved).
+    const settings = draftUrl !== null ? set({}) : ai;
     const ctrl = new AbortController();
     setRunning(ctrl);
     setStatus(t.aiTesting);
-    await testAi(ai, anySignal([ctrl.signal, AbortSignal.timeout(60_000)])).then(
+    await testAi(settings, anySignal([ctrl.signal, AbortSignal.timeout(60_000)])).then(
       () => !ctrl.signal.aborted && setStatus(t.aiTestOk),
       (e: unknown) => !ctrl.signal.aborted && setStatus(t.aiTestFailed(aiMessage(e))),
     );
     setRunning((cur) => (cur === ctrl ? null : cur));
   };
-  const insecure = aiInsecure(ai);
-  const badUrl = !!ai.url.trim() && !aiUrl(ai) && !insecure;
-  const field = (testID: string, label: string, value: string, onChange: (v: string) => void, placeholder?: string, secret?: boolean) => (
+  const shown = draftUrl !== null ? { ...ai, url: draftUrl } : ai;
+  const insecure = aiInsecure(shown);
+  const badUrl = !!shown.url.trim() && !aiUrl(shown) && !insecure;
+  const field = (testID: string, label: string, value: string, onChange: (v: string) => void, placeholder?: string, secret?: boolean, onDone?: () => void) => (
     <View style={{ gap: space.xs }}>
       <T v="caption" color={p.muted}>
         {label}
@@ -478,6 +489,8 @@ function AiSection() {
         testID={testID}
         value={value}
         onChangeText={onChange}
+        onBlur={onDone}
+        onSubmitEditing={onDone}
         placeholder={placeholder}
         accessibilityLabel={label}
         placeholderTextColor={p.muted}
@@ -519,7 +532,7 @@ function AiSection() {
             ))}
           </View>
         </View>
-        {field('ai-url', t.aiUrl, ai.url, (url) => set({ url }), t.aiUrlHint(ai.api))}
+        {field('ai-url', t.aiUrl, shown.url, setDraftUrl, t.aiUrlHint(ai.api), false, commitUrl)}
         {(badUrl || insecure) && (
           <T v="caption" color={p.markRing} testID="ai-url-bad" style={{ marginTop: -space.sm }}>
             {insecure ? t.aiUrlInsecure : t.aiUrlBad}
@@ -528,7 +541,7 @@ function AiSection() {
         {field('ai-key', t.aiKey, ai.key, (key) => set({ key }), undefined, true)}
         {field('ai-model', t.aiModel, ai.model, (model) => set({ model }), t.aiModelHint(ai.api))}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <Button testID="ai-test" kind="quiet" label={t.aiTest} disabled={testing || badUrl || insecure || !ai.url.trim() || !ai.model.trim()} onPress={() => void test()} />
+          <Button testID="ai-test" kind="quiet" label={t.aiTest} disabled={testing || badUrl || insecure || !shown.url.trim() || !ai.model.trim()} onPress={() => void test()} />
           {status && (
             <T testID="ai-status" v="caption" color={p.inkSoft} style={{ flex: 1 }}>
               {status}

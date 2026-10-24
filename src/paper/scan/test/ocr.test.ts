@@ -190,6 +190,13 @@ describe('reading order', () => {
     expect(order(boxes, names)).toEqual(names);
   });
 
+  it("reads an invoice's long descriptions and their amounts across, row by row", () => {
+    const boxes: ReturnType<typeof box>[] = [];
+    for (let r = 0; r < 6; r++) boxes.push(box(100, 500 + r * 45, 480 + (r % 2) * 20, 530 + r * 45), box(700, 500 + r * 45, 780, 530 + r * 45));
+    const names = boxes.map((_, i) => `${i % 2 ? 'amount' : 'item'}${i >> 1}`);
+    expect(order(boxes, names)).toEqual(names);
+  });
+
   it('reads a band across the page before the columns under it', () => {
     const boxes = [box(0, 0, 500, 20), box(0, 60, 200, 80), box(0, 90, 200, 110), box(0, 120, 200, 140), box(300, 70, 500, 84), box(300, 95, 500, 109)];
     expect(order(boxes, ['Title', 'L1', 'L2', 'L3', 'R1', 'R2'])).toEqual(['Title', 'L1', 'L2', 'L3', 'R1', 'R2']);

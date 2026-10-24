@@ -84,21 +84,33 @@ type Job = Exclude<Request, { type: 'cancel' }> | SearchJob;
 
 const wasmUrl = new URL('./pdfium.wasm', self.location.href).href;
 
-const ready: Promise<WrappedPdfiumModule> = init({
-  instantiateWasm(imports: WebAssembly.Imports, receive: (i: WebAssembly.Instance, m: WebAssembly.Module) => void) {
-    WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
-      .catch(() =>
-        fetch(wasmUrl)
-          .then((r) => r.arrayBuffer())
-          .then((b) => WebAssembly.instantiate(b, imports)),
-      )
-      .then((r) => receive(r.instance, r.module));
-    return {};
-  },
-} as never).then((m) => {
-  m.PDFiumExt_Init();
-  return m;
-});
+// PDFium's loader waits for `receive` forever when the wasm can't be loaded: that settles `ready` instead.
+let wasmFailed: (e: unknown) => void = () => {};
+const wasmFailure = new Promise<never>((_, reject) => (wasmFailed = reject));
+const ready: Promise<WrappedPdfiumModule> = Promise.race([
+  init({
+    instantiateWasm(imports: WebAssembly.Imports, receive: (i: WebAssembly.Instance, m: WebAssembly.Module) => void) {
+      WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
+        .catch(() =>
+          fetch(wasmUrl)
+            .then((r) => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              return r.arrayBuffer();
+            })
+            .then((b) => WebAssembly.instantiate(b, imports)),
+        )
+        .then((r) => receive(r.instance, r.module))
+        .catch(wasmFailed);
+      return {};
+    },
+  } as never).then((m) => {
+    m.PDFiumExt_Init();
+    return m;
+  }),
+  wasmFailure,
+]);
+// Told to each request instead (pump); not an unhandled rejection meanwhile.
+ready.catch(() => {});
 
 let M: WrappedPdfiumModule;
 const docs = new Map<number, Doc>();
@@ -303,6 +315,8 @@ function draw(d: Doc, page: number, index: number, w: number, region: NormRect, 
   const fullW = Math.round(w / region.w);
   const fullH = Math.round(h / region.h);
   const bmp = M.FPDFBitmap_CreateEx(w, h, FPDFBitmap_BGRA, 0, 0);
+  // Out of memory gives 0: its buffer would be read from address 0.
+  if (!bmp) throw new Error('Not enough memory');
   try {
     M.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
     const [x0, y0] = [-Math.round(region.x * fullW), -Math.round(region.y * fullH)];
@@ -1444,8 +1458,15 @@ const breathe = () =>
 async function pump() {
   if (busy) return;
   busy = true;
-  M ??= await ready;
   try {
+    try {
+      M ??= await ready;
+    } catch (e) {
+      // No engine: every request waiting is answered (and each later one, as it comes), none hangs.
+      const error = `The PDF engine could not be loaded (${e instanceof Error ? e.message : String(e)})`;
+      for (const job of queue.splice(0)) post({ id: job.id, ok: false, error });
+      return;
+    }
     while (queue.length) {
       const job = takeNext();
       try {

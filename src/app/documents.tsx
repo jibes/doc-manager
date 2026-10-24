@@ -430,10 +430,21 @@ export default function Documents() {
       if (yes == null) return;
     }
     await batch(async () => {
+      const gone = new Set(list.map((d) => d.key));
+      // The cursor goes to the next row left (or the one before), not to the list's ends.
+      const { cursor: at, doc: shown } = usePane.getState();
+      const i = visible.findIndex((h) => h.doc.key === at);
+      if (i >= 0 && gone.has(visible[i].doc.key)) {
+        const next = visible.slice(i + 1).find((h) => !gone.has(h.doc.key)) ?? visible.slice(0, i).reverse().find((h) => !gone.has(h.doc.key));
+        usePane.setState({ cursor: next?.doc.key ?? null });
+      }
       const { trashed, settle } = await deleteAll(list);
-      dropShown(new Set(list.map((d) => d.key)));
-      // The one beside the list goes with it.
-      if (list.some((d) => d.key === usePane.getState().doc?.key)) closePane();
+      dropShown(gone);
+      // The one beside the list goes with it (opened from its row, or from Add: by its library record).
+      const rec = shown && useLibrary.getState().docs.find((x) => x.id === shown.id);
+      const isShown = (d: IndexedDoc) =>
+        d.key === shown?.key || (d.place.kind === 'library' && d.place.id === shown?.id) || (!!rec && ((!!rec.shareKey && rec.shareKey === d.share) || (rec.fileName === d.name && rec.bytes === d.size)));
+      if (shown && list.some(isShown)) closePane();
       const n = trashed.reduce((k, g) => k + g.items.length, 0);
       if (n && n === list.length) {
         say(t.trashedN(n), { undo: () => void undoDelete(trashed).catch((e) => say(opError(e))), settle });
@@ -486,7 +497,9 @@ export default function Documents() {
       if (inSearch) target?.blur();
       const hit = k.visible.find((h) => h.doc.key === k.cursor);
       if (key === 'ArrowDown' || key === 'ArrowUp') return e.preventDefault(), void k.step(key === 'ArrowDown' ? 1 : -1);
-      if (key === 'Enter' && hit && !k.split) return e.preventDefault(), void openDoc(hit.doc, undefined, '').catch(fail);
+      // A focused button's own Enter presses it (not the cursor's row as well); while picking, Enter opens nothing.
+      if (key === 'Enter' && target?.closest?.('button, [role="button"], [role="checkbox"], a')) return;
+      if (key === 'Enter' && hit && !k.split && !k.selected) return e.preventDefault(), void openDoc(hit.doc, undefined, '').catch(fail);
       if (key === ' ' && hit && !k.split) return e.preventDefault(), setLook(hit.doc);
       const gone = k.selected ? k.picked : hit ? [hit.doc] : [];
       if (((mod && key === 'Backspace') || key === 'Delete') && k.deletable(gone)) return e.preventDefault(), void k.remove(gone);
@@ -663,7 +676,7 @@ export default function Documents() {
             ) : (
               <Chip testID="docs-filter" icon="tag" label={t.filter} count={active} onPress={openFilters} />
             )}
-            {syncIssues > 0 && <Chip testID="sync-banner" icon="copy" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
+            {syncIssues > 0 && <Chip testID="sync-banner" icon="sync" label={t.syncIssues(syncIssues)} onPress={() => router.push('/sync')} />}
             {!roomy &&
               FACETS.filter((f) => filter[f]).map((f) => <Chip key={f} testID={`facet-${f}`} label={filter[f]!} on onPress={() => choose(f)} />)}
             {views.map((v) => {

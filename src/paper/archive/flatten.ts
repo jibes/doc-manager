@@ -39,10 +39,13 @@ export async function flatten(root: string): Promise<Flattened> {
       out.moved += pdfs.length;
     }
     // Other files (notes, pictures) keep their folder.
-    if (empty && !(await folders.listNames(root, path)).length) {
-      const parent = path.length > 1 ? await parentOf(root, path) : undefined;
-      await folders.delete(root, parent, [dir]).catch(() => {});
-      return true;
+    if (empty && (await isEmpty(root, dir.id, path))) {
+      // Its parent not found: not the root's folder of that name instead.
+      const parent = path.length > 1 ? await folders.dirAt(root, path.slice(0, -1), false) : undefined;
+      if (parent !== null) {
+        await folders.delete(root, parent, [dir]).catch(() => {});
+        return true;
+      }
     }
     out.kept++;
     return false;
@@ -53,7 +56,21 @@ export async function flatten(root: string): Promise<Flattened> {
 
 const key = (name: string) => name.normalize('NFC').toLocaleLowerCase();
 
-/** The id of a folder's parent, by its path from the root. */
-async function parentOf(root: string, path: string[]): Promise<string | undefined> {
-  return (await folders.dirAt(root, path.slice(0, -1), false)) ?? undefined;
+/** Hidden folders `list` doesn't show (and `listNames`, files only, neither): Syncthing's old versions, repositories. */
+const HIDDEN_DIRS = ['.stversions', '.stfolder', '.git', '.svn', '.hg', '.tessel', '.trash', '.Trash'];
+
+/**
+ * Whether a folder is empty, so it can go (it goes with all that is in it): no entries listed, no files (hidden
+ * ones too), none of the usual hidden folders. Anything that can't be read counts as not empty.
+ */
+async function isEmpty(root: string, id: string, path: string[]): Promise<boolean> {
+  try {
+    if ((await folders.list(root, id)).length) return false;
+    if ((await folders.listNames(root, path)).length) return false;
+    for (const name of HIDDEN_DIRS) if ((await folders.dirAt(root, [...path, name], false)) != null) return false;
+    // listNames answers [] for a folder it can't read: it must still be found to count as empty.
+    return (await folders.dirAt(root, path, false)) != null;
+  } catch {
+    return false;
+  }
 }

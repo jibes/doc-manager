@@ -62,7 +62,7 @@ jobs:
           # a released version still without the macOS app gets it from the next run on main.
           if [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then
             if [ "$GITHUB_EVENT_NAME" = push ]; then echo "release=true" >> "$GITHUB_OUTPUT"; fi
-          elif ! gh release view "v$PKG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -q -- '-mac\.dmg$'; then
+          elif [ "$GITHUB_REF" = refs/heads/main ] && ! gh release view "v$PKG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -q -- '-mac\.dmg$'; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           fi
           echo "name=$PKG" >> "$GITHUB_OUTPUT"
@@ -103,4 +103,5 @@ jobs:
             fi
             sleep 20
           done
-          echo "::error::Release $TAG didn't appear within 30 minutes"; exit 1
+          # Not published (no signing secrets, the Web checks failed): the app stays in this run's artifacts.
+          echo "::warning::Release $TAG didn't appear within 30 minutes; the macOS app is in this run's artifacts"

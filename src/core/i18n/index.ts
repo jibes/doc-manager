@@ -47,7 +47,9 @@ export function aiMessage(e: unknown): string {
   if (m === 'ai:offline') return t.aiOffline;
   if (m === 'ai:timeout') return t.aiTimeout;
   const host = /^ai:(unknown-host|unreachable):(.*)$/.exec(m);
-  if (host) return host[1] === 'unknown-host' ? t.aiUnknownHost(host[2]) : t.aiUnreachable(host[2]);
+  // The Android and desktop apps make the request themselves: no browser rules (CORS) to blame there.
+  const inApp = typeof window !== 'undefined' && !!((window as { TesselShell?: unknown; TesselDesktop?: unknown }).TesselShell || (window as { TesselDesktop?: unknown }).TesselDesktop);
+  if (host) return host[1] === 'unknown-host' ? t.aiUnknownHost(host[2]) : t.aiUnreachable(host[2], inApp);
   if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) return t.aiTimeout;
   const server = /^ai:server ?(.*)$/s.exec(m);
   return server ? t.aiServer(server[1].trim()) : m;

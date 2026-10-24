@@ -156,7 +156,9 @@ export const rightClick = (fn: () => void, menu?: (at: { x: number; y: number })
           ev.preventDefault();
           const ne = ev.nativeEvent;
           // A mouse, or the keyboard's menu key (no pointer): the menu. A long press (or a browser that doesn't say) selects.
-          if (menu && (ne?.pointerType === 'mouse' || ne?.pointerType === '')) menu({ x: ne.clientX ?? 0, y: ne.clientY ?? 0 });
+          // Older browsers send a plain mouse event (no pointer type): a mouse where the pointer is fine.
+          const mouse = ne?.pointerType === 'mouse' || ne?.pointerType === '' || (ne?.pointerType === undefined && typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches);
+          if (menu && mouse) menu({ x: ne?.clientX ?? 0, y: ne?.clientY ?? 0 });
           else fn();
         },
       }

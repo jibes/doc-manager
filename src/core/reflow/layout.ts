@@ -93,6 +93,23 @@ const isNumeric = (l: TextLine) => {
   return s.length >= 6 && (s.match(/\d/g)?.length ?? 0) >= s.length * 0.45;
 };
 
+/**
+ * Running text in narrow columns (a two-column scan, ~40 characters a line): lines of words that start at a shared
+ * left edge with several others and fill most of that column's width. A form's labels and entries are shorter.
+ */
+function columnProse<L extends TextLine>(lines: L[]): Set<L> {
+  const wordy = lines.filter((l) => len(l) >= 25 && l.text.trim().split(/\s+/).length >= 4 && !isNumeric(l));
+  const out = new Set<L>();
+  for (const l of wordy) {
+    // A scan's left edges wander a little (skew, the recogniser's boxes).
+    const col = wordy.filter((o) => Math.abs(o.rect.x - l.rect.x) < 0.015);
+    if (col.length < 4 || median(col.map(len)) < 32) continue;
+    const width = Math.max(...col.map((o) => o.rect.w));
+    if (width >= 0.25 && l.rect.w >= width * 0.6) out.add(l);
+  }
+  return out;
+}
+
 /** Share of a page's text in tables and forms from which the page is shown as it is, whole. */
 const MOSTLY = 0.55;
 /** A scanned page with less running text than this (a form: labels, ticked boxes, short entries) is shown whole too. */
@@ -131,7 +148,8 @@ export function findTables<L extends TextLine>(lines: L[], scanned = false): { t
   const chars = (ls: L[]) => ls.reduce((n, l) => n + len(l), 0);
   const alt = (rs: Row<L>[]) => rs.map((r) => r.items.map((l) => l.text.trim()).join(' · ')).join('\n');
   const taken = new Set(runs.flat().flatMap((r) => r.items));
-  const form = scanned && lines.length >= SCAN_LINES && chars(lines.filter(isProse)) < chars(lines) * SCAN_PROSE;
+  const columns = scanned && lines.length >= SCAN_LINES ? columnProse(lines) : null;
+  const form = !!columns && chars(lines.filter((l) => isProse(l) || columns.has(l))) < chars(lines) * SCAN_PROSE;
   if ((taken.size && chars([...taken]) >= chars(lines) * MOSTLY) || form) {
     return { tables: [{ rect: pad(bounds(lines.map((l) => l.rect))!, 0.006), alt: alt(rows(lines)), table: true }], lines: [] };
   }

@@ -42,6 +42,8 @@ const SENTENCE_END = /[.!?:;…"”’»)\]。！？]$/;
 /** Chinese and Japanese script, written without spaces between words (or wrapped lines). */
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}。！？、，]/u;
 const BULLET = /^((?:[•▪◦‣●○■□–—*-])|(?:\d{1,3}[.)])|(?:[a-z][.)])|(?:\(\w{1,3}\)))\s+/;
+/** Bullet glyphs: never the start of a wrapped line, unlike a number, a letter or a dash. */
+const GLYPH = /^[•▪◦‣●○■□]/;
 /** "9. Dezember 2024", "3. Mai": a date, not a numbered item. */
 const DATE_START =
   /^\d{1,2}\.\s*(jan(uar|uary)?|feb(ruar|ruary)?|mär(z)?|mar(ch)?|apr(il)?|mai|may|jun[ie]?|jul[iy]?|aug(ust)?|sep(t|tember)?|okt(ober)?|oct(ober)?|nov(ember)?|dez(ember)?|dec(ember)?)\.?(?!\p{L})/iu;
@@ -182,6 +184,20 @@ function scannedTypography(lines: TextLine[], body: number): TextLine[] {
   });
 }
 
+/** Share of a page covered by pictures from which a page without text is a scan (not a blank or a drawing). */
+const SCAN_PICTURE = 0.3;
+
+/**
+ * Pages whose text has to be recognised: every page of a document without text, or else the pages without text
+ * that are pictures (a scan bound in after a typed cover). Pages with text keep it.
+ */
+export function ocrPages(input: PageLayout[]): number[] {
+  const bare = input.map((p) => chars(p.lines) < MIN_CHARS_PER_PAGE);
+  if (bare.every(Boolean)) return input.map((_, i) => i);
+  const picture = (p: PageLayout) => p.graphics.filter((g) => g.image).reduce((a, g) => a + g.rect.w * g.rect.h, 0) >= SCAN_PICTURE;
+  return input.flatMap((p, i) => (bare[i] && picture(p) ? [i] : []));
+}
+
 /** `sizes`: the pages' sizes, when known (for gaps across a line in its height). */
 export function buildReflow(input: PageLayout[], sizes?: Size[]): Reflow {
   // Typed pages set the body size scanned ones are measured in (10pt when all are scans).
@@ -260,8 +276,9 @@ export function buildReflow(input: PageLayout[], sizes?: Size[]): Reflow {
     let kind = kindOf(l);
     const last = cur?.lines[cur.lines.length - 1];
     // A wrapped line can start like an item ("19. Jahrhundert", "– und zwar"): a list starts after a sentence or
-    // another item, or indented.
-    if (kind === 'li' && !tagged && cur?.kind === 'p' && last && !SENTENCE_END.test(last.text.trim()) && l.rect.x <= edgeOf(l).left + 0.015) kind = 'p';
+    // another item, or indented. A bullet glyph starts one anyway (after an intro without a colon).
+    if (kind === 'li' && !tagged && cur?.kind === 'p' && last && !SENTENCE_END.test(last.text.trim()) && l.rect.x <= edgeOf(l).left + 0.015 && !GLYPH.test(l.text.trim()))
+      kind = 'p';
     if (held && kind !== 'caption') {
       const resume = (!cur || cur.kind === 'caption') && kind === 'p' && /^\p{Ll}/u.test(l.text.trim());
       if (resume) {

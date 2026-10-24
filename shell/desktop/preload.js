@@ -16,10 +16,11 @@ contextBridge.exposeInMainWorld('TesselDesktop', {
     onAbort?.(() => ipcRenderer.send('http-abort', id));
     return ipcRenderer.invoke('http', { ...request, id });
   },
-  /** PDFs opened with Tessel (Finder's "Open with", the Dock icon, a double click): { name, bytes }[]. */
+  /** PDFs opened with Tessel (Finder's "Open with", the Dock icon, a double click): { name, bytes }[]. Returns what stops listening. */
   onOpen: (cb) => {
-    ipcRenderer.on('open', (_e, files) => cb(files));
+    const stop = listen('open', cb);
     ipcRenderer.send('ready-for-files');
+    return stop;
   },
   /** A command chosen in the menu bar ('undo', 'find', 'scan', …). Returns what stops listening. */
   onMenu: (cb) => listen('menu', cb),

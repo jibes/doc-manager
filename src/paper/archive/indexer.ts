@@ -71,6 +71,18 @@ function ask<T>(req: DistributiveOmit<SearchRequest, 'id'>): Promise<T> {
       if (e.data.ok) w?.resolve(e.data.result);
       else w?.reject(new Error(e.data.error));
     };
+    // Not loaded (or its answers unreadable): every call waiting is told, and the next one starts it again.
+    const started = worker;
+    const fail = (why: string) => () => {
+      started.terminate();
+      if (worker !== started) return;
+      worker = null;
+      const all = [...waiting.values()];
+      waiting.clear();
+      for (const w of all) w.reject(new Error(why));
+    };
+    worker.onerror = fail('Search worker failed');
+    worker.onmessageerror = fail('Search worker answer unreadable');
   }
   const id = seq++;
   return new Promise<T>((resolve, reject) => {

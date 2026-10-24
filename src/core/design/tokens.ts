@@ -69,7 +69,7 @@ export const palettes: Record<ThemeName, Palette> = {
     raised: '#2B2C31',
     ink: '#ECE7DC',
     inkSoft: '#C9C3B7',
-    muted: '#8D8980',
+    muted: '#97938A',
     hairline: 'rgba(236,231,220,0.10)',
     accent: '#9DB7E6',
     accentInk: '#14171D',

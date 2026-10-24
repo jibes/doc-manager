@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,6 +13,7 @@ import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Button, T } from '@/paper/components/primitives';
 import { ScreenHeader } from '@/paper/components/ScreenHeader';
 import { Toast } from '@/paper/components/Toast';
+import { useNotice } from '@/paper/components/useNotice';
 import { fonts, radius, space } from '@/core/design/tokens';
 import { opError, t } from '@/core/i18n';
 import { useThrottled } from '@/core/lib/useThrottled';
@@ -31,16 +32,9 @@ export default function Duplicates() {
   const archive = usePrefs((s) => s.archive);
   const changed = useThrottled(useIndex((s) => s.changed), 1500);
   const [groups, setGroups] = useState<DuplicateGroup[] | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   // Removed just now: Undo brings them back from the trash until the notice goes (then they are let go).
-  const [undo, setUndo] = useState<{ run: () => void; settle: () => void } | null>(null);
-  const undone = useRef(false);
-  const dismiss = () => {
-    if (!undone.current) undo?.settle();
-    undone.current = false;
-    setUndo(null);
-    setNotice(null);
-  };
+  const { notice, id: noticeId, say, dismiss, action } = useNotice();
+  const setNotice = say;
   useEffect(() => refreshSoon(), []);
   useEffect(() => {
     let alive = true;
@@ -54,18 +48,16 @@ export default function Duplicates() {
     // Files outside the Tessel folder's trash are deleted for good: asked first.
     if (deletesForGood(g.others) && (await ask({ title: t.deleteTitle(g.others.length), body: t.deleteBody(g.others.length, name(g.others[0])), confirm: t.delete, destructive: true })) === null) return;
     try {
-      undo?.settle();
       const { trashed, settle } = await deleteAll(g.others);
       // The one beside the list goes with it.
       if (g.others.some((d) => d.key === usePane.getState().doc?.key)) closePane();
       setGroups((gs) => gs?.filter((x) => x !== g) ?? null);
       const all = trashed.reduce((k, x) => k + x.items.length, 0) === g.others.length;
-      if (all) setUndo({ run: () => void undoDelete(trashed).then(() => refreshSoon(), (e) => setNotice(opError(e))), settle });
+      if (all) say(t.duplicatesFreed(t.fileSize(g.freed)), { undo: () => void undoDelete(trashed).then(() => refreshSoon(), (e: unknown) => say(opError(e))), settle });
       else {
         settle();
-        setUndo(null);
+        say(t.duplicatesFreed(t.fileSize(g.freed)));
       }
-      setNotice(t.duplicatesFreed(t.fileSize(g.freed)));
     } catch (e) {
       setNotice(opError(e));
     }
@@ -117,11 +109,7 @@ export default function Duplicates() {
           ))}
         </View>
       </ScrollView>
-      <Toast
-        message={notice}
-        onDismiss={dismiss}
-        action={undo ? { label: t.undo, onPress: () => ((undone.current = true), undo.run()) } : undefined}
-      />
+      <Toast message={notice} id={noticeId} onDismiss={dismiss} action={action} />
     </SubFrame>
   );
 }

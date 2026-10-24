@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@/core/lib/folders', () => ({ folders: { supported: false } }));
 vi.mock('@/paper/state/prefs', () => ({ usePrefs: { getState: () => ({ archive: null }) } }));
 
-import { latest, parseOpened, serializeOpened } from './opened';
+import { latest, mergeOpened, parseOpened, serializeOpened } from './opened';
 
 describe('opened on other devices', () => {
   it('takes the latest time for each document over every device', () => {
@@ -13,6 +13,11 @@ describe('opened on other devices', () => {
   it('reads a broken or foreign file as nothing, and keeps only numbers', () => {
     expect(parseOpened('not json').size).toBe(0);
     expect(Object.fromEntries(parseOpened('{"v":1,"opened":{"a":5,"b":"x"}}'))).toEqual({ a: 5 });
+  });
+  it('keeps what another tab wrote to this device\'s file', () => {
+    const mine = new Map([['a', 5], ['b', 1]]);
+    mergeOpened(mine, parseOpened(serializeOpened(new Map([['a', 3], ['b', 4], ['c', 2]]))));
+    expect(Object.fromEntries(mine)).toEqual({ a: 5, b: 4, c: 2 });
   });
   it('writes the most recent 500 only', () => {
     const many = new Map(Array.from({ length: 600 }, (_, i) => [`k${i}`, i] as [string, number]));

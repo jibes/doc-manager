@@ -29,7 +29,14 @@ let win = null;
 const pdfsIn = (args) => args.filter((a) => /\.pdf$/i.test(a) && fs.existsSync(a));
 
 function open(paths) {
-  const files = paths.map((p) => ({ name: path.basename(p), bytes: fs.readFileSync(p) }));
+  // One that can't be read (no permission, a folder named like a PDF) is left out, not a crash.
+  const files = paths.flatMap((p) => {
+    try {
+      return [{ name: path.basename(p), bytes: fs.readFileSync(p) }];
+    } catch {
+      return [];
+    }
+  });
   if (!files.length) return;
   if (ready && win) {
     win.webContents.send('open', files);
@@ -118,8 +125,9 @@ app.on('open-file', (e, file) => {
   e.preventDefault();
   open([file]);
 });
-app.on('second-instance', (_e, argv) => {
-  open(pdfsIn(argv.slice(1)));
+app.on('second-instance', (_e, argv, workingDirectory) => {
+  // Paths as typed where it was launched again.
+  open(pdfsIn(argv.slice(1).map((a) => path.resolve(workingDirectory || '.', a))));
   // Launched again: the window comes back (from the taskbar or the Dock too), or there is one again.
   if (win) {
     if (win.isMinimized()) win.restore();
@@ -179,7 +187,7 @@ const item = (label, accelerator, name) => ({ label, accelerator, registerAccele
 /** The menu's own words in the app's languages (the page's are in src/core/i18n; the roles' come with Electron). */
 const LABELS = {
   en: { file: 'File', scan: 'Scan…', open: 'Open File…', save: 'Save', print: 'Print…', edit: 'Edit', undo: 'Undo', redo: 'Redo', find: 'Find', goto: 'Go to…', view: 'View', zoomIn: 'Zoom In', zoomOut: 'Zoom Out', zoomReset: 'Actual Size', update: 'Check for Updates…', github: 'Tessel on GitHub' },
-  de: { file: 'Datei', scan: 'Scannen…', open: 'Datei öffnen…', save: 'Speichern', print: 'Drucken…', edit: 'Bearbeiten', undo: 'Rückgängig', redo: 'Wiederholen', find: 'Suchen', goto: 'Gehe zu…', view: 'Ansicht', zoomIn: 'Vergrößern', zoomOut: 'Verkleinern', zoomReset: 'Originalgröße', update: 'Nach Updates suchen…', github: 'Tessel auf GitHub' },
+  de: { file: 'Datei', scan: 'Scannen…', open: 'Datei öffnen…', save: 'Speichern', print: 'Drucken…', edit: 'Bearbeiten', undo: 'Rückgängig', redo: 'Wiederholen', find: 'Finden', goto: 'Gehe zu…', view: 'Ansicht', zoomIn: 'Vergrößern', zoomOut: 'Verkleinern', zoomReset: 'Originalgröße', update: 'Nach Updates suchen…', github: 'Tessel auf GitHub' },
 };
 
 function menu() {
@@ -222,7 +230,8 @@ function menu() {
     {
       role: 'help',
       submenu: [
-        { label: l.update, click: () => void checkUpdate(true) },
+        // Builds are made for macOS only: elsewhere there is nothing to check for.
+        ...(process.platform === 'darwin' ? [{ label: l.update, click: () => void checkUpdate(true) }] : []),
         { label: l.github, click: () => void shell.openExternal('https://github.com/jibes/doc-manager') },
       ],
     },
@@ -314,7 +323,8 @@ ipcMain.handle('http', async (e, { id, url, method, headers, body }) => {
     const res = await net.fetch(url, { method, headers, body, signal: stop.signal });
     return { status: res.status, body: await res.text() };
   } finally {
-    running.delete(key);
+    // A request after a reload can have the same id: only its own entry goes.
+    if (running.get(key) === stop) running.delete(key);
   }
 });
 ipcMain.on('http-abort', (e, id) => running.get(`${e.sender.id}:${id}`)?.abort());

@@ -84,8 +84,10 @@ async function save() {
   if (!index) return;
   if (index.dirtCount > 0) await index.vacuum();
   const json = JSON.stringify(index);
-  changed.clear();
+  // Forgotten only once saved with the index: a failed write keeps them for the next save (and loading).
+  const saved = [...changed];
   await setMany([['index', json], ['changed', []], ['version', INDEX_VERSION]], savedStore);
+  for (const k of saved) changed.delete(k);
 }
 
 function ready(): Promise<MiniSearch<Indexable>> {

@@ -143,17 +143,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: read
+      actions: write
     steps:
       # Only a commit the Web workflow passed (types, lint, unit and end-to-end tests) is published.
       - name: Wait for the Web checks
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          RERUN=0
           for i in $(seq 1 90); do
-            STATE="$(gh run list -R "$GITHUB_REPOSITORY" --workflow web.yml --commit "$GITHUB_SHA" --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')"
+            RUN="$(gh run list -R "$GITHUB_REPOSITORY" --workflow web.yml --commit "$GITHUB_SHA" --json databaseId,status,conclusion --jq '.[0] | "\(.databaseId) \(.status) \(.conclusion)"')"
+            STATE="${RUN#* }"
             case "$STATE" in
               "completed success") echo "Web checks passed"; exit 0 ;;
+              # Replaced by a newer push before it ran: run once more for this commit, rather than fail the release.
+              "completed cancelled")
+                if [ "$RERUN" = 0 ]; then RERUN=1; gh run rerun "${RUN%% *}" -R "$GITHUB_REPOSITORY"; else echo "::error::The Web checks were cancelled again"; exit 1; fi ;;
               completed*) echo "::error::The Web checks didn't pass on this commit ($STATE)"; exit 1 ;;
             esac
             sleep 20

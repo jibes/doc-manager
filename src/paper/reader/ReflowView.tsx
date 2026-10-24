@@ -78,7 +78,7 @@ export function ReflowView({ handle, docId, palette: p, onExit, ...rest }: Props
     );
   }
 
-  return <PdfBlocks blocks={reflow.blocks} handle={handle} palette={p} ocr={ocr} {...rest} />;
+  return <PdfBlocks blocks={reflow.blocks} handle={handle} palette={p} ocr={ocr} canOcr={canOcr} {...rest} />;
 }
 
 function PdfBlocks({
@@ -86,9 +86,10 @@ function PdfBlocks({
   handle,
   palette: p,
   ocr,
+  canOcr,
   onOpenPage,
   ...rest
-}: Omit<Props, 'docId' | 'onExit'> & { blocks: Block[]; ocr?: OcrProgress }) {
+}: Omit<Props, 'docId' | 'onExit'> & { blocks: Block[]; ocr?: OcrProgress; canOcr: boolean }) {
   // Figures are crops of their page, rendered sharp for the column; a tap shows them on the page.
   const figures = useMemo<FigureSource>(
     () => ({
@@ -104,6 +105,14 @@ function PdfBlocks({
         {ocr.running ? t.ocrProgress(ocr.done, ocr.total) : ocr.failed ? t.ocrFailed : t.ocrNote}
       </T>
       {ocr.failed && <Button label={t.ocrResume} kind="quiet" onPress={() => recognizeText(handle)} />}
+    </View>
+  ) : canOcr ? (
+    // Text, but also scanned pages without any (after a typed cover): those can be recognised.
+    <View style={[styles.ocrNote, { borderColor: p.hairline }]}>
+      <T v="label" color={p.muted} style={{ flex: 1 }}>
+        {t.ocrOfferPages}
+      </T>
+      <Button label={t.ocrStart} kind="quiet" onPress={() => recognizeText(handle)} testID="ocr-start" />
     </View>
   ) : null;
   return <BlockList blocks={blocks} palette={p} figures={figures} footer={footer} {...rest} />;

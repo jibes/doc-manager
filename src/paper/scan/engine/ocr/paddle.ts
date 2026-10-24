@@ -222,8 +222,9 @@ export function blocks(boxes: TextBox[]): TextBox[][] {
   if (cut && cut.size >= GUTTER * h) {
     const left = boxes.filter((b) => b.x1 <= cut.at);
     const right = boxes.filter((b) => b.x0 >= cut.at);
-    // Level rows only make a table of short cells: typeset columns share baselines too, and are read down.
-    const cells = !isColumn(left, h) && !isColumn(right, h);
+    // Level rows read across unless both sides are running text: typeset columns share baselines too, and are
+    // read down, but an invoice's long descriptions beside their amounts are still rows.
+    const cells = !(isColumn(left, h) && isColumn(right, h));
     if (left.length >= 2 && right.length >= 2 && (!cells || levelShare(left, right) < ALIGNED)) return [...blocks(left), ...blocks(right)];
   }
   if (band && band.size >= BAND_GAP * h) return bands();

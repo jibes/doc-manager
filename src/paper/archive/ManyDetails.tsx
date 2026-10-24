@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { fonts, radius, space } from '@/core/design/tokens';
 import { t } from '@/core/i18n';
@@ -25,6 +25,18 @@ export function ManyDetails({ docs, onClose, onDone }: { docs: IndexedDoc[]; onC
   const [bad, setBad] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
+  // Escape closes it (before the list under it reacts).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
   const addTag = (raw: string) => {
     const words = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (words.length) setTags((x) => [...new Set([...x, ...words])]);

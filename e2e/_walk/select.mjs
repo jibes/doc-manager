@@ -1,0 +1,31 @@
+import { browser, ctxFor, watch, vis, openFile, painted, BASE } from './lib.mjs';
+const scheme = process.argv[2] ?? 'light';
+const ctx = await ctxFor({ size: 'desktop', scheme });
+const page = await ctx.newPage();
+const shot = watch(page, 'sel-' + scheme);
+await page.goto(BASE);
+await vis(page, 'add-menu').waitFor();
+await openFile(page, 'columns.pdf');
+await painted(page);
+await page.waitForSelector('[data-testid=text-layer] span');
+await page.waitForTimeout(1000);
+// close side panels for room
+const spans = page.locator('[data-testid=text-layer] span');
+const info = await spans.evaluateAll((els) => els.slice(0, 400).map((e, i) => { const r = e.getBoundingClientRect(); return [i, e.textContent, Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }));
+console.log(info.slice(0, 60).map((x) => JSON.stringify(x)).join('\n'));
+const sel = async (label, a, b) => {
+  await page.evaluate(() => getSelection().removeAllRanges());
+  await page.mouse.click(5, 450).catch(() => {});
+  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 12 }); await page.mouse.up();
+  await page.waitForTimeout(500);
+  const s = await page.evaluate(() => getSelection().toString());
+  const rects = await page.evaluate(() => { const s = getSelection(); if (!s.rangeCount) return 0; return s.getRangeAt(0).getClientRects().length; });
+  console.log('SEL', label, JSON.stringify(s), 'rects', rects, 'bubble', await page.getByTestId('selection-bubble').isVisible().catch(() => false));
+  await shot('sel-' + label);
+  return s;
+};
+const box = async (i) => spans.nth(i).boundingBox();
+globalThis.page = page; globalThis.sel = sel; globalThis.box = box; globalThis.shot = shot;
+const { default: steps } = await import(process.argv[3] ?? './select-steps.mjs');
+await steps({ page, sel, box, shot, spans });
+await browser.close();

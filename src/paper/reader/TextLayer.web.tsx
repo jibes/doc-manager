@@ -69,26 +69,75 @@ function endAt(x: number, y: number): { node: Node; offset: number } | null {
 function followSelection() {
   let start: { node: Node; offset: number } | null = null;
   let frame = 0;
+  let last: { x: number; y: number } | null = null;
+  // Near the top or bottom of the pages while dragging: they scroll, as the browser's own selecting would.
+  let scroller: HTMLElement | null = null;
+  const extend = (from: { node: Node; offset: number }, x: number, y: number) => {
+    const end = endAt(x, y);
+    if (end) document.getSelection()?.setBaseAndExtent(from.node, from.offset, end.node, end.offset);
+  };
+  const tick = () => {
+    frame = 0;
+    const from = start;
+    if (!from || !last) return;
+    extend(from, last.x, last.y);
+    const box = scroller?.getBoundingClientRect();
+    if (!scroller || !box) return;
+    const edge = 48;
+    const by = last.y < box.top + edge ? -(box.top + edge - last.y) : last.y > box.bottom - edge ? last.y - (box.bottom - edge) : 0;
+    if (by) {
+      scroller.scrollTop += Math.max(-40, Math.min(40, by / 2));
+      frame = requestAnimationFrame(tick);
+    }
+  };
   document.addEventListener('mousedown', (e) => {
     start = null;
     const tl = (e.target as Element | null)?.closest?.('.tl');
-    if (!tl || e.button !== 0 || e.detail > 1 || e.shiftKey) return;
+    // The left button alone: Ctrl-click (a Mac's right click), ⌘ and Alt clicks, Shift-clicks, double and triple
+    // clicks stay the browser's.
+    if (!tl || e.button !== 0 || e.detail > 1 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
     const at = caretAt(e.clientX, e.clientY);
     if (!at || at.node.nodeType !== Node.TEXT_NODE || !tl.contains(at.node)) return;
     e.preventDefault();
+    // The press would have taken the focus (a field being typed in is done, the keys go to the pages): it still does.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    (tl.closest('[tabindex]') as HTMLElement | null)?.focus({ preventScroll: true });
     start = at;
+    last = { x: e.clientX, y: e.clientY };
+    scroller = scrollParent(tl);
     document.getSelection()?.setBaseAndExtent(at.node, at.offset, at.node, at.offset);
   });
   document.addEventListener('mousemove', (e) => {
     if (!start || !(e.buttons & 1)) return;
-    const { clientX: x, clientY: y } = e;
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => {
-      const end = start && endAt(x, y);
-      if (start && end) document.getSelection()?.setBaseAndExtent(start.node, start.offset, end.node, end.offset);
-    });
+    last = { x: e.clientX, y: e.clientY };
+    if (!frame) frame = requestAnimationFrame(tick);
   });
-  document.addEventListener('mouseup', () => (start = null));
+  // The pages scrolled under a still pointer (the wheel, or the edge): the end follows.
+  document.addEventListener(
+    'scroll',
+    () => {
+      if (start && last && !frame) frame = requestAnimationFrame(tick);
+    },
+    true,
+  );
+  document.addEventListener('mouseup', (e) => {
+    // Released before the frame: where it was released counts.
+    if (start) extend(start, e.clientX, e.clientY);
+    cancelAnimationFrame(frame);
+    frame = 0;
+    start = null;
+    last = null;
+    scroller = null;
+  });
+}
+
+/** The element that scrolls the pages a layer is on. */
+function scrollParent(el: Element): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null;

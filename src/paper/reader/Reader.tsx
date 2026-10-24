@@ -56,6 +56,7 @@ import { NoteDialog, type NoteRequest } from './NoteDialog';
 import { HIGHLIGHT_COLORS } from './selection';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
+import { usePane } from '@/paper/state/pane';
 import { changedElsewhere } from '@/paper/archive/versions';
 import { discardDetails, useDrafts } from './drafts';
 import { useMoving } from './useMoving';
@@ -143,9 +144,17 @@ export function Reader({
   const edits = useEdits(doc, handle, focused, onClose);
   // Text read in the background waits for unsaved changes (one would be written over the other).
   useEffect(() => {
-    editing(doc.id, edits.dirty);
+    // Typed text too (a field, the details): reading the text in the background waits, rather than reload over it.
+    editing(doc.id, edits.unsaved);
     return () => editing(doc.id, false);
-  }, [doc.id, edits.dirty]);
+  }, [doc.id, edits.unsaved]);
+  // Beside the list: switching to another document can save this one's changes first.
+  const { dirtyAtOnce, save: saveEdits } = edits;
+  useEffect(() => {
+    if (!embedded) return;
+    usePane.setState({ reader: { dirty: dirtyAtOnce, save: saveEdits } });
+    return () => usePane.setState({ reader: null });
+  }, [embedded, dirtyAtOnce, saveEdits]);
   // A message from before the reopen, shown by this reader once (read while rendering, which may happen twice:
   // it is let go once the reader is up).
   const [reloaded, setReloaded] = useState(() => afterReload);
@@ -160,7 +169,7 @@ export function Reader({
     // Saved into the file: a document only viewed is kept first.
     if (!(await libraryActions().ensureKept(doc.id))) return;
     // The details go into the file as it is now: unsaved changes with them (asked first), a field still typed in too.
-    if (edits.dirty && (await ask({ title: t.unsavedTitle, body: t.detailsWithEdits, confirm: t.detailsSaveBoth })) === null) return;
+    if (edits.dirtyAtOnce() && (await ask({ title: t.unsavedTitle, body: t.detailsWithEdits, confirm: t.detailsSaveBoth })) === null) return;
     if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return;
     setSavingDetails(true);
     const failed = await detailsWritten(doc.id, handle, details);
