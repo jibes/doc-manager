@@ -76,5 +76,6 @@ export function opError(e: unknown): string {
   const many = /^too-many:(\d+)$/.exec(m);
   if (many) return `${t.opFailed} ${t.tooManyToShare(Number(many[1]))}`;
   if (m === t.settingsUnreadable) return m;
+  if (m === 'file-moved') return `${t.opFailed} ${t.fileGone}`;
   return m === t.fileGone ? `${t.opFailed} ${m}` : t.opFailed;
 }

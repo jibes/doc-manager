@@ -64,6 +64,14 @@ export function QuickLook({ doc, onClose, onStep, onOpen }: { doc: IndexedDoc; o
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose, onOpen, onStep]);
+  // Closed (a click beside it takes the focus away): the focus goes back where it was, the list's row.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const before = document.activeElement as HTMLElement | null;
+    return () => {
+      if (before?.isConnected) before.focus({ preventScroll: true });
+    };
+  }, []);
 
   const now = shown?.key === doc.key ? shown : null;
   const raster = now?.raster;

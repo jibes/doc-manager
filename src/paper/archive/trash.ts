@@ -78,7 +78,10 @@ export const trashes = (root: string) => root === usePrefs.getState().archive;
 
 /** Moves files and folders to the archive's trash. Returns what was trashed (for Undo). */
 export async function moveToTrash(root: string, dir: string | undefined, entries: FolderEntry[]): Promise<Trashed[]> {
-  const trash = (await folders.dirAt(root, TRASH, true)) ?? undefined;
+  const at = await folders.dirAt(root, TRASH, true);
+  // No trash folder (it couldn't be made): nothing moves, rather than into the Tessel folder itself.
+  if (at === null) throw new Error('denied');
+  const trash = at ?? undefined;
   const before = new Set((await folders.list(root, trash)).map((e) => e.name));
   // What did arrive when one fails is recorded all the same (then the error is told).
   let failed: unknown;

@@ -32,4 +32,11 @@ describe('markAt', () => {
     expect(markAt(list, 0, { x: 0.9, y: 0.9 })).toBeNull();
     expect(markAt(list, 1, { x: 0.25, y: 0.16 })?.page).toBe(1);
   });
+  it('counts a mark over text on its lines only, and leaves drawings alone', () => {
+    const two = { ...a(0, 0, 0.1, 0.1, 0.8, 0.04), lines: [{ x: 0.5, y: 0.1, w: 0.4, h: 0.02 }, { x: 0.1, y: 0.12, w: 0.3, h: 0.02 }] };
+    expect(markAt([two], 0, { x: 0.6, y: 0.11 })).toBe(two);
+    expect(markAt([two], 0, { x: 0.2, y: 0.11 })).toBeNull();
+    expect(markAt([two], 0, { x: 0.8, y: 0.13 })).toBeNull();
+    expect(markAt([{ ...a(1, 0, 0, 0, 1, 1), kind: 'ink' }], 0, { x: 0.5, y: 0.5 })).toBeNull();
+  });
 });

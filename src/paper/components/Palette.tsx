@@ -7,6 +7,7 @@ import { t } from '@/core/i18n';
 import { usePalette } from '@/paper/state/prefs';
 import { Icon, type IconName } from './Icon';
 import { T } from './primitives';
+import { useModal } from './useModal';
 
 export type PaletteItem = { key: string; icon: IconName; label: string; hint?: string; run: () => void };
 
@@ -19,6 +20,8 @@ const SHOWN = 12;
  */
 export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () => void }) {
   const p = usePalette();
+  // A dialog: Escape closes it from anywhere in it, Tab stays in it, the focus goes back where it was.
+  const ref = useModal(onClose);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const found = useMemo(() => {
@@ -37,7 +40,7 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
   };
 
   return (
-    <View style={StyleSheet.absoluteFill} testID="palette">
+    <View ref={ref} style={StyleSheet.absoluteFill} testID="palette" role="dialog" aria-modal aria-label={t.palette}>
       <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(100)} style={StyleSheet.absoluteFill}>
         <Pressable accessibilityLabel={t.close} style={[StyleSheet.absoluteFill, { backgroundColor: p.scrim }]} onPress={onClose} />
       </Animated.View>
@@ -62,11 +65,6 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
               if (key === 'ArrowDown' || key === 'ArrowUp') {
                 e.preventDefault();
                 setActive((a) => (Math.min(a, found.length - 1) + (key === 'ArrowDown' ? 1 : -1) + found.length) % Math.max(1, found.length));
-              } else if (key === 'Escape') {
-                // The palette's only: a selection under it stays.
-                e.preventDefault();
-                (e.nativeEvent as unknown as Event).stopPropagation?.();
-                onClose();
               }
             }}
             style={[styles.input, { color: p.ink }]}

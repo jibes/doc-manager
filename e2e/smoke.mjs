@@ -531,7 +531,7 @@ async function forms() {
   await page.getByTestId('text-view').waitFor({ timeout: 15000 });
   await page.waitForTimeout(800);
   const flow = await page.getByTestId('text-view').innerText();
-  check(/Full name: Ada Lovelace/.test(flow) && /◉ Large/.test(flow) && /◯ Small/.test(flow) && /Site: Orchard/.test(flow) && /☑ I agree/.test(flow), `forms: text view shows the values filled in (${JSON.stringify(flow.slice(0, 160))})`);
+  check(/Full name: Ada Lovelace/.test(flow) && /◉ Large/.test(flow) && /○\u2060 Small/.test(flow) && /Site: Orchard/.test(flow) && /☑ I agree/.test(flow), `forms: text view shows the values filled in (${JSON.stringify(flow.slice(0, 160))})`);
   await switchView(page);
   await name.waitFor({ timeout: 10000 });
   // Typing in a field and leaving straight away (no Enter, no tap elsewhere): asked first, nothing lost.
@@ -580,6 +580,23 @@ async function annotations() {
   const recoloured = (await clickMark()) && (await page.getByTestId('menu-mark-green').count()) === 1 && (await page.getByTestId('menu-mark-blue').count()) === 0;
   await page.keyboard.press('Escape');
   check(markMenu && recoloured, 'annotations: a click on a highlight offers other colours, a note and Delete; a colour changes it');
+  // Undone while its menu is open: the menu goes (it named the highlight by its place, which may be another's now).
+  await clickMark();
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(1000);
+  const menuGone = (await page.getByTestId('menu-mark-delete').count()) === 0;
+  await page.keyboard.press('Control+Shift+z');
+  await page.waitForTimeout(400);
+  check(menuGone, 'annotations: undoing closes a highlight’s menu');
+  // A double click on a highlighted word selects it, as anywhere else.
+  {
+    const b = await page.locator('[data-testid=text-layer] span', { hasText: /^Everything comes in one way/ }).first().boundingBox();
+    await page.mouse.dblclick(b.x + 4, b.y + b.height / 2);
+    await page.waitForTimeout(500);
+    const word = await page.evaluate(() => getSelection().toString().trim());
+    check(word.length > 0 && (await page.getByTestId('menu-mark-delete').count()) === 0, `annotations: a double click on a highlight selects the word (${JSON.stringify(word)})`);
+    await page.evaluate(() => getSelection().removeAllRanges());
+  }
   await select(/^Press \+ and choose Camera/);
   await page.getByTestId('highlight-note').click();
   await page.getByTestId('note-input').fill('Try dragging a file in');
@@ -2692,6 +2709,45 @@ async function changedElsewhere() {
   await page.getByTestId('ask-confirm').click();
   await page.getByTestId('save').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
   check((await page.getByTestId('save').count()) === 0, 'changed: …and confirmed, saved');
+  // Gone from its place meanwhile (moved, put in the trash): saving says so, and doesn't make it again there.
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Again');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('save').waitFor();
+  const removed = await page.evaluate(async () => {
+    const find = async (dir) => {
+      for await (const [name, h] of dir.entries()) {
+        if (h.kind === 'file' && name === 'columns.pdf') return dir;
+        if (h.kind === 'directory') {
+          const f = await find(h);
+          if (f) return f;
+        }
+      }
+      return null;
+    };
+    const dir = await find(await navigator.storage.getDirectory());
+    if (!dir) return null;
+    await dir.removeEntry('columns.pdf');
+    return dir.name;
+  });
+  await page.getByTestId('save').click();
+  const told = await page.getByText(/The file is no longer there/).first().waitFor({ timeout: 5000 }).then(() => true, () => false);
+  const remade = await page.evaluate(async (name) => {
+    const find = async (dir) => {
+      for await (const [n, h] of dir.entries()) {
+        if (h.kind === 'directory' && n === name) return h;
+        if (h.kind === 'directory') {
+          const f = await find(h);
+          if (f) return f;
+        }
+      }
+      return null;
+    };
+    const root = await navigator.storage.getDirectory();
+    const dir = root.name === name ? root : await find(root);
+    return !!dir && (await dir.getFileHandle('columns.pdf').then(() => true, () => false));
+  }, removed);
+  check(removed !== null && told && !remade, `changed: saving a file gone from its place says so, and doesn't make it again (${told}, ${remade})`);
   await ctx.close();
 }
 

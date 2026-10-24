@@ -48,10 +48,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run build:desktop-web
-      - run: npm ci
-        working-directory: shell/desktop
       - id: version
         name: Version
         env:
@@ -59,13 +55,20 @@ jobs:
         run: |
           PKG="$(node -p "require('./package.json').version")"
           # A version whose tag doesn't exist yet is being released by this push (the Android workflow tags it);
-          # a released version still without the macOS app gets it from the next run on main.
+          # a released version still without the macOS app gets it from the next run on main, built from the
+          # released commit (the one its checks passed), not from this one.
           if [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then
             if [ "$GITHUB_EVENT_NAME" = push ]; then echo "release=true" >> "$GITHUB_OUTPUT"; fi
           elif [ "$GITHUB_REF" = refs/heads/main ] && ! gh release view "v$PKG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -q -- '-mac\.dmg$'; then
             echo "release=true" >> "$GITHUB_OUTPUT"
+            git fetch -q --depth=1 origin "refs/tags/v$PKG:refs/tags/v$PKG"
+            git checkout -q "v$PKG"
           fi
           echo "name=$PKG" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - run: npm run build:desktop-web
+      - run: npm ci
+        working-directory: shell/desktop
       - name: Build the macOS app
         working-directory: shell/desktop
         # Not signed (no Apple Developer ID): macOS asks once, on the first start (Open from the context menu).

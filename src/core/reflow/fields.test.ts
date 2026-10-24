@@ -28,6 +28,14 @@ describe('withFields', () => {
     expect(out.map((l) => l.text)).toEqual(['Site: Harbour', 'Notes: one two', 'PIN']);
   });
 
+  it('puts a second field after one label on with a comma', () => {
+    const out = withFields([line('Name', 0.1, 0.2, 0.08)], [
+      field({ type: 'text', rect: { x: 0.25, y: 0.195, w: 0.2, h: 0.03 }, value: 'Ada' }),
+      field({ type: 'text', rect: { x: 0.5, y: 0.195, w: 0.2, h: 0.03 }, value: 'Lovelace' }),
+    ]);
+    expect(out[0].text).toBe('Name: Ada, Lovelace');
+  });
+
   it('gives a value without a label a line of its own', () => {
     const out = withFields([line('Title', 0.1, 0.1)], [field({ type: 'text', rect: { x: 0.3, y: 0.5, w: 0.3, h: 0.03 }, value: 'alone' })]);
     expect(out.at(-1)).toMatchObject({ text: 'alone', rect: { x: 0.3, y: 0.5 } });

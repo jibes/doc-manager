@@ -115,7 +115,11 @@ export default function RootLayout() {
     const unlibrary = useLibrary.subscribe((s, prev) => {
       if (s.docs.length !== prev.docs.length) schedule();
     });
-    return () => (unpicker(), unlibrary());
+    // Another Tessel folder, or this device now sorting the inbox: what waits there, counted again.
+    const unprefs = usePrefs.subscribe((s, prev) => {
+      if (s.archive !== prev.archive || s.inboxHere !== prev.inboxHere) void refreshInboxCount();
+    });
+    return () => (unpicker(), unlibrary(), unprefs());
   }, []);
 
   useEffect(() => {

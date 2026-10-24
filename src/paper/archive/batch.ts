@@ -2,7 +2,7 @@ import { folders, type FolderEntry, type Place as FolderPlace } from '@/core/lib
 import { PartlyDone } from '@/core/lib/folderTypes';
 import { shareDocs } from '@/core/lib/fileActions';
 import { useLibrary } from '@/paper/state/library';
-import type { DocRecord } from '@/core/storage';
+import { repo, type DocRecord } from '@/core/storage';
 import { forget, renamed, schedule } from './indexer';
 import type { IndexedDoc, Place } from './search';
 import type { Trashed } from './sync';
@@ -59,17 +59,29 @@ export const deletesForGood = (docs: IndexedDoc[]) => docs.some((d) => !inFolder
 const urisOf = (entries: FolderEntry[]) => entries.flatMap((e) => (e.uri ? [e.uri] : []));
 
 /**
+ * The library's documents of files known by their handle (a browser's; the Android app's go by URI): read before
+ * the files go, as a handle tells its file only by where it is (a new file there later would be taken for it).
+ */
+async function linkedIds(entries: FolderEntry[]): Promise<string[]> {
+  const ids: string[] = [];
+  for (const e of entries) if (!e.uri && e.handle) ids.push(...(await repo.linkedToHandle(e.handle).catch(() => [] as string[])));
+  return ids;
+}
+
+/**
  * Deletes them: files in the archive go to its trash, files elsewhere are deleted, library copies leave the
  * library. Returns what went to the trash, to undo, and `settle` for when that can't be undone any more: then the
  * library forgets its documents of those files too (until then Undo brings them back as they were).
  */
 export async function deleteAll(docs: IndexedDoc[]): Promise<{ trashed: { root: string; items: Trashed[] }[]; settle: () => void }> {
   const trashed: { root: string; items: Trashed[] }[] = [];
-  const [gone, kept]: string[][] = [[], []];
+  const [gone, kept, goneIds, keptIds]: string[][] = [[], [], [], []];
   for (const { from, entries } of byFolder(docs)) {
+    const ids = await linkedIds(entries);
     if (trashes(from.root)) {
       trashed.push({ root: from.root, items: await moveToTrash(from.root, from.dir, entries) });
       kept.push(...urisOf(entries));
+      keptIds.push(...ids);
     } else {
       await folders.delete(from.root, from.dir, entries).catch(async (e: unknown) => {
         // The library forgets what did go before the error is told.
@@ -77,16 +89,22 @@ export async function deleteAll(docs: IndexedDoc[]): Promise<{ trashed: { root: 
         throw e;
       });
       gone.push(...urisOf(entries));
+      goneIds.push(...ids);
     }
   }
   const library = useLibrary.getState();
   await library.forgetFiles(gone);
+  for (const id of goneIds) await library.remove(id);
   for (const d of docs) {
     const rec = libraryDoc(d);
     if (rec) await library.remove(rec.id);
   }
   forget(docs.map((d) => d.key));
-  return { trashed, settle: () => void library.forgetFiles(kept).catch(() => {}) };
+  const settle = async () => {
+    await library.forgetFiles(kept);
+    for (const id of keptIds) await library.remove(id);
+  };
+  return { trashed, settle: () => void settle().catch(() => {}) };
 }
 
 /** Renames a file (in its folder; library documents linked to it follow). */

@@ -53,6 +53,7 @@ import { anchorAt, computeLayout, contentWidth, positionAt, readingPage, scrollF
 import { PageView } from './PageView';
 import { ReflowView, type ReflowApi } from './ReflowView';
 import { NoteDialog, type NoteRequest } from './NoteDialog';
+import { refreshFields } from '@/core/reflow/useReflow';
 import { HIGHLIGHT_COLORS, markAt, RECOLORABLE } from './selection';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
@@ -81,6 +82,8 @@ const clampZoom = (z: number) => Math.min(4, Math.max(0.5, z));
 const clampText = (s: number) => Math.min(1.8, Math.max(0.75, Math.round(s * 20) / 20));
 /** Scroll events this soon after a jump (contents, scrubber, a search hit) are the jump's, not reading. */
 const JUMP_MS = 800;
+/** A click on a highlight opens its menu once no second click (selecting a word, a line) follows. */
+const DOUBLE_CLICK_MS = 280;
 
 /** Writes the details into the document's file (write access asked first); what went wrong, or null. */
 async function detailsWritten(id: string, handle: DocHandle, details: Details): Promise<string | null> {
@@ -501,6 +504,10 @@ export function Reader({
   const [annots, setAnnots] = useState<Annotation[] | null>(null);
   const [annotVersion, setAnnotVersion] = useState(0);
   const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
+  // The menu of a highlight or note clicked on the page.
+  const [marked, setMarked] = useState<{ a: Annotation; at: { x: number; y: number } } | null>(null);
+  // Counts changes to the annotations: a click still finding its highlight when one comes opens nothing.
+  const marksChanged = useRef(0);
   // Reading every page's annotations takes a while on long documents: only once the Notes tab is shown.
   const [notesShown, setNotesShown] = useState(false);
   const showNotes = useCallback(() => setNotesShown(true), []);
@@ -541,6 +548,9 @@ export function Reader({
       pages.forEach((pg) => cache.invalidate(pg));
       edits.markDirty();
       setAnnotVersion((v) => v + 1);
+      // A menu for one of them addresses it by its place, which may have changed.
+      marksChanged.current++;
+      setMarked(null);
     },
     [cache, edits],
   );
@@ -610,9 +620,13 @@ export function Reader({
     async (back: boolean) => {
       if (noteBusy.current || !(await (back ? edits.undo() : edits.redo()))) return;
       for (let pg = 0; pg < handle.pageCount; pg++) cache.invalidate(pg);
-      // The notes as they were are gone (their places may differ now): none listed until read again.
+      // The notes as they were are gone (their places may differ now): none listed until read again, and no menu
+      // for one of them stays open. Text view reads the form's values as they are now.
       setAnnots(null);
+      marksChanged.current++;
+      setMarked(null);
       setAnnotVersion((v) => v + 1);
+      void refreshFields(handle);
     },
     [edits, handle, cache],
   );
@@ -908,16 +922,22 @@ export function Reader({
     if (panel && !wide) setPanel(null);
   }, [panel, wide]);
   // A click on a highlight or note on the page: what can be done with it, there.
-  const [marked, setMarked] = useState<{ a: Annotation; at: { x: number; y: number } } | null>(null);
   const annotsOnPages = useRef<{ version: number; list: Promise<Annotation[]> } | null>(null);
   const onPageClick = useCallback(
     async (pg: number, at: { x: number; y: number } | null, client: { x: number; y: number } | null) => {
       if (Platform.OS === 'web' && window.getSelection()?.toString()) return;
       if (at && client) {
+        const seq = marksChanged.current;
         if (annotsOnPages.current?.version !== annotVersion) annotsOnPages.current = { version: annotVersion, list: handle.annotations().catch(() => []) };
-        const list = await annotsOnPages.current.list;
+        // A second press soon after (a double or triple click selecting a word or line) is the browser's.
+        let again = false;
+        const press = () => (again = true);
+        if (Platform.OS === 'web') document.addEventListener('mousedown', press, { once: true, capture: true });
+        const [list] = await Promise.all([annotsOnPages.current.list, new Promise((r) => setTimeout(r, Platform.OS === 'web' ? DOUBLE_CLICK_MS : 0))]);
+        if (Platform.OS === 'web') document.removeEventListener('mousedown', press, { capture: true });
+        if (seq !== marksChanged.current) return;
         const a = markAt(list, pg, at);
-        if (a) return setMarked({ a, at: client });
+        if (a) return again ? undefined : setMarked({ a, at: client });
       }
       onPagePress();
     },

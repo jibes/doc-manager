@@ -42,8 +42,12 @@ export const launchContents = (): Promise<File[]> => early?.files ?? fetchShellF
 
 /** The PDF engine's worker, started by the page (once). */
 export function takeEarlyWorker(): Worker | undefined {
-  const worker = early?.worker;
+  const worker = early?.worker as (Worker & { failed?: boolean }) | undefined;
   if (early) early.worker = undefined;
+  if (worker?.failed) {
+    worker.terminate();
+    return undefined;
+  }
   return worker;
 }
 

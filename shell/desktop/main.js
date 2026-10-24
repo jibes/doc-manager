@@ -19,7 +19,8 @@ protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: 
 const RELEASES = 'https://api.github.com/repos/jibes/doc-manager/releases/latest';
 
 // One app: a second launch (or "Open with" on Windows and Linux) hands its files to the running one.
-if (!app.requestSingleInstanceLock()) app.quit();
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
 
 /** PDFs to open, until the page says it is ready for them. */
 let waiting = [];
@@ -273,6 +274,8 @@ async function checkUpdate(asked) {
 }
 
 app.whenReady().then(() => {
+  // The second launch only hands over its files (quitting is under way): no window, no setup of its own.
+  if (!primary) return;
   Menu.setApplicationMenu(menu());
   nativeTheme.on('updated', () => BrowserWindow.getAllWindows().forEach((w) => w.setBackgroundColor(background())));
   protocol.handle(SCHEME, serve);

@@ -161,6 +161,9 @@ export async function clearLog(): Promise<void> {
  * Logs a call's start, end and time, or its failure, for each function of `obj` (the storage, the folders, the
  * engine): what was asked and how it went, with arguments in brief.
  */
+/** An argument or result of a traced call: a long string (a file's contents) by its size, keys left out. */
+const traceBrief = (x: unknown) => (typeof x === 'string' ? (x.length > 40 ? `(${x.length} chars)` : JSON.stringify(x.replace(/[0-9a-f]{24,}/gi, '#'))) : brief(x, 1));
+
 export function traced<T extends object>(scope: string, obj: T): T {
   return new Proxy(obj, {
     get(target, prop, receiver) {
@@ -168,7 +171,7 @@ export function traced<T extends object>(scope: string, obj: T): T {
       if (typeof v !== 'function' || typeof prop !== 'string') return v;
       return (...args: unknown[]) => {
         const started = performance.now();
-        const call = `${prop}(${args.map((a) => brief(a, 1)).join(', ')})`;
+        const call = `${prop}(${args.map(traceBrief).join(', ')})`;
         let out: unknown;
         try {
           out = v.apply(target, args);
@@ -178,7 +181,7 @@ export function traced<T extends object>(scope: string, obj: T): T {
         }
         if (out instanceof Promise)
           return out.then(
-            (r) => (on && log.debug(scope, `${call} ${Math.round(performance.now() - started)} ms`, r === undefined ? undefined : brief(r, 1)), r),
+            (r) => (on && log.debug(scope, `${call} ${Math.round(performance.now() - started)} ms`, r === undefined ? undefined : traceBrief(r)), r),
             (e: unknown) => {
               log.warn(scope, `${call} failed after ${Math.round(performance.now() - started)} ms`, e);
               throw e;

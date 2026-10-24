@@ -9,7 +9,7 @@ import { holdBrowserBack } from '@/core/lib/backGuard';
 import { goBack } from '@/core/lib/nav';
 import { invalidate } from '@/paper/archive/indexer';
 import { changedElsewhere, writeFrom } from '@/paper/archive/versions';
-import { repo, type DocRecord } from '@/core/storage';
+import { FILE_MOVED, repo, type DocRecord } from '@/core/storage';
 import { libraryActions } from '@/paper/state/library';
 import { drafting, useDrafts } from './drafts';
 
@@ -97,7 +97,9 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     if (!bytes) return fail();
     // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
     const saved = edits.current;
-    if (!(await writeFrom(doc.id, handle, bytes).then(() => true, () => false))) return fail();
+    const failed = await writeFrom(doc.id, handle, bytes).then(() => null, (e: unknown) => e);
+    // Gone from where it was (moved, trashed, filed elsewhere): said so, and not made again there.
+    if (failed) return failed instanceof Error && failed.message === FILE_MOVED ? (setNotice(`${t.saveFailed} ${t.fileGone}`), false) : fail();
     // Its size as now: browsers tell a linked document's file by its name and size.
     libraryActions().patchDoc(doc.id, { bytes: bytes.byteLength });
     invalidate(doc.id);

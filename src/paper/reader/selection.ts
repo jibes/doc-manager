@@ -38,16 +38,21 @@ export function lineRects(boxes: Box[], page: Box): NormRect[] {
 /** Kinds whose colour Tessel changes: marks over text. */
 export const RECOLORABLE = new Set<Annotation['kind']>(['highlight', 'underline', 'strikeout', 'squiggly']);
 
-/** The annotation under a point on a page (0..1 across and down), the smallest where several overlap. */
+/** Kinds a click opens a menu for: marks over text and notes (not drawings or stamps, which fill their box). */
+const CLICKABLE = new Set<Annotation['kind']>([...RECOLORABLE, 'note', 'freetext']);
+
+/**
+ * The annotation under a point on a page (0..1 across and down), the smallest where several overlap. A mark over
+ * text counts on its lines only, not the ends of them its box also spans.
+ */
 export function markAt(list: Annotation[], page: number, at: { x: number; y: number }): Annotation | null {
   const slack = 0.004;
+  const inside = (r: NormRect) => at.x >= r.x - slack && at.x <= r.x + r.w + slack && at.y >= r.y - slack && at.y <= r.y + r.h + slack;
   let best: Annotation | null = null;
   for (const a of list) {
-    if (a.page !== page) continue;
-    const r = a.rect;
-    if (at.x < r.x - slack || at.x > r.x + r.w + slack || at.y < r.y - slack || at.y > r.y + r.h + slack) continue;
-    if (!best || r.w * r.h < best.rect.w * best.rect.h) best = a;
+    if (a.page !== page || !CLICKABLE.has(a.kind)) continue;
+    if (!(a.lines?.length ? a.lines.some(inside) : inside(a.rect))) continue;
+    if (!best || a.rect.w * a.rect.h < best.rect.w * best.rect.h) best = a;
   }
   return best;
 }
-

@@ -477,6 +477,15 @@ export default function Documents() {
     const next = visible[at < 0 ? (dir > 0 ? 0 : visible.length - 1) : Math.max(0, Math.min(visible.length - 1, at + dir))];
     usePane.setState({ cursor: next.doc.key });
     if (split) void openDoc(next.doc, undefined, '').catch(fail);
+    // A row with the keyboard's focus: the focus goes along (Space or Enter press the focused row, not one before).
+    if (Platform.OS === 'web') {
+      const index = visible.indexOf(next);
+      requestAnimationFrame(() => {
+        if (!(document.activeElement as HTMLElement | null)?.closest?.('[data-testid="archive-hit"]')) return;
+        const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="archive-hit"]')].filter((r) => r.offsetParent);
+        rows[index]?.focus({ preventScroll: true });
+      });
+    }
     return next;
   };
   const keys = useRef({ step, look, palette, cursor, visible, remove, deletable, split, selected, picked, menu: false, many: false });

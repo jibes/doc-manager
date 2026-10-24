@@ -32,7 +32,16 @@ export function MoreMenu({ palette: p, top = 0, at, items, onClose }: { palette:
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [ref]);
-  const place = at ? { left: Math.max(space.sm, Math.min(at.x, width - MENU_W - space.sm)), top: Math.max(space.sm, Math.min(at.y, height - items.length * ITEM_H - space.lg)), right: 'auto' as const } : { top };
+  // At a point: in the window's coordinates, wherever the menu's screen is (the reader beside the list starts
+  // part way across).
+  const place = at
+    ? {
+        left: Math.max(space.sm, Math.min(at.x, width - MENU_W - space.sm)),
+        top: Math.max(space.sm, Math.min(at.y, height - items.length * ITEM_H - space.lg)),
+        right: 'auto' as const,
+        ...(Platform.OS === 'web' ? { position: 'fixed' as 'absolute' } : {}),
+      }
+    : { top };
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       <Pressable accessibilityLabel={t.close} style={StyleSheet.absoluteFill} onPress={onClose} />

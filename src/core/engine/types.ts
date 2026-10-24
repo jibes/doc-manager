@@ -97,6 +97,8 @@ export type Annotation = {
   index: number;
   kind: 'highlight' | 'underline' | 'strikeout' | 'squiggly' | 'note' | 'freetext' | 'ink' | 'shape' | 'stamp';
   rect: NormRect;
+  /** Marks over text: the box of each line they cover (the rect spans the lines' ends too). */
+  lines?: NormRect[];
   /** #rrggbb, when the annotation has a colour. */
   color?: string;
   /** The reader's comment. */

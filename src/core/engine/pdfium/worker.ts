@@ -189,8 +189,8 @@ function unload(d: Doc) {
   free(d.buf);
 }
 
-function open(bytes: ArrayBuffer, password = ''): OpenResult {
-  const { ptr, buf, len } = load(bytes, password);
+/** What a document opened in PDFium says about itself. */
+function readInfo(ptr: number) {
   const pageCount = M.FPDF_GetPageCount(ptr);
   const pageSizes: Size[] = withScratch(8, (s) => {
     const out: Size[] = [];
@@ -201,9 +201,6 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
     return out;
   });
   const meta = (tag: string) => readUtf16((b, l) => M.FPDF_GetMetaText(ptr, tag, b, l)).trim() || undefined;
-  const doc = nextDoc++;
-  const { formInfo, form } = formOf(ptr);
-  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [], state: 0, paper: new Map() });
   // Entries kept as they are when Tessel rewrites the details.
   const other: Record<string, string> = {};
   for (const key of ['Creator', 'Producer', 'CreationDate', 'Trapped']) {
@@ -211,13 +208,37 @@ function open(bytes: ArrayBuffer, password = ''): OpenResult {
     if (v) other[key] = v;
   }
   const date = meta('DocumentDate');
+  const title = meta('Title');
+  const author = meta('Author');
+  const subject = meta('Subject');
+  const keywords = meta('Keywords');
+  const signed = M.FPDF_GetSignatureCount(ptr) > 0;
+  return { pageCount, pageSizes, other, date, title, author, subject, keywords, signed };
+}
+
+function open(bytes: ArrayBuffer, password = ''): OpenResult {
+  const { ptr, buf, len } = load(bytes, password);
+  let info: ReturnType<typeof readInfo>;
+  try {
+    info = readInfo(ptr);
+  } catch (e) {
+    // Nothing read, nothing left open.
+    M.FPDF_CloseDocument(ptr);
+    free(buf);
+    throw e;
+  }
+  const { pageCount, pageSizes, other, date, title, author, subject, keywords, signed } = info;
+  // Known as open only once all of it is read (a failure before leaves nothing open here).
+  const doc = nextDoc++;
+  const { formInfo, form } = formOf(ptr);
+  docs.set(doc, { ptr, buf, len, pageSizes, formInfo, form, edited: false, password, undo: [], redo: [], state: 0, paper: new Map() });
   return {
     doc,
     pageCount,
     pageSizes,
-    metadata: { title: meta('Title'), author: meta('Author'), subject: meta('Subject'), keywords: meta('Keywords'), date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined, other },
+    metadata: { title, author, subject, keywords, date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined, other },
     hasForm: !!form,
-    signed: M.FPDF_GetSignatureCount(ptr) > 0,
+    signed,
   };
 }
 
@@ -393,37 +414,40 @@ function searchPage(d: Doc, pageIndex: number, textPtr: number): SearchHit[] {
     const DW = 10000;
     const DH = Math.round((DW * height) / width);
     const find = M.FPDFText_FindStart(text, textPtr, 0, 0);
-    withScratch(48, (s) => {
-      const [l, t, r, b, dx, dy] = [s, s + 8, s + 16, s + 24, s + 32, s + 40];
-      const toDevice = (x: number, y: number) => {
-        M.FPDF_PageToDevice(page, 0, 0, DW, DH, 0, x, y, dx, dy);
-        return [M.pdfium.getValue(dx, 'i32') / DW, M.pdfium.getValue(dy, 'i32') / DH];
-      };
-      while (M.FPDFText_FindNext(find)) {
-        const idx = M.FPDFText_GetSchResultIndex(find);
-        const cnt = M.FPDFText_GetSchCount(find);
-        const rects = [];
-        const n = M.FPDFText_CountRects(text, idx, cnt);
-        for (let i = 0; i < n; i++) {
-          M.FPDFText_GetRect(text, i, l, t, r, b);
-          const [x0, y0] = toDevice(M.pdfium.getValue(l, 'double'), M.pdfium.getValue(t, 'double'));
-          const [x1, y1] = toDevice(M.pdfium.getValue(r, 'double'), M.pdfium.getValue(b, 'double'));
-          rects.push({ x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) });
+    try {
+      withScratch(48, (s) => {
+        const [l, t, r, b, dx, dy] = [s, s + 8, s + 16, s + 24, s + 32, s + 40];
+        const toDevice = (x: number, y: number) => {
+          M.FPDF_PageToDevice(page, 0, 0, DW, DH, 0, x, y, dx, dy);
+          return [M.pdfium.getValue(dx, 'i32') / DW, M.pdfium.getValue(dy, 'i32') / DH];
+        };
+        while (M.FPDFText_FindNext(find)) {
+          const idx = M.FPDFText_GetSchResultIndex(find);
+          const cnt = M.FPDFText_GetSchCount(find);
+          const rects = [];
+          const n = M.FPDFText_CountRects(text, idx, cnt);
+          for (let i = 0; i < n; i++) {
+            M.FPDFText_GetRect(text, i, l, t, r, b);
+            const [x0, y0] = toDevice(M.pdfium.getValue(l, 'double'), M.pdfium.getValue(t, 'double'));
+            const [x1, y1] = toDevice(M.pdfium.getValue(r, 'double'), M.pdfium.getValue(b, 'double'));
+            rects.push({ x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) });
+          }
+          const from = Math.max(0, idx - 40);
+          const count = Math.min(total, idx + cnt + 60) - from;
+          const snippet = withScratch((count + 1) * 2, (p) => {
+            M.FPDFText_GetText(text, from, count, p);
+            return M.pdfium.UTF16ToString(p).replace(/[\r\n\t\u0002￾]/g, ' ');
+          });
+          hits.push({ page: pageIndex, rects, snippet, matchStart: idx - from, matchLength: cnt });
+          if (hits.length >= 200) {
+            hits[hits.length - 1].more = true;
+            break;
+          }
         }
-        const from = Math.max(0, idx - 40);
-        const count = Math.min(total, idx + cnt + 60) - from;
-        const snippet = withScratch((count + 1) * 2, (p) => {
-          M.FPDFText_GetText(text, from, count, p);
-          return M.pdfium.UTF16ToString(p).replace(/[\r\n\t\u0002￾]/g, ' ');
-        });
-        hits.push({ page: pageIndex, rects, snippet, matchStart: idx - from, matchLength: cnt });
-        if (hits.length >= 200) {
-          hits[hits.length - 1].more = true;
-          break;
-        }
-      }
-    });
-    M.FPDFText_FindClose(find);
+      });
+    } finally {
+      M.FPDFText_FindClose(find);
+    }
   } finally {
     if (text) M.FPDFText_ClosePage(text);
     M.FPDF_ClosePage(page);
@@ -485,6 +509,36 @@ function withTextPage<T>(d: Doc, pageIndex: number, fallback: T, fn: (page: numb
   }
 }
 
+
+/**
+ * Whether a glyph's box continues a run of text on its line: after its right end (left-to-right), or before its
+ * left end (right-to-left scripts, whose glyphs come right to left). `gap`: the space between them, for a word
+ * break. Null: it starts another run.
+ */
+function continues(run: { rect: NormRect; right: number }, rc: NormRect): { left: boolean; gap: number } | null {
+  const sameLine = Math.abs(rc.y + rc.h / 2 - (run.rect.y + run.rect.h / 2)) < Math.min(rc.h, run.rect.h) * 0.5;
+  if (!sameLine) return null;
+  const h = run.rect.h;
+  const gap = rc.x - run.right;
+  if (gap < h * 1.5 && gap > -h) return { left: false, gap };
+  const back = run.rect.x - (rc.x + rc.w);
+  if (rc.x < run.rect.x && back < h * 1.5 && back > -h) return { left: true, gap: back };
+  return null;
+}
+
+/** The second half of a character outside the Basic Multilingual Plane (an emoji, 𝔸): it has no box of its own. */
+const lowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+/** A run widened to take in a glyph's box, on either side. */
+function grow(run: { rect: NormRect; right: number }, rc: NormRect) {
+  const x0 = Math.min(run.rect.x, rc.x);
+  const x1 = Math.max(run.right, rc.x + rc.w);
+  const y0 = Math.min(run.rect.y, rc.y);
+  const y1 = Math.max(run.rect.y + run.rect.h, rc.y + rc.h);
+  run.rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  run.right = x1;
+}
+
 /** Groups characters into same-line runs for the selectable text layer. */
 function pageText(docId: number, pageIndex: number): TextRun[] {
   const d = getDoc(docId);
@@ -504,6 +558,10 @@ function pageText(docId: number, pageIndex: number): TextRun[] {
           flush(true);
           continue;
         }
+        if (lowSurrogate(code)) {
+          if (cur) (cur as TextRun).text += ch;
+          continue;
+        }
         // FS_RECTF {left, top, right, bottom}; the loose box spans the font's ascent..descent.
         const has = M.FPDFText_GetLooseCharBox(text, i, box);
         const [l, t, r, b] = [0, 4, 8, 12].map((o) => M.pdfium.getValue(box + o, 'float'));
@@ -513,17 +571,13 @@ function pageText(docId: number, pageIndex: number): TextRun[] {
         }
         const rc = norm(l, t, r, b);
         const c = cur as (TextRun & { right: number }) | null;
-        const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
-        const gap = c ? rc.x - c.right : 0;
-        if (c && sameLine && gap < c.rect.h * 1.5 && gap > -c.rect.h) {
-          if (gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+        const on = c && continues(c, rc);
+        if (c && on) {
+          if (on.gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
           c.text += ch;
-          const x1 = Math.max(c.right, rc.x + rc.w);
-          const y0 = Math.min(c.rect.y, rc.y);
-          const y1 = Math.max(c.rect.y + c.rect.h, rc.y + rc.h);
-          c.rect = { x: c.rect.x, y: y0, w: x1 - c.rect.x, h: y1 - y0 };
-          c.right = x1;
+          grow(c, rc);
         } else {
+          const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
           flush(!!c && !sameLine);
           cur = { text: ch, rect: rc, eol: false, right: rc.x + rc.w };
         }
@@ -563,9 +617,12 @@ function structRoles(page: number): Map<number, Role> | null {
       }
     }
   };
-  const top = M.FPDF_StructTree_CountChildren(tree);
-  for (let i = 0; i < top; i++) walk(M.FPDF_StructTree_GetChildAtIndex(tree, i), undefined, 0);
-  M.FPDF_StructTree_Close(tree);
+  try {
+    const top = M.FPDF_StructTree_CountChildren(tree);
+    for (let i = 0; i < top; i++) walk(M.FPDF_StructTree_GetChildAtIndex(tree, i), undefined, 0);
+  } finally {
+    M.FPDF_StructTree_Close(tree);
+  }
   return map.size ? map : null;
 }
 
@@ -598,10 +655,15 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
     const flags = s + 16;
     const nameBuf = s + 20;
     for (let i = 0; i < n; i++) {
-      const ch = String.fromCharCode(M.FPDFText_GetUnicode(text, i));
+      const code = M.FPDFText_GetUnicode(text, i);
+      const ch = String.fromCharCode(code);
       if (ch === '\r' || ch === '\n') {
         if (cur && M.FPDFText_IsHyphen(text, i - 1)) cur.hyphen = true;
         flush();
+        continue;
+      }
+      if (lowSurrogate(code)) {
+        if (cur) (cur as TextLine).text += ch;
         continue;
       }
       let role: Role | undefined;
@@ -618,16 +680,11 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
       }
       const rc = norm(l, t, r, b);
       const c = cur as (TextLine & { right: number }) | null;
-      const sameLine = c && Math.abs(rc.y + rc.h / 2 - (c.rect.y + c.rect.h / 2)) < Math.min(rc.h, c.rect.h) * 0.5;
-      const gap = c ? rc.x - c.right : 0;
-      if (c && sameLine && c.sid === role?.sid && gap < c.rect.h * 1.5 && gap > -c.rect.h) {
-        if (gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
+      const on = c && c.sid === role?.sid && continues(c, rc);
+      if (c && on) {
+        if (on.gap > c.rect.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
         c.text += ch;
-        const x1 = Math.max(c.right, rc.x + rc.w);
-        const y0 = Math.min(c.rect.y, rc.y);
-        const y1 = Math.max(c.rect.y + c.rect.h, rc.y + rc.h);
-        c.rect = { x: c.rect.x, y: y0, w: x1 - c.rect.x, h: y1 - y0 };
-        c.right = x1;
+        grow(c, rc);
       } else {
         flush();
         // Typography from the line's first glyph.
@@ -871,11 +928,34 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
   const d = getDoc(docId);
   // Changed from the first page written (a page that fails later leaves the others' text in the document).
   d.edited = true;
-  // One font for every word: an embedded one, which this PDFium shares between text objects (a standard font it
+  // A font for the words: an embedded one, which this PDFium shares between text objects (a standard font it
   // writes again for each: a page of small print made thousands of them). Made for exactly the characters
   // written (any script): a few kilobytes. The words as they are written, with the space after each.
   const written = pages.map(({ words }) => words.map((w) => layerWord(w.text)));
-  const made = layerFont(written.flat().map((w) => `${w} `));
+  // A font holds so many characters (65 535 glyphs, 8 189 ranges of them): pages go in batches, a font each.
+  let from = 0;
+  while (from < pages.length) {
+    const chars = new Set<string>();
+    let to = from;
+    while (to < pages.length) {
+      const more = new Set(written[to].flatMap((w) => [...w]));
+      if (to > from && chars.size + [...more].filter((c) => !chars.has(c)).length > FONT_CHARS) break;
+      more.forEach((c) => chars.add(c));
+      to++;
+    }
+    writeWithFont(d, pages.slice(from, to), written.slice(from, to));
+    from = to;
+  }
+  // The file written anew (as Save does): the layers it replaced leave the file, rather than staying behind in
+  // earlier revisions (a document read again and again grew by megabytes each time). A signed one is updated.
+  return save(docId);
+}
+
+/** Characters in one text-layer font (a page with more goes alone, its rarest ones without a glyph). */
+const FONT_CHARS = 6000;
+
+function writeWithFont(d: Doc, pages: PageWords[], written: string[][]) {
+  const made = layerFont(written.flat().map((w) => `${w} `), FONT_CHARS);
   const buf = malloc(made.data.length);
   heap().set(made.data, buf);
   const embedded = M.FPDFText_LoadFont(d.ptr, buf, made.data.length, FPDF_FONT_TRUETYPE, true);
@@ -890,9 +970,6 @@ function addTextLayer(docId: number, pages: PageWords[]): ArrayBuffer {
     M.FPDFFont_Close(font);
     M.pdfium.wasmExports.free(buf);
   }
-  // The file written anew (as Save does): the layers it replaced leave the file, rather than staying behind in
-  // earlier revisions (a document read again and again grew by megabytes each time). A signed one is updated.
-  return save(docId);
 }
 
 /**
@@ -1105,18 +1182,21 @@ function pageAnnotations(d: Doc, pageIndex: number): Annotation[] {
           const color = annotColor(annot, s, u);
           // Text under each quad (one per line), in order.
           const quotes: string[] = [];
+          const lines: NormRect[] = [];
           const quads = M.FPDFAnnot_CountAttachmentPoints(annot);
           for (let q = 0; q < quads; q++) {
             if (!M.FPDFAnnot_GetAttachmentPoints(annot, q, s)) continue;
             const xs = [0, 8, 16, 24].map(f);
             const ys = [4, 12, 20, 28].map(f);
             quotes.push(boundedText(text, Math.min(...xs), Math.max(...ys), Math.max(...xs), Math.min(...ys)).trim());
+            lines.push(norm(Math.min(...xs), Math.max(...ys), Math.max(...xs), Math.min(...ys)));
           }
           out.push({
             page: pageIndex,
             index: i,
             kind,
             rect: norm(l, t, r, b),
+            ...(lines.length ? { lines } : {}),
             color,
             contents: str('Contents'),
             author: str('T'),
@@ -1312,24 +1392,27 @@ function pageLinks(docId: number, pageIndex: number): PageLink[] {
     // Plain-text URLs, unless an annotation already covers them.
     const web = M.FPDFLink_LoadWebLinks(text);
     if (web) {
-      withScratch(32, (s) => {
-        for (let i = 0; i < M.FPDFLink_CountWebLinks(web); i++) {
-          const n = M.FPDFLink_GetURL(web, i, 0, 0);
-          if (n <= 1) continue;
-          const url = withScratch(n * 2, (b) => (M.FPDFLink_GetURL(web, i, b, n), M.pdfium.UTF16ToString(b)));
-          if (!SAFE_URL.test(url)) continue;
-          for (let j = 0; j < M.FPDFLink_CountRects(web, i); j++) {
-            M.FPDFLink_GetRect(web, i, j, s, s + 8, s + 16, s + 24);
-            const [l, t, r2, b] = [0, 8, 16, 24].map((o) => M.pdfium.getValue(s + o, 'double'));
-            const rc = norm(l, t, r2, b);
-            const covered = out.some(
-              (o) => rc.x < o.rect.x + o.rect.w && rc.x + rc.w > o.rect.x && rc.y < o.rect.y + o.rect.h && rc.y + rc.h > o.rect.y,
-            );
-            if (!covered) out.push({ kind: 'url', url, rect: rc });
+      try {
+        withScratch(32, (s) => {
+          for (let i = 0; i < M.FPDFLink_CountWebLinks(web); i++) {
+            const n = M.FPDFLink_GetURL(web, i, 0, 0);
+            if (n <= 1) continue;
+            const url = withScratch(n * 2, (b) => (M.FPDFLink_GetURL(web, i, b, n), M.pdfium.UTF16ToString(b)));
+            if (!SAFE_URL.test(url)) continue;
+            for (let j = 0; j < M.FPDFLink_CountRects(web, i); j++) {
+              M.FPDFLink_GetRect(web, i, j, s, s + 8, s + 16, s + 24);
+              const [l, t, r2, b] = [0, 8, 16, 24].map((o) => M.pdfium.getValue(s + o, 'double'));
+              const rc = norm(l, t, r2, b);
+              const covered = out.some(
+                (o) => rc.x < o.rect.x + o.rect.w && rc.x + rc.w > o.rect.x && rc.y < o.rect.y + o.rect.h && rc.y + rc.h > o.rect.y,
+              );
+              if (!covered) out.push({ kind: 'url', url, rect: rc });
+            }
           }
-        }
-      });
-      M.FPDFLink_CloseWebLinks(web);
+        });
+      } finally {
+        M.FPDFLink_CloseWebLinks(web);
+      }
     }
     return out;
   });

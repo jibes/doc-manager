@@ -104,8 +104,10 @@ function followSelection() {
     // The left button alone: Ctrl-click (a Mac's right click), ⌘ and Alt clicks, Shift-clicks, double and triple
     // clicks stay the browser's.
     if (!tl || e.button !== 0 || e.detail > 1 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-    const at = caretAt(e.clientX, e.clientY);
-    if (!at || at.node.nodeType !== Node.TEXT_NODE || !tl.contains(at.node)) return;
+    // Pressed beside the text (the margin, a gutter, between lines): from the word it belongs to, as an end would.
+    const caret = caretAt(e.clientX, e.clientY);
+    const at = caret?.node.nodeType === Node.TEXT_NODE && tl.contains(caret.node) ? caret : endAt(e.clientX, e.clientY);
+    if (!at || !tl.contains(at.node)) return;
     e.preventDefault();
     // The press would have taken the focus (a field being typed in is done, the keys go to the pages): it still does.
     (document.activeElement as HTMLElement | null)?.blur?.();

@@ -165,7 +165,12 @@ export const indexedTitle = (key: string): string | undefined => docs.get(key)?.
 /** Renamed by Tessel itself: its record (and text) under the file's new name now, as the next pass would find it. */
 export function renamed(from: IndexedDoc, entry: FolderEntry) {
   if (Platform.OS !== 'web' || from.place.kind !== 'folder' || !docs.has(from.key)) return;
-  rekey(from, { key: `${from.place.root}:${entry.id}`, place: { ...from.place, entry }, name: entry.name, size: entry.size, modified: entry.modified });
+  const key = `${from.place.root}:${entry.id}`;
+  // A pass listing the folder meanwhile saw the old name: neither is its to change.
+  const now = Date.now();
+  settled.set(from.key, now);
+  settled.set(key, now);
+  rekey(from, { key, place: { ...from.place, entry }, name: entry.name, size: entry.size, modified: entry.modified });
 }
 
 function drop(keys: string[]) {
@@ -437,7 +442,7 @@ async function run(): Promise<void> {
   const list = listed.filter((c) => !settledSince(c.key, started));
   useIndex.setState({ conflicts: conflicts.filter((c) => !settledSince(conflictKey(c), started)) });
   const seen = new Set(list.map((c) => c.key));
-  const gone = [...docs.values()].filter((d) => !seen.has(d.key) && !inUnlisted(d, unlisted));
+  const gone = [...docs.values()].filter((d) => !seen.has(d.key) && !inUnlisted(d, unlisted) && !settledSince(d.key, started));
   // Moved or renamed (a new key, the same size and time as a file gone): its text goes along, not read again.
   const stamp = (x: { size: number; modified: number }) => `${x.size}:${x.modified}`;
   const movable = new Map(gone.filter((d) => d.place.kind === 'folder' && d.modified > 0 && !d.failed && d.hash).map((d) => [stamp(d), d]));

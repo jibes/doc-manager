@@ -36,6 +36,19 @@ class WorkerClient {
         if (msg.ok) p.resolve(msg.result);
         else p.reject(new Error(msg.error));
       };
+      // The worker itself failed (its script didn't load, or threw): what waits on it fails rather than waiting for
+      // ever, and the next call starts another.
+      const failed = (e: Event) => {
+        const pending = [...this.pending.values()];
+        this.pending.clear();
+        this.worker?.terminate();
+        this.worker = null;
+        const error = new Error(`The PDF engine stopped${e instanceof ErrorEvent && e.message ? `: ${e.message}` : ''}`);
+        log.error('engine', error.message);
+        for (const p of pending) p.reject(error);
+      };
+      this.worker.onerror = failed;
+      this.worker.onmessageerror = failed;
     }
     return this.worker;
   }

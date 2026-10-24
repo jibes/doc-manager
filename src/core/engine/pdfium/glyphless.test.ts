@@ -120,3 +120,15 @@ describe('text layer font in PDFium', () => {
     }
   });
 });
+
+describe('layer font limits', () => {
+  it('keeps the most used characters when there are more than a font holds', () => {
+    const rare = Array.from({ length: 20 }, (_, i) => String.fromCodePoint(0x4e00 + i)).join('');
+    const { charcodes } = layerFont(['aaaa bbbb', rare], 3);
+    expect(charcodes('ab')).not.toContain(0);
+    expect(charcodes(String.fromCodePoint(0x4e05))).toEqual([0]);
+  });
+  it('leaves control characters out of a word', () => {
+    expect(layerWord('a\u0000b\u0007c')).toBe('abc');
+  });
+});

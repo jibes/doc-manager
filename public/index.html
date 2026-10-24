@@ -46,7 +46,12 @@
           history.replaceState(null, '', base + '/opening');
           window.__tesselLaunch = {
             list: list,
-            worker: new Worker(base + '/engine/pdfium-worker.js', { type: 'module' }),
+            worker: (function () {
+              var w = new Worker(base + '/engine/pdfium-worker.js', { type: 'module' });
+              // Failed before the app took it (it starts one of its own then).
+              w.onerror = function () { w.failed = true; };
+              return w;
+            })(),
             files: Promise.all(list.map(function (f) {
               return fetch(f.url).then(function (r) { return r.blob(); }).then(function (b) { return new File([b], f.name, { type: f.type || b.type }); });
             })),

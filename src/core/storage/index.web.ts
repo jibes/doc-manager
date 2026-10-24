@@ -63,6 +63,8 @@ export const repo: LibraryRepo = traced('storage', {
     if (isShellLink(stored)) return writeToShell(bytes, stored.uri);
     if (!isFileHandle(stored)) return set(id, new Blob([bytes], { type: 'application/pdf' }), files);
     if (!(await ensurePermission(stored, true))) throw new Error(FILE_ACCESS);
+    // Gone from there (moved, put in the trash, filed by another device): writing would make it again where it was.
+    if (!(await stored.getFile().then(() => true, () => false))) throw new Error(FILE_MOVED);
     await writeFile(stored, bytes);
   },
   async linkedTo(uris) {

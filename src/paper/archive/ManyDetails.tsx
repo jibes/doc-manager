@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { fonts, radius, space } from '@/core/design/tokens';
 import { t } from '@/core/i18n';
 import { Icon } from '@/paper/components/Icon';
 import { Button, T } from '@/paper/components/primitives';
+import { discardDetails } from '@/paper/reader/drafts';
 import { Panel } from '@/paper/reader/Panel';
 import { usePalette } from '@/paper/state/prefs';
 import { sharedDetails, writeDetailsMany, type DetailsChange } from './manyDetails';
@@ -25,18 +26,28 @@ export function ManyDetails({ docs, onClose, onDone }: { docs: IndexedDoc[]; onC
   const [bad, setBad] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // Escape closes it (before the list under it reacts).
+  // Closed with changes not saved: asked first, as the details of one document are.
+  const changed = sender !== null || type !== null || date !== null || tag.trim() !== '' || tags.join('\n') !== shared.tags.join('\n');
+  const asking = useRef(false);
+  const close = async () => {
+    if (asking.current) return;
+    asking.current = true;
+    const go = !changed || (await discardDetails());
+    asking.current = false;
+    if (go) onClose();
+  };
+  // Escape closes it (before the list under it reacts); not while it asks.
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || asking.current) return;
       e.preventDefault();
       e.stopPropagation();
-      onClose();
+      void close();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  });
   const addTag = (raw: string) => {
     const words = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (words.length) setTags((x) => [...new Set([...x, ...words])]);
@@ -78,7 +89,7 @@ export function ManyDetails({ docs, onClose, onDone }: { docs: IndexedDoc[]; onC
   );
 
   return (
-    <Panel title={t.detailsMany(docs.length)} onClose={onClose} testID="many-details">
+    <Panel title={t.detailsMany(docs.length)} onClose={() => void close()} testID="many-details">
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.xl - 4, paddingBottom: space.xl, gap: space.lg }}>
         {field('many-sender', t.detailSender, shared.sender, sender, setSender)}
         <View style={{ flexDirection: 'row', gap: space.md }}>

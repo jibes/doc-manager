@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, useRulesUnreadable, withRules, type Proposal } from '@/paper/archive/inbox';
 import type { Details } from '@/paper/archive/pdfInfo';
 import { openDoc } from '@/paper/archive/Results';
-import { discard } from '@/paper/archive/trash';
+import { discard, restore } from '@/paper/archive/trash';
 import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Thumbnail } from '@/paper/components/DocItems';
 import { Field } from '@/paper/components/Field';
@@ -58,6 +58,9 @@ export default function Inbox() {
   // Filing with rules that couldn't be read would file by others (the default ones): it waits for them.
   const rulesUnreadable = useRulesUnreadable((s) => s.unreadable);
   const [notice, setNotice] = useState<string | null>(null);
+  // Undo for the last removed: put back from the trash, and the inbox read again.
+  const [undo, setUndo] = useState<(() => void) | null>(null);
+  const [reread, setReread] = useState(0);
   // While filing makes a document searchable: how far reading its text has come.
   const [progress, setProgress] = useState<Record<string, string>>({});
 
@@ -81,7 +84,7 @@ export default function Inbox() {
     return () => {
       alive = false;
     };
-  }, [archive, here]);
+  }, [archive, here, reread]);
 
   const proposals = (items ?? []).map((item) => withRules(item, rules));
   const pathOf = (item: Proposal) => destination(detailsOf(item, edits[item.entry.id]), item.entry, rules, t.inboxUnknownSender);
@@ -152,7 +155,19 @@ export default function Inbox() {
     const filed = item.duplicateOf?.place;
     if (filed?.kind === 'folder') await libraryActions().followEntry(item.entry, filed.entry).catch(() => {});
     await discard(archive, dir, [item.entry]).then(
-      () => gone(item),
+      (trashed) => {
+        gone(item);
+        setNotice(t.trashedN(1));
+        setUndo(() =>
+          trashed?.length
+            ? () =>
+                void restore(archive, trashed).then(
+                  () => (setReread((n) => n + 1), void refreshInboxCount()),
+                  (e: unknown) => setNotice(message(e)),
+                )
+            : null,
+        );
+      },
       (e: unknown) => setNotice(message(e)),
     );
   };
@@ -184,7 +199,7 @@ export default function Inbox() {
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column }}>
           <ScreenHeader title={t.inboxTitle} up={() => goTab('documents')}>
-            {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push('/rules')} />}
+            {archive && here && <Button testID="inbox-rules" kind="quiet" label={rules.rules.length ? `${t.rulesTitle} · ${rules.rules.length}` : t.rulesTitle} onPress={() => router.push({ pathname: '/rules', params: { from: 'inbox' } })} />}
             {here && proposals.length > 1 && <Button testID="inbox-file-all" kind="quiet" label={t.inboxFileAll(proposals.length)} disabled={filingAll || rulesUnreadable} onPress={() => void fileAll()} />}
           </ScreenHeader>
 
@@ -234,7 +249,7 @@ export default function Inbox() {
           )}
         </View>
       </ScrollView>
-      <Toast message={notice} onDismiss={() => setNotice(null)} />
+      <Toast message={notice} onDismiss={() => (setNotice(null), setUndo(null))} action={undo && notice === t.trashedN(1) ? { label: t.undo, onPress: undo } : undefined} />
     </SubFrame>
   );
 }

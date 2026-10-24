@@ -32,7 +32,7 @@ const RTL_ALL = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]/gu;
  * it is (no order is right for every reader then).
  */
 export function layerWord(text: string): string {
-  const word = text.normalize('NFC').replace(/\p{Cs}/gu, '\ufffd');
+  const word = text.normalize('NFC').replace(/\p{Cs}/gu, '\ufffd').replace(/\p{Cc}/gu, '');
   if (!RTL.test(word) || /[\p{L}\p{N}]/u.test(word.replace(RTL_ALL, ''))) return word;
   return (word.match(/\P{M}\p{M}*|\p{M}+/gu) ?? [])
     .reverse()
@@ -44,8 +44,16 @@ export function layerWord(text: string): string {
 }
 
 /** The font for a text layer, and each text's character codes in it (a glyph per character: 0 for one it lacks). */
-export function layerFont(texts: Iterable<string>): { data: Uint8Array; charcodes: (text: string) => number[] } {
-  const codes = codePointsOf(texts);
+export function layerFont(texts: Iterable<string>, max = 6000): { data: Uint8Array; charcodes: (text: string) => number[] } {
+  const all = [...texts];
+  let codes = codePointsOf(all);
+  // More than a font holds: the most used ones.
+  if (codes.length > max) {
+    const uses = new Map<number, number>();
+    for (const t of all) for (const c of t) uses.set(c.codePointAt(0)!, (uses.get(c.codePointAt(0)!) ?? 0) + 1);
+    const kept = new Set([...codes].sort((a, b) => (uses.get(b) ?? 0) - (uses.get(a) ?? 0)).slice(0, max));
+    codes = codes.filter((c) => kept.has(c));
+  }
   const glyph = new Map(codes.map((c, i) => [c, i + 1]));
   return { data: fontFor(codes), charcodes: (text) => Array.from(text, (c) => glyph.get(c.codePointAt(0)!) ?? 0) };
 }
