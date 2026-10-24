@@ -1,6 +1,7 @@
 import type { DocHandle } from '@/core/engine/types';
 import { fingerprint } from '@/core/lib/bytes';
 import { repo } from '@/core/storage';
+import { libraryActions } from '@/paper/state/library';
 
 /**
  * Whether the document's file changed since `handle` was opened from it (or last written from it): another
@@ -17,4 +18,5 @@ export async function writeFrom(id: string, handle: DocHandle, bytes: ArrayBuffe
   const mark = fingerprint(bytes);
   await repo.writeFile(id, bytes);
   handle.origin = mark;
+  await libraryActions().rewritten(id, bytes);
 }

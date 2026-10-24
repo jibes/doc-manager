@@ -84,6 +84,11 @@ type LibraryState = {
   /** The details written into the file changed: the library shows its new title and sender. */
   setDetails(id: string, details: { title: string; author?: string }): void;
   markOpened(id: string): void;
+  /**
+   * The document's file was written anew here (saved, its text read again, its pages cleaned up): its key may
+   * have changed with its first bytes; what this device remembers about it (when opened, where left) follows.
+   */
+  rewritten(id: string, bytes: ArrayBuffer): Promise<void>;
   /** The document is now this file (it was copied there): the library points at it, keeping everything else. */
   linkTo(id: string, item: ImportItem): Promise<void>;
   /** Changes from elsewhere (another device's reading, a computed share key), saved as they are. */
@@ -611,6 +616,16 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     patchDoc: (id, changes) => patch(id, (d) => ({ ...d, ...changes })),
+
+    async rewritten(id, bytes) {
+      const d = get().docs.find((x) => x.id === id);
+      if (!d?.shareKey || d.viewed) return;
+      const key = await docKey(bytes);
+      if (key === d.shareKey) return;
+      const known = useCache.getState().docs.get(d.shareKey);
+      if (known) cache(key, { ...known, ...useCache.getState().docs.get(key) });
+      patch(id, (x) => ({ ...x, shareKey: key }));
+    },
 
     markOpened: (id) => {
       patch(id, (d) => ({ ...d, openedAt: Date.now() }));

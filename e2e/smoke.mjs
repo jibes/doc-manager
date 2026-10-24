@@ -2300,6 +2300,28 @@ async function lastRead() {
   await page.getByTestId('reader').waitFor();
   await page.waitForTimeout(1000);
   check(/^2/.test((await page.getByTestId('page-label').innerText()).trim()), `last read: opened again, it is at the end where it was left (${await page.getByTestId('page-label').innerText()})`);
+  // Saved (the file written anew: its first bytes, and so its key, change): still last opened, after a reload too.
+  // The one added first is saved, so its date added can't stand in for when it was opened.
+  await page.keyboard.press('Escape');
+  await docRows(page).filter({ hasText: 'Tagged' }).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(800);
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click().catch(() => {});
+  await page.keyboard.press('Escape');
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Kept place');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('save').click();
+  await page.getByTestId('save').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(6000);
+  await page.reload();
+  first = '';
+  for (let i = 0; i < 40 && !first; i++) first = await page.waitForTimeout(250).then(() => docRows(page).first().innerText().catch(() => ''));
+  await page.waitForTimeout(3000);
+  first = await docRows(page).first().innerText().catch(() => '');
+  check(/tagged/i.test(first), `last read: saved, it stays last opened, after a reload too (${first.split('\n')[0]})`);
   await ctx.close();
 }
 
@@ -2693,6 +2715,38 @@ async function debugLog() {
   const [dl2] = await Promise.all([page.waitForEvent('download'), vis('debug-log-export').click()]);
   const after = readFileSync(await dl2.path(), 'utf8');
   check(!/old     entry|addNote/.test(after), 'debug-log: cleared');
+  await ctx.close();
+}
+
+// Selecting several lines with the mouse: ending in the white space after a line ends the selection there, not
+// lines further on (the browser took the layer's end); upwards too.
+async function multiline() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`multiline: ${e.message}`));
+  await openFixture(page, 'columns.pdf');
+  await page.waitForTimeout(1500);
+  const spans = await page.evaluate(() =>
+    [...document.querySelector('[data-testid="text-layer"]').querySelectorAll('span')].map((s) => {
+      const r = s.getBoundingClientRect();
+      return { t: s.textContent, x: r.x, y: r.y, w: r.width, h: r.height };
+    }),
+  );
+  const line = (start) => spans.find((s) => s.t.startsWith(start));
+  const drag = async (a, ax, b, bx) => {
+    await page.mouse.move(ax, a.y + a.h / 2);
+    await page.mouse.down();
+    await page.mouse.move(bx, b.y + b.h / 2, { steps: 20 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    return page.evaluate(() => getSelection().toString());
+  };
+  const from = line('them. A good index');
+  const to = line('trail forks. Nothing');
+  const past = await drag(from, from.x + 1, to, to.x + to.w + 20);
+  check(past.startsWith('them. A good') && past.trim().endsWith('but the order of'), `multiline: dragging into the white space after a line ends at that line (${JSON.stringify(past.slice(-40))})`);
+  const up = await drag(to, to.x + 1, from, from.x + from.w + 20);
+  check(!/trail forks/.test(up) && /one can walk through/.test(up) && /references tie/.test(up), `multiline: …and upwards (${JSON.stringify(up.slice(0, 40))})`);
   await ctx.close();
 }
 
@@ -3323,6 +3377,7 @@ await step('page-notes', pageNotes);
 await step('undo', undoRedo);
 await step('changed', changedElsewhere);
 await step('debug-log', debugLog);
+await step('multiline', multiline);
 await step('desktop-list', desktopList);
 await step('again', again);
 await step('docked', docked);

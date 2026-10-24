@@ -1,5 +1,3 @@
-import { changedElsewhere } from './versions';
-import { log } from '@/core/lib/log';
 import { create } from 'zustand';
 
 import { engine } from '@/core/engine';
@@ -9,7 +7,8 @@ import { aiReady, aiTitle, type AiDescription } from '@/paper/scan/ai';
 import { pdfFilename } from '@/paper/scan/export';
 import { passwordFor } from '@/paper/state/password';
 import { usePrefs } from '@/paper/state/prefs';
-import { useLibrary } from '@/paper/state/library';
+import { libraryActions, useLibrary } from '@/paper/state/library';
+import { log } from '@/core/lib/log';
 import { readStored, writeStored } from '@/core/lib/stored';
 import { repo, type DocRecord } from '@/core/storage';
 import { detailsOf } from './details';
@@ -17,6 +16,7 @@ import { childDir, INBOX } from './dirs';
 import { improveWithAi } from './improve';
 import { infoFor, withInfo } from './pdfInfo';
 import { makeSearchable, pagesWithoutText } from './searchable';
+import { changedElsewhere } from './versions';
 
 /**
  * Reading text, in the background, one document after another: whatever is added (files, a document kept from
@@ -202,6 +202,7 @@ async function readOne(job: Job, again = false): Promise<Outcome> {
       return await readOne(job, true);
     }
     await repo.writeFile(rec.id, bytes);
+    await libraryActions().rewritten(rec.id, bytes);
     void import('./indexer').then((m) => m.invalidate(rec.id));
     if (describe?.name && found) await nameFile(rec.id, found).catch(() => {});
     return { result: 'read', said: said ?? (describe ? null : t.searchableDone), changed: true, aiFailed };

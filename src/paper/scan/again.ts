@@ -58,6 +58,7 @@ export async function saveAgain(replaces: Replaces, title: string, pages: Page[]
   });
   const bytes = withInfo(new Uint8Array(await pdf.arrayBuffer()), infoFor(details, replaces.other));
   await repo.writeFile(replaces.id, bytes.buffer);
+  await libraryActions().rewritten(replaces.id, bytes.buffer);
   // The text read from the old pages is theirs, not these.
   await repo.clearOcr(replaces.id).catch(() => {});
   libraryActions().patchDoc(replaces.id, { bytes: bytes.byteLength });
