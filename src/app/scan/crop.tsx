@@ -25,6 +25,13 @@ export default function ScanCrop() {
   useEffect(() => {
     if (loaded && !page) goBack();
   }, [loaded, page]);
+  // Esc leaves without changing the corners, as Cancel does.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && !e.defaultPrevented && goBack();
+    addEventListener('keydown', key);
+    return () => removeEventListener('keydown', key);
+  }, []);
 
   if (Platform.OS !== 'web') return <Unsupported />;
   if (!page) return <View style={styles.screen} />;

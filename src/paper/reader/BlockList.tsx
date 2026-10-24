@@ -217,6 +217,15 @@ export function BlockList({
     timerRef.current = setTimeout(locate, 80);
   };
   useEffect(() => () => clearTimeout(timerRef.current), []);
+  // Another column width (the device turned, the window resized, the text larger): the block being read stays
+  // at the top, rather than the same distance from the start (every block above is taller or shorter now).
+  const columnRef = useRef(column);
+  useEffect(() => {
+    if (columnRef.current === column) return;
+    columnRef.current = column;
+    const at = currentRef.current;
+    requestAnimationFrame(() => scrollToIndex(at));
+  }, [column, scrollToIndex]);
 
   const downRef = useRef<{ x: number; y: number; at: number; scroll: number } | null>(null);
   const onPointerDown = (e: { nativeEvent: { clientX?: number; clientY?: number; pageX?: number; pageY?: number } }) => {

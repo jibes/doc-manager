@@ -69,7 +69,7 @@ CHAPTERS = [
     ]),
     ('Making it comfortable', 'Pages should look right in a bright office and in a dark room.', [
         ('Appearance', [
-            'The Aa button sets the theme: Light, Sepia, Dark or Black, or Auto to follow your system. Fit '
+            'The Aa button sets the theme: Light, Dark, or Auto to follow your system. Fit '
             'width fills the screen with the page; Fit page shows each page whole. Zoom with the buttons, '
             'with a pinch, or with Ctrl and the scroll wheel.',
         ]),

@@ -26,6 +26,7 @@ import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled,
 import { deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/paper/archive/batch';
 import { readAdded, useIntake } from '@/paper/archive/intake';
 import { aiReady } from '@/paper/scan/ai';
+import { startScan } from '@/paper/scan/start';
 import { Toast } from '@/paper/components/Toast';
 import { useNotice } from '@/paper/components/useNotice';
 import { fonts, radius, space } from '@/core/design/tokens';
@@ -151,7 +152,7 @@ export default function Documents() {
   // The model reading the text is asked for on each add (from the default in Settings), where one is set up.
   const addMenu = (ai = improveAdded) =>
     showActions(t.addTitle, [
-      ...(scanSupported ? [{ key: 'add-camera', icon: 'camera' as IconName, label: t.addCamera, onPress: () => router.push('/scan') }] : []),
+      ...(scanSupported ? [{ key: 'add-camera', icon: 'camera' as IconName, label: t.addCamera, onPress: () => void startScan() }] : []),
       { key: 'add-files', icon: 'documents' as IconName, label: t.addFiles, onPress: () => void addFiles(aiSet && ai) },
       // A file only to look at (kept when something is saved into it).
       { key: 'add-open', icon: 'pageView' as IconName, label: t.addOpen, onPress: async () => void openFiles(await pickPdfs()) },
@@ -502,7 +503,7 @@ export default function Documents() {
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (mod && key === 'k') return e.preventDefault(), setPalette(true);
-      if (mod && key === 'n' && scanSupported) return e.preventDefault(), router.push('/scan');
+      if (mod && key === 'n' && scanSupported) return e.preventDefault(), void startScan();
       if (mod && key === 'o') return e.preventDefault(), void pickPdfs().then((items) => void (items.length && openFiles(items)));
       const target = e.target as HTMLElement | null;
       // The document beside the list has its own keys.
@@ -559,7 +560,7 @@ export default function Documents() {
 
   // ⌘K: documents by title, what to filter by, and every action of the screen.
   const paletteItems = (): PaletteItem[] => [
-    ...(scanSupported ? [{ key: 'act-scan', icon: 'camera' as IconName, label: t.addCamera, hint: shortcut('N'), run: () => router.push('/scan') }] : []),
+    ...(scanSupported ? [{ key: 'act-scan', icon: 'camera' as IconName, label: t.addCamera, hint: shortcut('N'), run: () => void startScan() }] : []),
     { key: 'act-files', icon: 'plus' as IconName, label: t.addFiles, run: () => void addFiles(improveAdded) },
     { key: 'act-settings', icon: 'settings' as IconName, label: t.settings, run: () => router.push('/settings') },
     ...moreItems.map((a) => ({ key: `act-${a.key}`, icon: a.icon, label: a.label, run: a.onPress })),

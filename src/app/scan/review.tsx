@@ -167,10 +167,17 @@ export default function ScanReview() {
   };
 
   const discard = async () => {
-    const answer = await ask({ title: t.scanDiscardTitle, body: t.scanDiscardBody(pages.length), confirm: t.scanDiscard, destructive: true });
+    // Pages of a document being cleaned up: only the pictures go; the document stays, and is where this goes back to.
+    const was = replaces;
+    const answer = await ask(
+      was
+        ? { title: t.againStopTitle, body: t.againStopBody(was.title), confirm: t.scanDiscard }
+        : { title: t.scanDiscardTitle, body: t.scanDiscardBody(pages.length), confirm: t.scanDiscard, destructive: true },
+    );
     if (answer === null) return;
     clear();
-    router.replace('/');
+    if (was) router.replace({ pathname: '/read/[id]', params: { id: was.id } });
+    else router.replace('/');
   };
 
   if (Platform.OS !== 'web') return <Unsupported />;
@@ -374,5 +381,5 @@ const styles = StyleSheet.create({
   kicker: { marginTop: space.xxl, marginBottom: space.sm },
   card: { borderWidth: 1, borderRadius: radius.md, marginTop: space.xl, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg },
-  bar: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: space.md, borderTopWidth: 1 },
+  bar: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: space.md, borderTopWidth: 1, zIndex: 10 },
 });

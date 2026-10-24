@@ -115,14 +115,19 @@ export async function importFolder(onProgress: (done: number, total: number) => 
     };
     await walk(undefined, 0);
     const library = useLibrary.getState();
+    // Counted as new only where the library didn't have it (a folder imported again adds nothing).
+    const had = new Set(useLibrary.getState().docs.map((d) => d.id));
     let done = 0;
+    let added = 0;
     for (const { entry } of found) {
       onProgress(done, found.length);
       const file = await folders.read(picked.id, entry);
-      readAdded(await library.importFiles([{ name: entry.name, size: entry.size || file.size, file }]));
+      const recs = await library.importFiles([{ name: entry.name, size: entry.size || file.size, file }]);
+      added += recs.filter((r) => !had.has(r.id)).length;
+      readAdded(recs);
       done++;
     }
-    return done;
+    return added;
   } finally {
     // Let go of, unless it is the Tessel folder's own (the same ID where a folder has one: the Android app's).
     if (picked.id !== tesselRoot()) await folders.forget(picked.id).catch(() => {});

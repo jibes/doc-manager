@@ -2516,6 +2516,20 @@ async function again() {
   let repictured = pictured;
   for (let i = 0; i < 40 && repictured === pictured; i++) repictured = await page.waitForTimeout(250).then(picture);
   check(!!pictured && !!repictured && repictured !== pictured, 'again: the list shows its new first page');
+  // Cleaning up left without saving: a new scan asks about those pages (saved, they would replace the document's).
+  await docRows(page).first().click();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-again').click();
+  await page.waitForURL(/\/scan\/review/, { timeout: 60000 });
+  await page.getByTestId('scan-tile').nth(1).waitFor({ timeout: 60000 });
+  await page.goto(BASE);
+  await page.getByTestId('add-menu').locator('visible=true').first().click();
+  await page.getByTestId('action-add-camera').click();
+  const askedNew = await page.getByText('Pages being cleaned up').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  await page.getByTestId('ask-other').click().catch(() => {});
+  await page.waitForURL(/\/scan/, { timeout: 10000 }).catch(() => {});
+  const fresh = await page.evaluate(() => new Promise((r) => setTimeout(() => r(document.body.innerText), 800)));
+  check(askedNew && !/Saving replaces the pages/.test(fresh), 'again: a new scan asks about pages left being cleaned up, and starts empty');
   await ctx.close();
 }
 
