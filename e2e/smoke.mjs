@@ -2645,6 +2645,57 @@ async function changedElsewhere() {
   await ctx.close();
 }
 
+// The debug log: switched on in Settings, what the app does is kept on the device; exported as a file; its size
+// kept under its limit (the oldest go); cleared.
+async function debugLog() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`debug-log: ${e.message}`));
+  // Left from before: 6 MB of old entries, over the 4 MB limit.
+  await page.goto(BASE);
+  await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const r = indexedDB.open('tessel-log');
+      r.onupgradeneeded = () => r.result.createObjectStore('chunks');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const tx = db.transaction('chunks', 'readwrite');
+    const old = `${'2020-01-01T00:00:00.000Z INFO  test old     entry\n'.repeat(Math.ceil((64 * 1024) / 49))}`;
+    for (let i = 0; i < 96; i++) tx.objectStore('chunks').put(old, `${String(1577836800000 + i).padStart(14, '0')}-old-${i}`);
+    await new Promise((r) => (tx.oncomplete = r));
+    db.close();
+  });
+  await vis('home-settings').click();
+  await vis('debug-log-switch').click();
+  check((await vis('debug-log-switch').getAttribute('aria-checked')) === 'true', 'debug-log: switched on in Settings');
+  await openFixture(page, 'columns.pdf');
+  await page.getByTestId('page-note').click();
+  await page.getByTestId('note-input').fill('Logged');
+  await page.getByTestId('note-save').click();
+  await page.getByTestId('save').click();
+  await page.waitForTimeout(1500);
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('debug-log-note').waitFor();
+  await page.waitForTimeout(1000);
+  const [dl] = await Promise.all([page.waitForEvent('download'), vis('debug-log-export').click()]);
+  const text = readFileSync(await dl.path(), 'utf8');
+  check(/^tessel-log-.*\.txt$/.test(dl.suggestedFilename()) && /^Tessel \d+\.\d+\.\d+ debug log/.test(text), `debug-log: exported as a text file (${dl.suggestedFilename()})`);
+  if (process.env.DUMP) writeFileSync(`${process.env.DUMP}/log.txt`, text);
+  const has = (re) => re.test(text);
+  check(has(/ nav +\/read\//) && has(/ engine +open/) && has(/ storage +writeFile\(/) && has(/ log +debug log on/), 'debug-log: navigation, the engine, storage and switching it on are in it');
+  check(!has(/sk-|Logged/), 'debug-log: no keys and no document text in it');
+  check(text.length <= 4.2 * 1024 * 1024 && text.split('old     entry').length < 96 * 1300, `debug-log: kept under its limit, the oldest going first (${Math.round(text.length / 1024)} KB)`);
+  await vis('debug-log-clear').click();
+  await page.waitForTimeout(500);
+  const [dl2] = await Promise.all([page.waitForEvent('download'), vis('debug-log-export').click()]);
+  const after = readFileSync(await dl2.path(), 'utf8');
+  check(!/old     entry|addNote/.test(after), 'debug-log: cleared');
+  await ctx.close();
+}
+
 // Wide desktop windows: Find and Details stay open beside the pages, each closed on its own (and remembered);
 // the document's actions are in the bar, one click each.
 async function docked() {
@@ -3271,6 +3322,7 @@ await step('annotations', annotations);
 await step('page-notes', pageNotes);
 await step('undo', undoRedo);
 await step('changed', changedElsewhere);
+await step('debug-log', debugLog);
 await step('desktop-list', desktopList);
 await step('again', again);
 await step('docked', docked);

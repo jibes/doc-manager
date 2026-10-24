@@ -1,4 +1,5 @@
 import { createStore, del, entries, get, getMany, promisifyRequest, set, values } from 'idb-keyval';
+import { traced } from '@/core/lib/log';
 
 import type { TextLine } from '@/core/engine/types';
 import { ensurePermission, isFileHandle, isGranted, writeFile, type FileHandle } from '@/core/lib/fsa';
@@ -23,7 +24,7 @@ const dropOcr = (id: string) => ocr('readwrite', (s) => promisifyRequest(s.delet
 // Ask the browser not to evict the library under storage pressure.
 navigator.storage?.persist?.().catch(() => {});
 
-export const repo: LibraryRepo = {
+export const repo: LibraryRepo = traced('storage', {
   list: () => values<DocRecord>(meta),
   put: (rec) => set(rec.id, rec, meta),
   async remove(id) {
@@ -126,4 +127,4 @@ export const repo: LibraryRepo = {
     viewed.delete(id);
     for (const k of [...viewedOcr.keys()]) if (k.startsWith(`${id}#`)) viewedOcr.delete(k);
   },
-};
+});

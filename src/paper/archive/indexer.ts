@@ -1,4 +1,5 @@
 import { createStore, set, values, type UseStore } from 'idb-keyval';
+import { log } from '@/core/lib/log';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
@@ -418,7 +419,7 @@ async function run(): Promise<void> {
   const started = (lastWalk = Date.now());
   const found = await candidates();
   // The places themselves couldn't be listed: nothing is known to be gone.
-  if (!found) return;
+  if (!found) return void log.warn('index', 'places not listed: pass skipped');
   const { list: listed, unlisted, conflicts } = found;
   // What was resolved while the folders were being listed is gone already.
   const list = listed.filter((c) => !settledSince(c.key, started));
@@ -444,15 +445,18 @@ async function run(): Promise<void> {
     return read;
   });
   useIndex.setState({ running: todo.length > 0, done: 0, total: todo.length });
+  log.info('index', `pass: ${list.length} files, ${gone.length} gone, ${todo.length} to read, ${unlisted.length} folders not listed, ${conflicts.length} conflicts`);
   for (const [i, c] of todo.entries()) {
     await whileOpen();
     const doc = await read(c);
     if (doc) put(doc);
+    log.debug('index', `read ${c.key} ${c.size} B`, doc ? { failed: !!doc.failed } : 'not read');
     useIndex.setState({ done: i + 1 });
     // Let the app breathe between documents.
     await new Promise((r) => setTimeout(r, 30));
   }
   useIndex.setState({ running: false, duplicates: archiveDuplicates() });
+  log.info('index', `pass done in ${Math.round((Date.now() - started) / 1000)} s`);
 }
 
 /**

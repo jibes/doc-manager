@@ -1,4 +1,5 @@
 import { desktop } from '@/core/lib/desktop';
+import { log } from '@/core/lib/log';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
 import type { PdfWord } from './engine/pdf/writer';
@@ -196,6 +197,28 @@ export function parseResult(text: string, pageCount: number): AiResult {
  * own host, which an address's CORS rules (set up for the web app's address, or for none) don't allow.
  */
 async function post(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
+  // Logged: where, how much and how it went (not the key, not the pages).
+  const started = performance.now();
+  const where = (() => {
+    try {
+      const u = new URL(url);
+      return `${u.host}${u.pathname}`;
+    } catch {
+      return 'bad address';
+    }
+  })();
+  log.info('ai', `POST ${where} ${init.body.length} chars`);
+  try {
+    const r = await request(url, init);
+    log[r.ok ? 'info' : 'warn']('ai', `${where} → ${r.status} in ${Math.round(performance.now() - started)} ms`);
+    return r;
+  } catch (e) {
+    log.warn('ai', `${where} failed after ${Math.round(performance.now() - started)} ms`, e);
+    throw e;
+  }
+}
+
+async function request(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
   // The desktop app makes the request itself: an address's cross-origin rules don't know the app's origin.
   if (desktop) {
     init.signal?.throwIfAborted();

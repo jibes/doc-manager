@@ -24,6 +24,12 @@ function save(file: File) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
+/** A file made here (the debug log): saved where the user says (Android app), else downloaded. */
+export async function exportFile(file: File) {
+  if (shell) return sendToShell(file, file.name, 'save');
+  save(file);
+}
+
 export async function downloadDoc(doc: DocRecord, current?: Current) {
   const file = await asFile(doc, current);
   // Android app: the system save dialog (any folder, or a cloud drive).

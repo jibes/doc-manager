@@ -1,4 +1,5 @@
 import { createStore, del, entries, set } from 'idb-keyval';
+import { traced } from './log';
 
 import { t } from '@/core/i18n';
 import { PartlyDone, type FolderEntry, type FolderRoot, type FoldersApi } from './folderTypes';
@@ -312,4 +313,4 @@ const unsupported: FoldersApi = {
 };
 
 const ownFileSystem = typeof navigator !== 'undefined' && typeof navigator.storage?.getDirectory === 'function';
-export const folders: FoldersApi = shell ? shellFolders : ownFileSystem ? browserFolders : unsupported;
+export const folders: FoldersApi = traced('folders', shell ? shellFolders : ownFileSystem ? browserFolders : unsupported);

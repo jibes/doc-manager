@@ -3,6 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { version } from '../../package.json';
+import { clearLog, LOG_MAX_CHARS, logSize, readLog } from '@/core/lib/log';
 
 import { Icon } from '@/paper/components/Icon';
 import { Button, T } from '@/paper/components/primitives';
@@ -19,7 +20,7 @@ import { shell } from '@/core/lib/shell';
 import { showActions, type Action } from '@/paper/state/actions';
 import { forget, viewedCount } from '@/paper/state/viewed';
 import { useLibrary } from '@/paper/state/library';
-import { downloadDoc } from '@/core/lib/fileActions';
+import { downloadDoc, exportFile } from '@/core/lib/fileActions';
 import { schedule } from '@/paper/archive/indexer';
 import { AppearancePicker } from '@/paper/reader/AppearancePanel';
 import { aiInsecure, aiReady, aiUrl, testAi, type AiApi } from '@/paper/scan/ai';
@@ -151,6 +152,7 @@ export default function Settings() {
     ...(folders.supported ? ([['folders', t.tesselFolderTitle]] as [string, string][]) : []),
     ...(folders.supported && archive ? ([['sync', t.syncTitle]] as [string, string][]) : []),
     ...(Platform.OS === 'web' ? ([['ai', t.aiTitle]] as [string, string][]) : []),
+    ...(Platform.OS === 'web' ? ([['debug', t.debugTitle]] as [string, string][]) : []),
   ];
   return (
     <SubFrame sub="settings">
@@ -290,6 +292,12 @@ export default function Settings() {
           </View>
         )}
 
+        {Platform.OS === 'web' && (
+          <View {...mark('debug')}>
+            <DebugSection say={setError} />
+          </View>
+        )}
+
         {viewed > 0 && (
           <>
             <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
@@ -365,6 +373,65 @@ function SyncSection() {
           </T>
         </>
       )}
+    </>
+  );
+}
+
+/** The debug log: on or off, its size, exported as a file (for whoever looks into a problem), or cleared. */
+function DebugSection({ say }: { say: (s: string) => void }) {
+  const p = usePalette();
+  const on = usePrefs((s) => s.debugLog);
+  const setPrefs = usePrefs((s) => s.set);
+  const [size, setSize] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () => void logSize().then((n) => alive && setSize(n), () => {});
+    read();
+    const every = setInterval(read, 5000);
+    return () => {
+      alive = false;
+      clearInterval(every);
+    };
+  }, [on]);
+  const exportLog = async () => {
+    const body = await readLog();
+    const head = [`Tessel ${version} debug log, exported ${new Date().toISOString()}`, `${navigator.userAgent}`, `Debug log ${on ? 'on' : 'off'} (off: warnings and errors only)`, ''].join('\n');
+    const day = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    await exportFile(new File([head, '\n', body], `tessel-log-${day}.txt`, { type: 'text/plain' }));
+  };
+  return (
+    <>
+      <T v="kicker" color={p.muted} style={[styles.kicker, { marginTop: space.xxl }]}>
+        {t.debugTitle}
+      </T>
+      <Pressable
+        testID="debug-log-switch"
+        accessibilityRole="switch"
+        accessibilityLabel={t.debugLog}
+        aria-checked={on}
+        onPress={() => setPrefs({ debugLog: !on })}
+        style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.card, styles.row, { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg }]}
+      >
+        <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+          {t.debugLog}
+        </T>
+        <View style={[styles.track, { backgroundColor: on ? p.accent : p.muted }]}>
+          <View style={[styles.knob, { backgroundColor: p.surface, transform: [{ translateX: on ? 18 : 0 }] }]} />
+        </View>
+      </Pressable>
+      <T v="caption" color={p.muted} style={styles.note} testID="debug-log-note">
+        {t.debugLogNote(t.fileSize(LOG_MAX_CHARS))} {size !== null ? t.debugLogSize(t.fileSize(size)) : ''}
+      </T>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+        <Button testID="debug-log-export" kind="quiet" icon="share" label={t.debugExport} onPress={() => void exportLog().catch((e: unknown) => say(opError(e)))} />
+        <Button
+          testID="debug-log-clear"
+          kind="quiet"
+          icon="trash"
+          label={t.debugClear}
+          onPress={() => void clearLog().then(() => (setSize(0), say(t.debugCleared)), (e: unknown) => say(opError(e)))}
+        />
+      </View>
     </>
   );
 }

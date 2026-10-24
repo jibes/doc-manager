@@ -1,4 +1,5 @@
 import { changedElsewhere } from './versions';
+import { log } from '@/core/lib/log';
 import { create } from 'zustand';
 
 import { engine } from '@/core/engine';
@@ -111,7 +112,12 @@ async function work() {
     current = job.rec.id;
     kept.current = job;
     waiting();
-    const r = await readOne(job).catch((e: unknown): Outcome => ({ result: 'failed', said: job.asked ? whyNot(e, job.ai) : null, changed: false }));
+    log.info('intake', `${job.ai ? 'improve' : 'read'} ${job.rec.id}`, { asked: job.asked, describe: !!job.describe });
+    const r = await readOne(job).catch((e: unknown): Outcome => {
+      log.warn('intake', `${job.rec.id} failed`, e);
+      return { result: 'failed', said: job.asked ? whyNot(e, job.ai) : null, changed: false };
+    });
+    log.info('intake', `${job.rec.id}: ${r.result}`, { changed: r.changed, aiFailed: r.aiFailed });
     // The reader tells what it asked for itself; the summary is about what was added.
     if (!job.asked) {
       if (r.result === 'read') read++;

@@ -6,7 +6,7 @@ import { Newsreader_400Regular_Italic } from '@expo-google-fonts/newsreader/400R
 import { Newsreader_500Medium } from '@expo-google-fonts/newsreader/500Medium';
 import { Newsreader_600SemiBold } from '@expo-google-fonts/newsreader/600SemiBold';
 import { useFonts } from 'expo-font';
-import { router, Stack } from 'expo-router';
+import { router, Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -20,6 +20,8 @@ import { PasswordDialog } from '@/paper/components/PasswordDialog';
 import { RootToast, sayRoot } from '@/paper/components/RootToast';
 import { DesktopBridge } from '@/paper/components/DesktopBridge';
 import { ShellOpen } from '@/paper/components/ShellOpen';
+import { desktop } from '@/core/lib/desktop';
+import { log, setLogging, watchErrors } from '@/core/lib/log';
 import { shell } from '@/core/lib/shell';
 import { useAmbientLight } from '@/paper/state/ambient';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
@@ -30,6 +32,7 @@ import { showInPane } from '@/paper/state/pane';
 import { t } from '@/core/i18n';
 import { showInPicker } from '@/paper/archive/tessel';
 import { useLibrary, type ImportItem } from '@/paper/state/library';
+import { version } from '../../package.json';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -47,7 +50,20 @@ async function dropped(items: ImportItem[]) {
   else if (added.length) sayRoot(t.filesAddedN(added.length));
 }
 
+/** The debug log: on as Settings says; errors (and where the app was) always. */
+function useLog() {
+  const on = usePrefs((s) => s.debugLog);
+  useEffect(() => setLogging(on), [on]);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    watchErrors({ version, app: shell ? 'android' : desktop ? 'desktop' : 'web', agent: navigator.userAgent, screen: `${screen.width}×${screen.height}@${devicePixelRatio}`, language: navigator.language });
+  }, []);
+  const path = usePathname();
+  useEffect(() => log.info('nav', path), [path]);
+}
+
 export default function RootLayout() {
+  useLog();
   const p = usePalette();
   useAmbientLight(usePrefs((s) => s.appearance) === 'auto');
   const [loaded, error] = useFonts({

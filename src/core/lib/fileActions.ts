@@ -29,6 +29,8 @@ export async function shareDocs(docs: DocRecord[]) {
   for (const d of docs) await shareDoc(d);
 }
 
+export async function exportFile(_file: globalThis.File) {}
+
 export async function downloadDoc(doc: DocRecord, _current?: Current) {
   await shareDoc(doc);
 }

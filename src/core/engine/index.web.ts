@@ -1,4 +1,5 @@
 import { BASE } from '@/core/lib/base';
+import { brief, log, logging } from '@/core/lib/log';
 import { takeEarlyWorker } from '@/core/lib/shell';
 
 import { fingerprint } from '@/core/lib/bytes';
@@ -45,7 +46,8 @@ class WorkerClient {
     opts: { signal?: AbortSignal; transfer?: Transferable[]; onProgress?: Pending['onProgress'] } = {},
   ): Promise<ResultMap[T]> {
     const id = this.seq++;
-    return new Promise((resolve, reject) => {
+    const started = performance.now();
+    const done = new Promise<ResultMap[T]>((resolve, reject) => {
       if (opts.signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
       this.pending.set(id, { resolve: resolve as Pending['resolve'], reject, onProgress: opts.onProgress });
       // Abort asks the worker to drop the job but settles only when the worker answers,
@@ -62,6 +64,13 @@ class WorkerClient {
       );
       this.w.postMessage({ id, type, ...body } as unknown as Request, opts.transfer ?? []);
     });
+    // Each request to the engine and its time (drawing a page is debug; failures are warnings).
+    const what = `${type} ${brief({ ...body, bytes: undefined }, 1)}`;
+    done.then(
+      () => logging() && log.debug('engine', `${what} ${Math.round(performance.now() - started)} ms`),
+      (e: unknown) => (e instanceof DOMException && e.name === 'AbortError' ? undefined : log.warn('engine', `${what} failed`, e)),
+    );
+    return done;
   }
 }
 
