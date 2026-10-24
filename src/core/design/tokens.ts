@@ -79,8 +79,8 @@ export const palettes: Record<ThemeName, Palette> = {
     markRing: '#FFB238',
     scrim: 'rgba(0,0,0,0.45)',
     glass: 'rgba(34,35,39,0.80)',
-    // The page's white is the app's own white (its light text), not a dimmed grey that reads as a poor scan.
-    page: { cssFilter: 'brightness(0.92) sepia(0.6)', blend: { color: '#ECE7DC', mode: 'multiply' }, base: '#ECE7DC' },
+    // A page's white only a little dimmed, and neutral: no sepia tint (it read as an old or poor scan).
+    page: { cssFilter: 'brightness(0.92)', blend: { color: '#EBEBEB', mode: 'multiply' }, base: '#EBEBEB' },
     inverted: { cssFilter: 'invert(0.86) hue-rotate(180deg) contrast(0.94)', blend: { color: '#DCDCDC', mode: 'difference' }, base: '#2B2B2B' },
     shadow: 'rgba(0,0,0,0.5)',
   },
