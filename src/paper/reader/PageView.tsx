@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, type GestureResponderEvent } from 'react-native';
 
 import { T } from '@/paper/components/primitives';
 import { elevation, type Palette } from '@/core/design/tokens';
@@ -22,7 +22,8 @@ type Props = {
   palette: Palette;
   hits?: SearchHit[];
   activeHit?: SearchHit | null;
-  onPress?: () => void;
+  /** A click or tap on the page: where on it (0..1 across and down), and where on the screen. */
+  onPress?: (page: number, at: { x: number; y: number } | null, client: { x: number; y: number } | null) => void;
   onLink?: (link: PageLink) => void;
   /** A form field on this page was changed. */
   /** Before a field changes (undo comes back to here). */
@@ -100,9 +101,18 @@ export const PageView = memo(function PageView({ page, width, height, cache, pal
   const raster = useRaster(cache, page, width);
   const extras = usePageExtras(cache.handle, page);
   const form = useFields(cache, page, beforeEdit, onEdited);
+  const press = (e: GestureResponderEvent) => {
+    if (!onPress) return;
+    const ev = e.nativeEvent as unknown as { clientX?: number; clientY?: number; pageX?: number; pageY?: number };
+    const x = ev.clientX ?? ev.pageX;
+    const y = ev.clientY ?? ev.pageY;
+    const box = Platform.OS === 'web' ? (e.currentTarget as unknown as HTMLElement | null)?.getBoundingClientRect?.() : undefined;
+    if (x === undefined || y === undefined || !box?.width) return onPress(page, null, null);
+    onPress(page, { x: (x - box.left) / box.width, y: (y - box.top) / box.height }, { x, y });
+  };
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       role="group"
       aria-label={t.pageN(page + 1)}
       style={[

@@ -53,7 +53,7 @@ import { anchorAt, computeLayout, contentWidth, positionAt, readingPage, scrollF
 import { PageView } from './PageView';
 import { ReflowView, type ReflowApi } from './ReflowView';
 import { NoteDialog, type NoteRequest } from './NoteDialog';
-import { HIGHLIGHT_COLORS } from './selection';
+import { HIGHLIGHT_COLORS, markAt, RECOLORABLE } from './selection';
 import { SelectionBubble, type PageRects } from './SelectionBubble';
 import { useEdits } from './useEdits';
 import { usePane } from '@/paper/state/pane';
@@ -907,6 +907,51 @@ export function Reader({
     if (Platform.OS === 'web' && window.getSelection()?.toString()) return;
     if (panel && !wide) setPanel(null);
   }, [panel, wide]);
+  // A click on a highlight or note on the page: what can be done with it, there.
+  const [marked, setMarked] = useState<{ a: Annotation; at: { x: number; y: number } } | null>(null);
+  const annotsOnPages = useRef<{ version: number; list: Promise<Annotation[]> } | null>(null);
+  const onPageClick = useCallback(
+    async (pg: number, at: { x: number; y: number } | null, client: { x: number; y: number } | null) => {
+      if (Platform.OS === 'web' && window.getSelection()?.toString()) return;
+      if (at && client) {
+        if (annotsOnPages.current?.version !== annotVersion) annotsOnPages.current = { version: annotVersion, list: handle.annotations().catch(() => []) };
+        const list = await annotsOnPages.current.list;
+        const a = markAt(list, pg, at);
+        if (a) return setMarked({ a, at: client });
+      }
+      onPagePress();
+    },
+    [annotVersion, handle, onPagePress],
+  );
+  const onRecolor = useCallback(
+    async (a: Annotation, color: string) => {
+      if (noteBusy.current) return;
+      noteBusy.current = true;
+      edits.step();
+      await handle
+        .updateAnnotation(a.page, a.index, { color })
+        .then(() => {
+          setAnnots((list) => list && list.map((x) => (x.page === a.page && x.index === a.index ? { ...x, color } : x)));
+          annotated([a.page]);
+        })
+        .finally(() => {
+          noteBusy.current = false;
+        });
+    },
+    [handle, annotated, edits],
+  );
+  const markedItems = (a: Annotation): MenuItem[] => [
+    ...(!RECOLORABLE.has(a.kind)
+      ? []
+      : HIGHLIGHT_COLORS.filter((c) => c.hex.toLowerCase() !== a.color?.toLowerCase()).map((c) => ({
+          key: `mark-${c.key}`,
+          icon: 'pencil' as const,
+          label: t.highlightIn(t.colors[c.key]),
+          onPress: () => void onRecolor(a, c.hex),
+        }))),
+    { key: 'mark-note', icon: 'note', label: a.contents ? t.editNote : t.addNote, onPress: () => void onEditNote(a) },
+    { key: 'mark-delete', icon: 'trash', label: t.deleteNote, onPress: () => void onDeleteNote(a) },
+  ];
 
   // Document actions; how it looks lives in Aa, how to find things in the bar.
   // A phone's bar: undo and redo in ⋯ (⌘Z still works where there are keys).
@@ -1050,7 +1095,7 @@ export function Reader({
                       palette={pageP}
                       hits={hitsByPage.get(item)}
                       activeHit={hits[active]}
-                      onPress={onPagePress}
+                      onPress={onPageClick}
                       onLink={onLink}
                       beforeEdit={edits.step}
                       onEdited={edits.markDirty}
@@ -1214,6 +1259,7 @@ export function Reader({
 
       {!docked && findPanel}
       {menu && <MoreMenu palette={p} top={insets.top + TOP_BAR - 4} items={[...stepItems, ...menuItems.slice(inBar.length)]} onClose={() => setMenu(false)} />}
+      {marked && <MoreMenu palette={p} at={marked.at} items={markedItems(marked.a)} onClose={() => setMarked(null)} />}
       {panel === 'appearance' && (
         <AppearancePanel
           palette={p}

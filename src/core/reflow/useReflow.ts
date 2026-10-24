@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react';
 
-import type { DocHandle, PageLayout, TextLine } from '@/core/engine/types';
+import type { DocHandle, FormField, PageLayout, TextLine } from '@/core/engine/types';
 import { createRecognizer, ocrAvailable, type Recognizer } from '@/core/ocr';
 import { repo } from '@/core/storage';
 import { buildReflow, ocrPages, type Reflow } from './build';
+import { withFields } from './fields';
 
 /** On-device recognition of a scanned PDF: `done` pages of `total` are in the reflow so far. */
 export type OcrProgress = { done: number; total: number; running: boolean; failed: boolean };
@@ -27,6 +28,8 @@ type Job = {
   layouts: PageLayout[];
   targets: Set<number>;
   recognised?: (TextLine[] | undefined)[];
+  /** A form's fields per page, as last read: their values are in the text. */
+  fields: FormField[][];
 };
 
 /** One extraction per open document, shared by every view of it. */
@@ -41,7 +44,7 @@ function set(job: Job, state: ReflowState) {
 }
 
 function start(handle: DocHandle, docId: string): Job {
-  const job: Job = { state: { status: 'loading', progress: 0 }, listeners: new Set(), handle, docId, ocr: false, paused: false, layouts: [], targets: new Set() };
+  const job: Job = { state: { status: 'loading', progress: 0 }, listeners: new Set(), handle, docId, ocr: false, paused: false, layouts: [], targets: new Set(), fields: [] };
   (async () => {
     const pages: PageLayout[] = [];
     for (let i = 0; i < handle.pageCount; i += CHUNK) {
@@ -51,7 +54,8 @@ function start(handle: DocHandle, docId: string): Job {
       pages.push(...layout);
       set(job, { status: 'loading', progress: Math.min(1, (i + CHUNK) / handle.pageCount) });
     }
-    const reflow = buildReflow(pages, handle.pageSizes);
+    job.fields = await readFields(handle);
+    const reflow = buildReflow(pages.map((p, i) => filled(job, p, i)), handle.pageSizes);
     job.layouts = pages;
     // Text that reads as nothing (stray OCR noise) is recognised again, every page of it.
     job.targets = new Set(reflow.status === 'no-text' ? pages.map((_, i) => i) : ocrPages(pages));
@@ -82,7 +86,7 @@ async function runOcr(job: Job) {
   const recognised = (job.recognised = job.recognised.map((lines) => lines?.map((l) => (l.ocr ? l : { ...l, ocr: true }))));
   const todo = (i: number) => targets.has(i) && !recognised[i];
   // A recognised page's picture isn't a figure: only its text counts.
-  const page = (i: number): PageLayout => (targets.has(i) ? { lines: recognised[i] ?? [], graphics: [] } : (layouts[i] ?? { lines: [], graphics: [] }));
+  const page = (i: number): PageLayout => (targets.has(i) ? { lines: recognised[i] ?? [], graphics: [] } : filled(job, layouts[i] ?? { lines: [], graphics: [] }, i));
   let done = 0;
   while (done < total && !todo(done)) done++;
   let failed = false;
@@ -127,6 +131,27 @@ async function runOcr(job: Job) {
     rec?.close();
     job.ocr = false;
   }
+}
+
+/** A page with its form's values in the text. */
+function filled(job: Job, page: PageLayout, i: number): PageLayout {
+  const fields = job.fields[i];
+  return fields?.length ? { ...page, lines: withFields(page.lines, fields) } : page;
+}
+
+const readFields = (handle: DocHandle) =>
+  handle.hasForm ? Promise.all(Array.from({ length: handle.pageCount }, (_, i) => handle.fields(i).catch(() => [] as FormField[]))) : Promise.resolve([]);
+
+/** The form was filled in since the text was read (in page view): its values are read again. */
+export async function refreshFields(handle: DocHandle) {
+  const job = jobs.get(handle);
+  if (!job || !handle.hasForm || job.ocr || job.state.status !== 'ready' || job.state.ocr) return;
+  const fields = await readFields(handle).catch(() => null);
+  if (!fields || JSON.stringify(fields) === JSON.stringify(job.fields)) return;
+  job.fields = fields;
+  const state = job.state;
+  if (state.status !== 'ready') return;
+  set(job, { ...state, reflow: buildReflow(job.layouts.map((p, i) => filled(job, p, i)), handle.pageSizes) });
 }
 
 function subscribe(job: Job, listener: () => void) {

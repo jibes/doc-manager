@@ -10,6 +10,7 @@ import { discard } from '@/paper/archive/trash';
 import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Thumbnail } from '@/paper/components/DocItems';
 import { Field } from '@/paper/components/Field';
+import { Icon } from '@/paper/components/Icon';
 import { Button, IconButton, T } from '@/paper/components/primitives';
 import { ScreenHeader } from '@/paper/components/ScreenHeader';
 import { Toast } from '@/paper/components/Toast';
@@ -272,15 +273,20 @@ function Card(props: {
   const d = detailsOf(item, edits);
   return (
     <View testID="inbox-item" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-      <View style={styles.cardHead}>
-        <Pressable testID="inbox-preview" accessibilityRole="button" accessibilityLabel={`${t.inboxOpen}: ${item.entry.name}`} onPress={props.onOpen}>
-          <Thumbnail picture={{ kind: 'file', root: props.archive, entry: item.entry }} width={56} />
-        </Pressable>
+      {/* The whole head opens it: its first page, its name and the arrow. */}
+      <Pressable
+        testID="inbox-preview"
+        accessibilityRole="button"
+        accessibilityLabel={`${t.inboxOpen}: ${item.entry.name}`}
+        onPress={props.onOpen}
+        style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.cardHead, styles.headPress, hovered && { backgroundColor: p.hairline }]}
+      >
+        <Thumbnail picture={{ kind: 'file', root: props.archive, entry: item.entry }} width={56} />
         <T numberOfLines={2} style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
           {item.entry.name}
         </T>
-        <IconButton icon="chevronRight" size={34} label={t.inboxOpen} onPress={props.onOpen} />
-      </View>
+        <Icon name="chevronRight" size={22} color={p.muted} />
+      </Pressable>
       <View style={styles.fields}>
         <Field label={t.detailTitle} value={d.title} onChange={(title) => onEdit({ title })} testID="inbox-title" />
         <Field label={t.detailSender} value={d.sender} onChange={(sender) => onEdit({ sender })} testID="inbox-sender" />
@@ -316,7 +322,9 @@ function Card(props: {
 
 const styles = StyleSheet.create({
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: space.lg, gap: space.md },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginRight: -space.sm },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  // Pressable to its edges, its content where it was.
+  headPress: { margin: -space.sm, padding: space.sm, borderRadius: radius.md },
   fields: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
   duplicate: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' },

@@ -6,7 +6,7 @@ import { space, type Palette } from '@/core/design/tokens';
 import type { DocHandle, Raster } from '@/core/engine/types';
 import { t } from '@/core/i18n';
 import type { Block } from '@/core/reflow/build';
-import { recognizeText, useReflow, type OcrProgress } from '@/core/reflow/useReflow';
+import { recognizeText, refreshFields, useReflow, type OcrProgress } from '@/core/reflow/useReflow';
 import { BlockList, type BlockListApi, type FigureBox, type FigureSource } from './BlockList';
 import { RasterView } from './RasterView';
 
@@ -36,6 +36,8 @@ type Props = {
 /** The document as reflowed text: one comfortable column, typography from the reader's settings. */
 export function ReflowView({ handle, docId, palette: p, onExit, ...rest }: Props) {
   const state = useReflow(handle, docId);
+  // Fields filled in on the pages since the text was read: their values as they are now.
+  useEffect(() => void refreshFields(handle), [handle]);
 
   if (state.status === 'loading')
     return (

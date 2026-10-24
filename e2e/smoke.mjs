@@ -526,6 +526,14 @@ async function forms() {
     (await page.getByTestId('field-site').inputValue()) === '2' &&
     (await page.getByTestId('field-agree').getAttribute('aria-checked')) === 'true';
   check(kept, 'forms: text, radio, dropdown and checkbox values saved');
+  // Text view reads what was filled in: after each label, or before the words of a box.
+  await switchView(page);
+  await page.getByTestId('text-view').waitFor({ timeout: 15000 });
+  await page.waitForTimeout(800);
+  const flow = await page.getByTestId('text-view').innerText();
+  check(/Full name: Ada Lovelace/.test(flow) && /◉ Large/.test(flow) && /◯ Small/.test(flow) && /Site: Orchard/.test(flow) && /☑ I agree/.test(flow), `forms: text view shows the values filled in (${JSON.stringify(flow.slice(0, 160))})`);
+  await switchView(page);
+  await name.waitFor({ timeout: 10000 });
   // Typing in a field and leaving straight away (no Enter, no tap elsewhere): asked first, nothing lost.
   await name.click();
   await page.keyboard.type(' Jr');
@@ -559,6 +567,19 @@ async function annotations() {
   };
   await select(/^Everything comes in one way/);
   await page.getByTestId('highlight-green').click();
+  // A click on the highlight: what can be done with it, there.
+  const clickMark = async () => {
+    const b = await page.locator('[data-testid=text-layer] span', { hasText: /^Everything comes in one way/ }).first().boundingBox();
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    return page.getByTestId('menu-mark-delete').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  };
+  const menuOn = await clickMark();
+  const markMenu = menuOn && (await page.getByTestId('menu-mark-blue').count()) === 1 && (await page.getByTestId('menu-mark-green').count()) === 0;
+  await page.getByTestId('menu-mark-blue').click().catch(() => {});
+  await page.waitForTimeout(300);
+  const recoloured = (await clickMark()) && (await page.getByTestId('menu-mark-green').count()) === 1 && (await page.getByTestId('menu-mark-blue').count()) === 0;
+  await page.keyboard.press('Escape');
+  check(markMenu && recoloured, 'annotations: a click on a highlight offers other colours, a note and Delete; a colour changes it');
   await select(/^Press \+ and choose Camera/);
   await page.getByTestId('highlight-note').click();
   await page.getByTestId('note-input').fill('Try dragging a file in');
@@ -1892,6 +1913,12 @@ async function inbox() {
   check((await card('scan-1.pdf').getByTestId('inbox-title').inputValue()) === 'Old title', 'inbox: a document keeps its own title');
   await card('scan-1.pdf').locator('[data-testid="inbox-preview"] img').first().waitFor({ timeout: 20000 });
   check(true, 'inbox: each card shows its first page');
+  // Its name opens it as well as its first page does.
+  await card('scan-1.pdf').getByText('scan-1.pdf').click();
+  const openedByName = await page.getByTestId('reader').waitFor({ timeout: 10000 }).then(() => true, () => false);
+  check(openedByName, 'inbox: a click on a card’s name opens it');
+  if (openedByName) await page.getByTestId('back').locator('visible=true').click();
+  await card('scan-1.pdf').waitFor({ timeout: 10000 });
 
   // A rule (on its own screen): its words in the text give the sender, type and tags.
   await vis('inbox-rules').click();

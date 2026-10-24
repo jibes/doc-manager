@@ -35,10 +35,11 @@ export function Toast({
   }, [message, id, onDismiss]);
   if (!message) return null;
   return (
-    // Only the toast takes taps: what is beside it (a row of actions) stays usable.
+    // Only the toast takes taps: what is beside it (a row of actions) stays usable. Without a button of its own it
+    // takes none: what it covers (a switch, a row) can still be tapped through it.
     <Animated.View
       key={id}
-      pointerEvents="box-none"
+      pointerEvents={action ? 'box-none' : 'none'}
       entering={(top ? FadeInUp : FadeInDown).duration(220)}
       exiting={(top ? FadeOutUp : FadeOutDown).duration(160)}
       style={[styles.wrap, top ? { top: insets.top + space.md } : { bottom: insets.bottom + space.xl + above }]}
