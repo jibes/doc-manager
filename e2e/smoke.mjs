@@ -1,7 +1,7 @@
 // End-to-end smoke test against a running web build (default: expo dev server on :8081).
 // Usage: BASE=http://localhost:8081 node e2e/smoke.mjs
 import { Buffer } from 'node:buffer';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE ?? 'http://localhost:8081';
@@ -616,7 +616,9 @@ async function annotations() {
   await page.waitForTimeout(400);
   check((await page.getByTestId('save').isVisible()) && /\/read\//.test(page.url()), 'annotations: staying keeps the edits (and the address)');
   await page.goBack();
-  check((await page.getByTestId('ask-confirm').innerText()) === 'Save' && (await page.getByTestId('ask-other').count()) === 1, 'annotations: leaving offers Save first, and leaving without');
+  await page.getByTestId('ask-dialog').waitFor({ timeout: 3000 }).catch(() => {});
+  const offered = `${await page.getByTestId('ask-confirm').innerText().catch(() => '')}|${await page.getByTestId('ask-other').count()}`;
+  check(offered === 'Save|1', `annotations: leaving offers Save first, and leaving without (${offered})`);
   await page.getByTestId('ask-other').click();
   await docRows(page).first().waitFor({ timeout: 5000 });
   check(true, 'annotations: discarding them goes back');
@@ -3147,7 +3149,27 @@ async function improve() {
   check(/on 1 page; 1 page with typed text left as it is/.test(one.said), `improve: the scanned page is read again, the typed one left alone (${one.said})`);
   const req = sent.at(-1);
   check(sent.length === 1 && req.messages[0].content.filter((c) => c.type === 'image_url').length === 1 && /2\.1|1\.1\t\S/.test(req.messages[0].content.at(-1).text), 'improve: the page image goes with the text read on the device');
-  check((await found('Improved Line One')) === '1 result' && (await found('handwritten note')) === '1 result', 'improve: the corrected text and what the model added are in the document');
+  if (process.env.DUMP) {
+    const files = await page.evaluate(async () => {
+      const out = [];
+      const walk = async (dir, path) => {
+        for await (const [name, h] of dir.entries()) {
+          if (h.kind === 'directory') await walk(h, `${path}${name}/`);
+          else if (name.endsWith('.pdf')) {
+            const b = new Uint8Array(await (await h.getFile()).arrayBuffer());
+            let s = '';
+            for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+            out.push([path + name, btoa(s)]);
+          }
+        }
+      };
+      await walk(await navigator.storage.getDirectory(), '');
+      return out;
+    });
+    for (const [name, b64] of files) writeFileSync(`${process.env.DUMP}/${name.replace(/\//g, '_')}`, Buffer.from(b64, 'base64'));
+  }
+  const corrected = `${await found('Improved Line One')}|${await found('handwritten note')}`;
+  check(corrected === '1 result|1 result', `improve: the corrected text and what the model added are in the document (${corrected})`);
   check((await found('Orderly Notes')) !== 'No matches', 'improve: the typed page keeps its own text');
   // Again: the layer is replaced, not added to.
   first = 'Second Pass Line';
