@@ -1,13 +1,13 @@
 import type { FormField, TextLine } from '@/core/engine/types';
 
+/** An empty radio button: a joiner after it, as "○ Small" would read as a list item with its bullet. */
+const EMPTY_RADIO = '○\u2060';
+
 /**
  * A filled-in form's values in its text: a field's value goes after its label on the same row ("Full name: Ada"),
  * a check box's or radio button's state before the words beside it ("☑ I agree"). A field with no label beside
  * it is a line of its own where it is. Empty fields and passwords add nothing.
  */
-/** An empty radio button: a joiner after it, as "○ Small" would read as a list item with its bullet. */
-const EMPTY_RADIO = '○\u2060';
-
 export function withFields(lines: TextLine[], fields: FormField[]): TextLine[] {
   if (!fields.length) return lines;
   const out = lines.map((l) => ({ ...l }));

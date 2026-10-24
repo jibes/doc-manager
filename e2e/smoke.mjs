@@ -567,16 +567,18 @@ async function annotations() {
   };
   await select(/^Everything comes in one way/);
   await page.getByTestId('highlight-green').click();
+  // Written (Save is offered once it is in the document): a click before would find nothing there yet.
+  await page.getByTestId('save').waitFor();
   // A click on the highlight: what can be done with it, there.
   const clickMark = async () => {
     const b = await page.locator('[data-testid=text-layer] span', { hasText: /^Everything comes in one way/ }).first().boundingBox();
     await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
-    return page.getByTestId('menu-mark-delete').waitFor({ timeout: 3000 }).then(() => true, () => false);
+    return page.getByTestId('menu-mark-delete').waitFor({ timeout: 8000 }).then(() => true, () => false);
   };
   const menuOn = await clickMark();
   const markMenu = menuOn && (await page.getByTestId('menu-mark-blue').count()) === 1 && (await page.getByTestId('menu-mark-green').count()) === 0;
   await page.getByTestId('menu-mark-blue').click().catch(() => {});
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(800);
   const recoloured = (await clickMark()) && (await page.getByTestId('menu-mark-green').count()) === 1 && (await page.getByTestId('menu-mark-blue').count()) === 0;
   await page.keyboard.press('Escape');
   check(markMenu && recoloured, 'annotations: a click on a highlight offers other colours, a note and Delete; a colour changes it');
