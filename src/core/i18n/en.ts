@@ -162,6 +162,7 @@ export const en = {
     stamp: 'Stamp',
   },
   save: 'Save',
+  saveDetails: 'Save details',
   savedInPlace: (name: string) => `Saved to “${name}”.`,
   savedCopy: 'Saved in Tessel. Download it to keep a copy elsewhere.',
   saveFailed: 'Couldn’t save the changes.',

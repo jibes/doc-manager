@@ -544,6 +544,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         cache(rec.shareKey!, { openedAt: kept.addedAt, position: rec.position, view: rec.view, invert: rec.invert ? true : undefined });
         void forget(viewedKey(rec.shareKey!, rec.bytes));
         if (file) void makeCover(id, file);
+        // Listed in Documents now, not with the next look at the folder.
+        void import('@/paper/archive/indexer').then((m) => m.schedule(200));
         return true;
       } catch (e) {
         set({ error: `${t.importFailed(rec.fileName)} ${errorText(e)}` });

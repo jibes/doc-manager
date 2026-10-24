@@ -133,7 +133,7 @@ export function DetailsPanel({
         )}
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, flexWrap: 'wrap' }}>
           {onSuggest && <Button testID="details-suggest" kind="quiet" icon="sparkles" label={asking ? t.detailsSuggesting : t.inboxSuggest} onPress={asking ? undefined : () => void suggest()} />}
-          <Button testID="details-save" label={t.save} icon="check" onPress={busy ? undefined : save} />
+          <Button testID="details-save" label={t.saveDetails} icon="check" onPress={busy ? undefined : save} />
         </View>
       </ScrollView>
     </Panel>

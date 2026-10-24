@@ -46,11 +46,19 @@ export function SelectionBubble({ palette: p, onHighlight }: Props) {
         const sel = window.getSelection();
         const inLayer = sel && !sel.isCollapsed && sel.anchorNode?.parentElement?.closest('.tl');
         if (!inLayer) return setAt(null);
-        // Anchor at the end of the selection, where the pointer let go: a long selection's overall box can
-        // reach past the screen on both sides. Keep it on screen either way.
+        // Beside the end of the selection, where the pointer let go, and off the selected lines: below the last
+        // line when dragged down, above the first when dragged up (a long selection's overall box can reach past
+        // the screen on both sides). The other side when there is no room. Kept on screen either way.
         const rects = [...sel.getRangeAt(0).getClientRects()].filter((r) => r.width > 0 && r.bottom > 0 && r.top < innerHeight);
-        const box = rects.at(-1) ?? sel.getRangeAt(0).getBoundingClientRect();
-        const below = box.top < 120;
+        const order = sel.anchorNode && sel.focusNode ? document.createRange() : null;
+        order?.setStart(sel.anchorNode!, sel.anchorOffset);
+        order?.setEnd(sel.focusNode!, sel.focusOffset);
+        const up = !!order?.collapsed;
+        const whole = sel.getRangeAt(0).getBoundingClientRect();
+        const first = rects[0] ?? whole;
+        const last = rects.at(-1) ?? whole;
+        const below = up ? first.top < 120 : last.bottom <= innerHeight - 120;
+        const box = below ? last : first;
         const y = Math.min(Math.max(below ? box.bottom + 10 : box.top - 10, 70), innerHeight - 70);
         setAt({ x: box.left + box.width / 2, y, below });
       }, 220);

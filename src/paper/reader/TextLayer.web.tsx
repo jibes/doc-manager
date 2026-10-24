@@ -34,8 +34,10 @@ const layerAt = (x: number, y: number) =>
   });
 
 /**
- * Where the selection's end goes for a point: in the word under it; over white space (past a line's end, between
- * lines, in a gutter), at the nearest word on the line, its end when right of it, its start when left of it.
+ * Where the selection's end goes for a point: in the word under it; over white space, at the nearest word that the
+ * space belongs to. Past a line's end (a short line, a gutter, the margin): that line, not the next column's.
+ * Between lines or below a paragraph: the column under the point, the nearest line above or below. Elsewhere (the
+ * margin left of the text): the nearest word. Its end when right of or below it, its start when left of or above.
  */
 function endAt(x: number, y: number): { node: Node; offset: number } | null {
   const over = document.elementFromPoint(x, y);
@@ -45,15 +47,21 @@ function endAt(x: number, y: number): { node: Node; offset: number } | null {
   }
   const tl = layerAt(x, y);
   if (!tl) return null;
-  let best: { span: Element; rect: DOMRect; d: number } | null = null;
+  type Hit = { span: Element; rect: DOMRect; d: number };
+  let lineEnd: Hit | null = null;
+  let column: Hit | null = null;
+  let near: Hit | null = null;
   for (const span of tl.querySelectorAll('span')) {
     const rect = span.getBoundingClientRect();
-    // On the line first (by height), then across it.
+    if (!rect.width || !rect.height) continue;
     const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
     const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+    if (dy === 0 && x > rect.right && (!lineEnd || dx < lineEnd.d)) lineEnd = { span, rect, d: dx };
+    if (dx === 0 && (!column || dy < column.d)) column = { span, rect, d: dy };
     const d = dy * 1000 + dx;
-    if (!best || d < best.d) best = { span, rect, d };
+    if (!near || d < near.d) near = { span, rect, d };
   }
+  const best = lineEnd ?? column ?? near;
   const text = best?.span.firstChild;
   if (!best || !text || text.nodeType !== Node.TEXT_NODE) return null;
   const after = y > best.rect.bottom || (y >= best.rect.top && x > best.rect.left + best.rect.width / 2);

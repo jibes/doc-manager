@@ -62,6 +62,9 @@ function openRecord(doc: DocRecord) {
 const PAGE = 100;
 /** While indexing, the list and the search are read again at most this often. */
 const REFRESH_MS = 1500;
+const finePointer = () => Platform.OS === 'web' && typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
+/** The index's documents as last read here (null: not yet). */
+let lastRead: IndexedDoc[] | null = null;
 
 const facetName: Record<Facet, string> = { tag: t.facetTag, sender: t.facetSender, type: t.facetType, year: t.facetYear };
 const facetIcon: Record<Facet, IconName> = { tag: 'tag', sender: 'person', type: 'pages', year: 'calendar' };
@@ -205,12 +208,14 @@ export default function Documents() {
   const changed = useThrottled(indexed, REFRESH_MS);
   const views = useViews((s) => s.views);
 
-  const [all, setAll] = useState<IndexedDoc[]>([]);
+  // The list as last read: the screen mounting again (a document opened beside it) shows it at once, not empty.
+  const [all, setAll] = useState<IndexedDoc[]>(() => lastRead ?? []);
   // Until the index has answered once, nothing is known (not "no documents").
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => lastRead !== null);
   useEffect(() => {
     let alive = true;
     allDocs().then((d) => {
+      lastRead = d;
       if (!alive) return;
       // Documents that can't be opened here (protected, damaged) are listed too, by their name.
       setAll(d);
@@ -521,8 +526,9 @@ export default function Documents() {
     const editable = d.place.kind === 'folder' && folders.canEdit(d.place.root, d.place.entry);
     return [
       { key: 'ctx-open', icon: 'documents', label: t.ctxOpen, onPress: () => void openDoc(d, undefined, '').catch(fail) },
-      ...(Platform.OS === 'web' ? [{ key: 'ctx-window', icon: 'copy' as IconName, label: t.ctxWindow, onPress: () => void openInWindow(d).catch(fail) }] : []),
-      ...(!split ? [{ key: 'ctx-look', icon: 'search' as IconName, label: t.ctxLook, hint: t.keySpace, onPress: () => setLook(d) }] : []),
+      // Windows and keys where there is a mouse (not on a phone or tablet).
+      ...(finePointer() ? [{ key: 'ctx-window', icon: 'copy' as IconName, label: t.ctxWindow, onPress: () => void openInWindow(d).catch(fail) }] : []),
+      ...(!split ? [{ key: 'ctx-look', icon: 'search' as IconName, label: t.ctxLook, hint: finePointer() ? t.keySpace : undefined, onPress: () => setLook(d) }] : []),
       { key: 'ctx-details', icon: 'tag', label: t.ctxDetails, onPress: () => setMany([d]) },
       ...(folders.canShare ? [{ key: 'ctx-share', icon: 'share' as IconName, label: t.share, onPress: () => void batch(() => shareAll([d])) }] : []),
       ...(editable ? [{ key: 'ctx-rename', icon: 'pencil' as IconName, label: t.rename, onPress: () => void rename(d) }] : []),

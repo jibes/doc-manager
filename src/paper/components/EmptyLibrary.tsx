@@ -14,15 +14,14 @@ function Grid() {
   return (
     <View style={styles.grid}>
       {[0, 1, 2, 3, 4, 5].map((i) => (
-        <Animated.View
-          key={i}
-          entering={FadeIn.delay(60 * i).duration(420)}
-          style={[styles.page, { backgroundColor: page }, elevation(p.shadow, 1), p.dark && { opacity: 0.9 }]}
-        >
-          {[0.85, 1, 0.7, 0, 0.95, 0.6].map((w, j) => (
-            <View key={j} style={{ height: 2.5, width: `${w * 100}%`, borderRadius: 2, backgroundColor: w ? 'rgba(27,26,23,0.12)' : 'transparent' }} />
-          ))}
-          {i === 4 && <View style={[styles.ribbon, { backgroundColor: p.accent }]} />}
+        // Faded in on its own: dimmed in Dark inside it (the fade sets the opacity of the one it is on).
+        <Animated.View key={i} entering={FadeIn.delay(60 * i).duration(420)}>
+          <View style={[styles.page, { backgroundColor: page }, elevation(p.shadow, 1), p.dark && { opacity: 0.9 }]}>
+            {[0.85, 1, 0.7, 0, 0.95, 0.6].map((w, j) => (
+              <View key={j} style={{ height: 2.5, width: `${w * 100}%`, borderRadius: 2, backgroundColor: w ? 'rgba(27,26,23,0.12)' : 'transparent' }} />
+            ))}
+            {i === 4 && <View style={[styles.ribbon, { backgroundColor: p.accent }]} />}
+          </View>
         </Animated.View>
       ))}
     </View>

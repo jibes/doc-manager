@@ -2749,6 +2749,15 @@ async function multiline() {
   check(past.startsWith('them. A good') && past.trim().endsWith('but the order of'), `multiline: dragging into the white space after a line ends at that line (${JSON.stringify(past.slice(-40))})`);
   const up = await drag(to, to.x + 1, from, from.x + from.w + 20);
   check(!/trail forks/.test(up) && /one can walk through/.test(up) && /references tie/.test(up), `multiline: …and upwards (${JSON.stringify(up.slice(0, 40))})`);
+  // In the gutter, nearer the next column's line than the end of its own: still its own line, not the rest of the
+  // column and the next one.
+  const across = spans.find((s) => s.x > to.x + to.w && Math.abs(s.y - to.y) < to.h);
+  const gutter = across ? await drag(from, from.x + 1, to, across.x - 4) : '';
+  check(gutter.trim().endsWith('but the order of') && !/Keeping place/.test(gutter), `multiline: …in the gutter between columns too (${JSON.stringify(gutter.slice(-40))})`);
+  // Below a paragraph's last line (a column beside it has text there): that line's end.
+  const last = line('entries together where the paper trail forks.');
+  const below = last ? await drag(from, from.x + 1, { ...last, y: last.y + last.h }, last.x + last.w / 2) : '';
+  check(below.trim().endsWith('paper trail forks.') && !/Keeping place/.test(below), `multiline: …and below a paragraph (${JSON.stringify(below.slice(-40))})`);
   await ctx.close();
 }
 

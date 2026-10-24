@@ -52,7 +52,8 @@ function Card() {
       entering={FadeInDown.duration(180)}
       accessibilityViewIsModal
       testID="ask-dialog"
-      style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
+      // Three buttons fit on one row (German too).
+      style={[styles.card, request.other ? { maxWidth: 480 } : null, { backgroundColor: p.surface, borderColor: p.hairline }, elevation(p.shadow, 3)]}
     >
       <View ref={ref} role="dialog" aria-modal aria-label={request.title} tabIndex={-1} style={styles.inner}>
         <T v="headline" accessibilityRole="header" style={{ fontSize: 17 }}>

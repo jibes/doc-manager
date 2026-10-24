@@ -22,12 +22,14 @@ export default function Rules() {
   const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const archive = usePrefs((s) => s.archive);
+  // Reached from the inbox where this device sorts it, else from Documents.
+  const inboxHere = usePrefs((s) => s.inboxHere);
   const [notice, setNotice] = useState<string | null>(null);
   return (
     <SubFrame sub="rules">
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column }}>
-          <ScreenHeader over={t.inboxTitle} title={t.rulesTitle} up={() => (router.canGoBack() ? router.back() : router.replace('/inbox'))} />
+          <ScreenHeader over={inboxHere ? t.inboxTitle : t.documentsTitle} title={t.rulesTitle} up={() => (router.canGoBack() ? router.back() : router.replace(inboxHere ? '/inbox' : '/'))} />
           {archive ? (
             <RulesEditor archive={archive} onError={(e) => setNotice(opError(e))} />
           ) : (
