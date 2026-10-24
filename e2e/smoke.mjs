@@ -1,6 +1,7 @@
 // End-to-end smoke test against a running web build (default: expo dev server on :8081).
 // Usage: BASE=http://localhost:8081 node e2e/smoke.mjs
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
@@ -2750,6 +2751,57 @@ async function multiline() {
   await ctx.close();
 }
 
+// When documents were opened, shared through the Tessel folder: this device writes its own file; a document opened
+// on another device (its file synced in) comes first here too.
+async function openedSync() {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 } }, { fsa: true });
+  await ctx.addInitScript(() => {
+    window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('Shared', { create: true });
+  });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`opened-sync: ${e.message}`));
+  const keyOf = (f) => {
+    const b = readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).subarray(0, 65536);
+    const end = b.indexOf('%%EOF');
+    return createHash('sha256').update(end < 0 ? b : b.subarray(0, end + 5)).digest('hex').slice(0, 32);
+  };
+  await page.goto(BASE);
+  await page.evaluate(async (files) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('Shared', { create: true });
+    for (const [name, b64] of files) {
+      const w = await (await root.getFileHandle(name, { create: true })).createWritable();
+      await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+      await w.close();
+    }
+  }, ['columns.pdf', 'tagged.pdf'].map((f) => [f, readFileSync(new URL(`./fixtures/${f}`, import.meta.url)).toString('base64')]));
+  await chooseTessel(page);
+  for (let i = 0; i < 60 && (await docRows(page).count()) < 2; i++) await page.waitForTimeout(500);
+  await docRows(page).filter({ hasText: 'Orderly Notes' }).first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.waitForTimeout(1000);
+  await page.goBack();
+  await page.waitForTimeout(12000);
+  const mine = await page.evaluate(async () => {
+    const dir = await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Shared')).getDirectoryHandle('.tessel')).getDirectoryHandle('opened');
+    const out = [];
+    for await (const [, h] of dir.entries()) out.push(await (await h.getFile()).text());
+    return out;
+  }).catch(() => []);
+  check(mine.length === 1 && mine[0].includes(keyOf('columns.pdf')), 'opened-sync: this device writes when it opened a document into its own file in the Tessel folder');
+  // Another device opened the other one later; its file arrives.
+  await page.evaluate(async ([key, at]) => {
+    const dir = await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('Shared')).getDirectoryHandle('.tessel')).getDirectoryHandle('opened', { create: true });
+    const w = await (await dir.getFileHandle('otherdevice.json', { create: true })).createWritable();
+    await w.write(JSON.stringify({ v: 1, opened: { [key]: at } }));
+    await w.close();
+  }, [keyOf('tagged.pdf'), Date.now() + 1000]);
+  await page.reload();
+  let first = '';
+  for (let i = 0; i < 40 && !/tagged/i.test(first); i++) first = await page.waitForTimeout(250).then(() => docRows(page).first().innerText().catch(() => ''));
+  check(/tagged/i.test(first), `opened-sync: opened on another device later, it comes first here (${first.split('\n')[0]})`);
+  await ctx.close();
+}
+
 // Wide desktop windows: Find and Details stay open beside the pages, each closed on its own (and remembered);
 // the document's actions are in the bar, one click each.
 async function docked() {
@@ -3378,6 +3430,7 @@ await step('undo', undoRedo);
 await step('changed', changedElsewhere);
 await step('debug-log', debugLog);
 await step('multiline', multiline);
+await step('opened-sync', openedSync);
 await step('desktop-list', desktopList);
 await step('again', again);
 await step('docked', docked);

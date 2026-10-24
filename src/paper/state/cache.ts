@@ -5,7 +5,8 @@ import type { ReadingPosition } from '@/core/storage';
 
 /**
  * What this device remembers about documents, by their content key (archive/docKey.ts): when it last opened each,
- * where it was left and how it looked. Nothing of it is synced or needed: lost, documents open at the start.
+ * where it was left and how it looked. Only when it was opened is shared with other devices (archive/opened.ts);
+ * none of it is needed: lost, documents open at the start.
  */
 export type Cached = { openedAt?: number; position?: ReadingPosition; view?: 'page' | 'text'; invert?: true };
 
@@ -29,9 +30,14 @@ export function loadCache(): Promise<Map<string, Cached>> {
   return loading;
 }
 
-/** Changes what is remembered about a document (only what changed is written). */
-export function remember(key: string, changes: Cached) {
+const openedListeners: ((key: string, at: number) => void)[] = [];
+/** Told when a document is opened here (to share it with other devices). */
+export const onOpened = (fn: (key: string, at: number) => void) => void openedListeners.push(fn);
+
+/** Changes what is remembered about a document (only what changed is written); `share`: a newer open is told. */
+export function remember(key: string, changes: Cached, share = true) {
   const was = useCache.getState().docs.get(key) ?? {};
+  if (share && changes.openedAt && changes.openedAt > (was.openedAt ?? 0)) for (const fn of openedListeners) fn(key, changes.openedAt);
   const next: Cached = { ...was, ...changes };
   if (!changes.invert && 'invert' in changes) delete next.invert;
   if (JSON.stringify(next) === JSON.stringify(was)) return;

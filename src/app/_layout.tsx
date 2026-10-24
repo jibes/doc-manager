@@ -25,7 +25,9 @@ import { log, setLogging, watchErrors } from '@/core/lib/log';
 import { shell } from '@/core/lib/shell';
 import { useAmbientLight } from '@/paper/state/ambient';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
-import { schedule, startIndexing } from '@/paper/archive/indexer';
+import { schedule, startIndexing, useIndex } from '@/paper/archive/indexer';
+import { flushOpened, syncOpened } from '@/paper/archive/opened';
+import { loadCache } from '@/paper/state/cache';
 import { refreshInboxCount } from '@/paper/archive/inbox';
 import { readAdded, resumeReading } from '@/paper/archive/intake';
 import { showInPane } from '@/paper/state/pane';
@@ -62,8 +64,29 @@ function useLog() {
   useEffect(() => log.info('nav', path), [path]);
 }
 
+/** When documents were opened on the other devices: read at start, after each pass over the folder, on return. */
+function useOpenedSync() {
+  const archive = usePrefs((s) => s.archive);
+  useEffect(() => {
+    if (!archive) return;
+    void loadCache().then(syncOpened);
+    let was = useIndex.getState().running;
+    const unsub = useIndex.subscribe((s) => {
+      if (was && !s.running) void syncOpened();
+      was = s.running;
+    });
+    const onShow = () => (document.visibilityState === 'visible' ? void syncOpened() : flushOpened());
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onShow);
+    return () => {
+      unsub();
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onShow);
+    };
+  }, [archive]);
+}
+
 export default function RootLayout() {
   useLog();
+  useOpenedSync();
   const p = usePalette();
   useAmbientLight(usePrefs((s) => s.appearance) === 'auto');
   const [loaded, error] = useFonts({
