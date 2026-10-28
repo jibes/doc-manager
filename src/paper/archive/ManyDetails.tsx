@@ -9,6 +9,7 @@ import { discardDetails } from '@/paper/reader/drafts';
 import { Panel } from '@/paper/reader/Panel';
 import { usePalette } from '@/paper/state/prefs';
 import { sharedDetails, writeDetailsMany, type DetailsChange } from './manyDetails';
+import { typedDate } from './rules';
 import type { IndexedDoc } from './search';
 
 /**
@@ -54,8 +55,9 @@ export function ManyDetails({ docs, onClose, onDone }: { docs: IndexedDoc[]; onC
     setTag('');
   };
   const save = async () => {
-    const day = date?.trim();
-    if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return setBad(true);
+    // As on paper ("2.10.2026") too.
+    const day = date === null ? undefined : typedDate(date);
+    if (day === null) return setBad(true);
     const all = tag.trim() ? [...new Set([...tags, ...tag.split(',').map((s) => s.trim()).filter(Boolean)])] : tags;
     const change: DetailsChange = {
       ...(sender !== null ? { sender: sender.trim() } : {}),

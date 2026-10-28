@@ -1,5 +1,6 @@
 import { desktop } from '@/core/lib/desktop';
 import { log } from '@/core/lib/log';
+import { findDate } from '@/paper/archive/rules';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
 import type { PdfWord } from './engine/pdf/writer';
@@ -221,7 +222,8 @@ export function parseResult(text: string, pageCount: number): AiResult {
   });
   return {
     title: str(raw.title),
-    date: /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? str(raw.date) : '',
+    // Asked for as YYYY-MM-DD; a model writing it otherwise ("02.10.2026", with a time) still gives the date.
+    date: findDate(str(raw.date)),
     sender: str(raw.sender),
     type: str(raw.type),
     keywords: Array.isArray(raw.keywords) ? raw.keywords.map(str).filter(Boolean).slice(0, 5) : [],

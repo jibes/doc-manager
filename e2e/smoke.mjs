@@ -1573,6 +1573,48 @@ async function aiReading() {
   await ctx.close();
 }
 
+/** A one-page PDF with `line` as its text (Helvetica, plain ASCII). */
+function textPdf(line) {
+  const content = `BT /F1 14 Tf 72 720 Td (${line}) Tj ET`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+  ];
+  let out = '%PDF-1.4\n';
+  const at = [];
+  objs.forEach((o, i) => {
+    at.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((n) => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+// A document without a date of its own: Details offers the first date in its text.
+async function foundDate() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`found date: ${e.message}`));
+  await page.goto(BASE);
+  await page.getByTestId('add-menu').locator('visible=true').first().waitFor();
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), openFile(page)]);
+  await fc.setFiles({ name: 'letter.pdf', mimeType: 'application/pdf', buffer: textPdf('Bern, den 3.Okt.2026 - Ihre Bestellung') });
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('details-panel').waitFor();
+  const offer = page.getByTestId('detail-found-date');
+  const offered = await offer.waitFor({ timeout: 10000 }).then(() => true, () => false);
+  if (offered) await offer.click();
+  check(offered && (await page.getByTestId('detail-date').inputValue()) === '2026-10-03', `details: the date in the text is offered and taken (${offered ? await page.getByTestId('detail-date').inputValue() : 'not offered'})`);
+  await ctx.close();
+}
+
 // Details in the file: written by an incremental update (cross-reference table and stream), read back by PDFium
 // after the reopen; the library follows the new title. A protected PDF can't take them.
 async function details() {
@@ -1600,7 +1642,8 @@ async function details() {
     await page.getByTestId('detail-title').fill(`Rechnung 40217 ${kind}`);
     await page.getByTestId('detail-sender').fill('Musterwerke Zürich');
     await page.getByTestId('detail-type').fill('Rechnung');
-    await page.getByTestId('detail-date').fill('2026-10-02');
+    // As written on paper, once: it is saved as YYYY-MM-DD.
+    await page.getByTestId('detail-date').fill(kind === 'stream' ? '2.10.2026' : '2026-10-02');
     await page.getByTestId('detail-tag-input').fill('Strom,');
     await page.getByTestId('detail-tag-input').fill('Steuer 2026');
     await page.getByTestId('details-save').click();
@@ -1628,9 +1671,9 @@ async function details() {
   await docRows(page).first().click();
   await page.getByTestId('reader').waitFor();
   await panel();
-  await page.getByTestId('detail-date').fill('2.10.2026');
+  await page.getByTestId('detail-date').fill('31.02.2026');
   await page.getByTestId('details-save').click();
-  check(await page.getByText('Write the date as YYYY-MM-DD.').isVisible(), 'details: a date not in YYYY-MM-DD is refused');
+  check(await page.getByText('That isn’t a date. Write it as YYYY-MM-DD or 2.10.2026.').isVisible(), 'details: a date that doesn’t exist is refused');
   // Details typed in and not saved: closing the panel, or leaving the document, asks first.
   await page.keyboard.press('Escape');
   const askedClose = await page.getByTestId('ask-dialog').waitFor({ timeout: 3000 }).then(() => true, () => false);
@@ -3558,6 +3601,7 @@ await step('debug-log', debugLog);
 await step('multiline', multiline);
 await step('opened-sync', openedSync);
 await step('desktop-list', desktopList);
+await step('found-date', foundDate);
 await step('again', again);
 await step('docked', docked);
 await step('upgrade', upgrade);

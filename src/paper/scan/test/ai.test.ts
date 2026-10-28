@@ -66,7 +66,8 @@ describe('AI reading', () => {
     const reply = 'Here you go:\n```json\n{"title":"Rechnung 40217","date":"02.10.2026","sender":"Musterwerke Zürich","type":"Rechnung","keywords":["Strom",3],"pages":[{"lines":[{"id":"1.1","text":"x"},{"id":2}],"added":[{"text":"bez","box":[1,2,3]}]}]}\n```';
     const r = parseResult(reply, 2);
     expect(r.title).toBe('Rechnung 40217');
-    expect(r.date).toBe(''); // not YYYY-MM-DD
+    expect(r.date).toBe('2026-10-02'); // written as on paper: still the date
+    expect(parseResult(reply.replace('02.10.2026', 'soon'), 1).date).toBe('');
     expect(r.keywords).toEqual(['Strom']);
     expect(r.pages).toHaveLength(2);
     expect(r.pages[0].lines).toEqual([{ id: '1.1', text: 'x' }]);

@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { destination, fileDocument, inboxFiles, loadRules, propose, refreshInboxCount, suggest, useRules, useRulesUnreadable, withRules, type Proposal } from '@/paper/archive/inbox';
+import { typedDate } from '@/paper/archive/rules';
 import type { Details } from '@/paper/archive/pdfInfo';
 import { openDoc } from '@/paper/archive/Results';
 import { discard, restore } from '@/paper/archive/trash';
@@ -41,7 +42,8 @@ const detailsOf = (p: Proposal, e: Edits = {}): Details => ({
   title: e.title ?? p.details.title,
   sender: e.sender ?? p.details.sender,
   type: e.type ?? p.details.type,
-  date: e.date ?? p.details.date,
+  // Typed as on paper ("2.10.2026") it files as YYYY-MM-DD; one that isn't a date stays as typed (and holds it back).
+  date: e.date !== undefined ? (typedDate(e.date) ?? e.date) : p.details.date,
   tags: e.tags !== undefined ? tagsOf(e.tags) : p.details.tags,
 });
 

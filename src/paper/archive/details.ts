@@ -1,6 +1,7 @@
 import type { DocHandle } from '@/core/engine/types';
 import { describeWithAi, type AiSettings } from '@/paper/scan/ai';
 import { infoFor, parseTags, real, realTitle, withInfo, type Details } from './pdfInfo';
+import { findDate } from './rules';
 import { pagesWithoutText, readPages, textOf } from './searchable';
 import { writeFrom } from './versions';
 
@@ -39,6 +40,8 @@ export async function suggestDetails(handle: DocHandle, fileName: string, now: D
   let text = pages.join('\n').trim();
   if (!text && (await pagesWithoutText(handle, 1)).length) text = textOf(await readPages(handle, [0], undefined, signal).catch(() => []));
   const d = await describeWithAi(ai, `${fileName}\n\n${text}`, signal);
+  // The model found none: the first date in the text, as the inbox takes it.
+  if (!d.date) d.date = findDate(text);
   const stem = fileName.replace(/\.pdf$/i, '');
   const titled = now.title.trim() && now.title !== stem;
   return {
@@ -48,4 +51,14 @@ export async function suggestDetails(handle: DocHandle, fileName: string, now: D
     date: now.date || d.date,
     tags: now.tags.length ? now.tags : d.keywords,
   };
+}
+
+/** The first date in a document's first pages (its text layer only; nothing is read from the pictures). */
+export async function dateIn(handle: DocHandle): Promise<string> {
+  const pages: string[] = [];
+  for (let p = 0; p < Math.min(handle.pageCount, DESCRIBE_PAGES); p++) {
+    const runs = await handle.pageText(p).catch(() => []);
+    pages.push(runs.map((r) => r.text + (r.eol ? '\n' : ' ')).join(''));
+  }
+  return findDate(pages.join('\n'));
 }

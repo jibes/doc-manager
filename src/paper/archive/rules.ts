@@ -88,8 +88,11 @@ const SHORT_YEARS_BACK = 30;
 /** The first date in a text, as YYYY-MM-DD: 02.10.2026, 2.10.26, 2026-10-02, 2. Oktober 2026, October 2, 2026. */
 export function findDate(text: string, now = new Date()): string {
   const patterns: [RegExp, (m: RegExpExecArray) => string][] = [
-    [/\b(\d{4})-(\d{2})-(\d{2})\b/, (m) => iso(+m[1], +m[2], +m[3], now)],
-    [/\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/, (m) => iso(+m[3], +m[2], +m[1], now)],
+    // ISO, also with one-digit parts or a time after it ("2026-10-3", "2026-10-03T00:00:00Z": as a model may write it).
+    [/\b(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/, (m) => iso(+m[1], +m[2], +m[3], now)],
+    // Spaces after the dots are allowed ("03. 10. 2026"); a slash is read day first ("03/10/2026"), as in Europe.
+    [/\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b/, (m) => iso(+m[3], +m[2], +m[1], now)],
+    [/(?<![\d/])(\d{1,2})\/(\d{1,2})\/(\d{4})\b/, (m) => iso(+m[3], +m[2], +m[1], now)],
     // Two-digit years: not inside a longer dotted number, nor after a version or number word ("Version 2.1.19").
     [
       /(?<![\d.])(?<!\b(?:version|vers|ver|v|rev|release|build|nr|no)\.?\s*)\b(\d{1,2})\.(\d{1,2})\.(\d{2})\b(?!\.\d)/i,
@@ -98,7 +101,8 @@ export function findDate(text: string, now = new Date()): string {
         return y >= now.getFullYear() - SHORT_YEARS_BACK ? iso(y, +m[2], +m[1], now) : '';
       },
     ],
-    [/\b(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü]{3,9})\.?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[2])] ? iso(+m[3], MONTHS[fold(m[2])], +m[1], now) : '')],
+    // "3. Oktober 2026", also "3.Oktober 2026" and "3.Okt.2026".
+    [/\b(\d{1,2})(?:\.\s*|\s+)([A-Za-zÄÖÜäöü]{3,9})\.?\s*(\d{4})\b/, (m) => (MONTHS[fold(m[2])] ? iso(+m[3], MONTHS[fold(m[2])], +m[1], now) : '')],
     [/\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b/, (m) => (MONTHS[fold(m[1])] ? iso(+m[3], MONTHS[fold(m[1])], +m[2], now) : '')],
   ];
   // The earliest valid date in the text wins (letters put theirs near the top).
@@ -114,6 +118,16 @@ export function findDate(text: string, now = new Date()): string {
     }
   }
   return best.date;
+}
+
+/**
+ * A date as typed into a details field, as YYYY-MM-DD: typed so already, or as it is written on paper
+ * ("2.10.2026", "2. Oktober 2026"). '' for none typed; null when it isn't a date.
+ */
+export function typedDate(typed: string): string | null {
+  const s = typed.trim();
+  if (!s || /^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return findDate(s) || null;
 }
 
 /** A path part that is safe on every system Syncthing may sync to (no name ends in a dot or space, even cut short). */

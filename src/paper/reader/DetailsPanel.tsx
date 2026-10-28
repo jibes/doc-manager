@@ -6,6 +6,7 @@ import { Button, T } from '@/paper/components/primitives';
 import { fonts, radius, space, type Palette } from '@/core/design/tokens';
 import { aiMessage, t } from '@/core/i18n';
 import type { Details } from '@/paper/archive/pdfInfo';
+import { typedDate } from '@/paper/archive/rules';
 import { Panel } from './Panel';
 import { discardDetails, useDrafts } from './drafts';
 
@@ -17,6 +18,7 @@ export function DetailsPanel({
   onSave,
   onClose,
   onSuggest,
+  findDate,
 }: {
   palette: Palette;
   initial: Details;
@@ -25,10 +27,24 @@ export function DetailsPanel({
   onClose: () => void;
   /** With AI reading set up: the model's details for what is still empty (shown, saved only with Save). */
   onSuggest?: (now: Details) => Promise<Details>;
+  /** The first date in the document's text: offered when it has none of its own. */
+  findDate?: () => Promise<string>;
 }) {
   const [d, setD] = useState(initial);
   const [tag, setTag] = useState('');
   const [bad, setBad] = useState(false);
+  const [found, setFound] = useState('');
+  useEffect(() => {
+    if (initial.date || !findDate) return;
+    let live = true;
+    findDate().then(
+      (date) => live && setFound(date),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [initial.date, findDate]);
   const set = (patch: Partial<Details>) => setD((x) => ({ ...x, ...patch }));
   // Changes not saved yet: closing the panel, or leaving the document, asks first.
   const changed = !!tag.trim() || JSON.stringify(d) !== JSON.stringify(initial);
@@ -58,8 +74,9 @@ export function DetailsPanel({
     setAsking(false);
   };
   const save = () => {
-    const date = d.date.trim();
-    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return setBad(true);
+    // Written as YYYY-MM-DD; typed as it is written on paper ("2.10.2026", "2. Oktober 2026") it is turned into that.
+    const date = typedDate(d.date);
+    if (date === null) return setBad(true);
     // A tag still being typed counts.
     const tags = tag.trim() ? [...new Set([...d.tags, ...tag.split(',').map((s) => s.trim()).filter(Boolean)])] : d.tags;
     onSave({ ...d, date, tags });
@@ -96,6 +113,13 @@ export function DetailsPanel({
           <T v="caption" color={p.markRing}>
             {t.detailsBadDate}
           </T>
+        )}
+        {!!found && !d.date.trim() && (
+          <Pressable testID="detail-found-date" accessibilityRole="button" onPress={() => (setBad(false), set({ date: found }))} style={{ alignSelf: 'flex-start' }}>
+            <T v="caption" color={p.accent}>
+              {t.detailFoundDate(found)}
+            </T>
+          </Pressable>
         )}
         <View style={{ gap: space.xs }}>
           <T v="caption" color={p.muted}>

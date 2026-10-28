@@ -42,6 +42,17 @@ describe('dates', () => {
     expect(findDate('31.02.2026')).toBe('');
   });
 
+  it('reads dates written without spaces, with slashes, or as an AI may give them', () => {
+    const now = new Date('2026-10-28T12:00:00Z');
+    expect(findDate('Zürich, 3.Oktober 2026', now)).toBe('2026-10-03');
+    expect(findDate('Bern, den 3.Okt.2026', now)).toBe('2026-10-03');
+    expect(findDate('Invoice date 03/10/2026', now)).toBe('2026-10-03');
+    expect(findDate('Datum 03. 10. 2026', now)).toBe('2026-10-03');
+    expect(findDate('2026-10-03T00:00:00Z', now)).toBe('2026-10-03');
+    expect(findDate('2026-10-3', now)).toBe('2026-10-03');
+    expect(findDate('Seite 1/2 von 3', now)).toBe('');
+  });
+
   it('puts two-digit years in the right century, skips birthdays and far-off dates', () => {
     const now = new Date('2026-10-14T12:00:00Z');
     expect(findDate('geb. 03.04.67, Rechnung vom 02.10.26', now)).toBe('2026-10-02');
