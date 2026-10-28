@@ -277,6 +277,11 @@ interface InkLayer {
   darkest: Float32Array;
 }
 
+/** Width of the anti-aliased edge of print, in output pixels. */
+const EDGE_PX = 1;
+/** Widest ramp (in luma) an edge gets: a soft blur is not turned into a grey halo. */
+const MAX_RAMP = 0.35;
+
 function inkCoverage(flat: RGBAImage, adj: Adjustments, ctx: FilterContext): InkLayer {
   // A whisker of smoothing at the scale of the camera's noise straightens the
   // wobble that JPEG blocks and sensor noise put into glyph outlines; the
@@ -328,8 +333,16 @@ function inkCoverage(flat: RGBAImage, adj: Adjustments, ctx: FilterContext): Ink
     // into a black block.
     t = Math.min(t, sampleHalf(mean, x, y) - 0.015);
     t = Math.min(paperCut, Math.max(darkCut, t));
+    // The ramp spans one output pixel across the edge: (v - t) / |gradient| is
+    // the pixel's distance from the stroke's outline, so each edge pixel gets
+    // the share of it the stroke covers. A fixed ramp in luma is a fraction of
+    // a pixel on a sharp edge, and its staircase is what makes letters look
+    // coarse. Never narrower than that ramp (flat areas stay clean).
+    const gx = luma.data[x < width - 1 ? i + 1 : i] - luma.data[x > 0 ? i - 1 : i];
+    const gy = luma.data[y < height - 1 ? i + width : i] - luma.data[y > 0 ? i - width : i];
+    const grad = Math.hypot(gx, gy) / 2;
     const half = Math.min(0.05, Math.max(0.015, contrast * 0.06));
-    let c = (v - t) / (2 * half) + 0.5;
+    let c = (v - t) / Math.min(MAX_RAMP, Math.max(2 * half, grad * EDGE_PX)) + 0.5;
     // Solid dark areas go fully black over a short ramp of their own.
     if (v < darkCut) c = Math.min(c, (v - (darkCut - 0.06)) / 0.06);
     out.data[i] = c < 0 ? 0 : c > 1 ? 1 : c;

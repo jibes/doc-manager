@@ -200,7 +200,7 @@ export async function fileDocument(
   schedule(1000);
   if (!now) return filed;
   if (now.size !== read.size || now.modified !== read.modified)
-    throw new Error(`Filed as ${filed.name}, but “${p.entry.name}” changed in the inbox meanwhile: the new one stays there`);
+    throw new Error(`changed:${filed.name}\n${p.entry.name}`);
   await folders.delete(archive, inbox, [now]);
   return filed;
 }

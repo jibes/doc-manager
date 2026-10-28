@@ -2546,6 +2546,16 @@ async function desktopList() {
   const pane = page.getByTestId('doc-pane');
   check((await pane.isVisible()) && /Choose a document/.test(await pane.innerText()), 'desktop list: room beside the list for a document');
   const paneTitle = () => pane.getByTestId('reader-title').innerText().catch(() => '');
+  // Keys typed in the search field reach the list (the field keeps them from bubbling).
+  await page.getByTestId('docs-search').locator('visible=true').click();
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(300);
+  check((await page.locator('[aria-current="true"]').count()) === 1, 'desktop list: ↓ in the search field moves to the results');
+  await page.getByTestId('docs-search').locator('visible=true').click();
+  await page.keyboard.press('Meta+k');
+  const paletteFromSearch = await page.getByTestId('palette').waitFor({ timeout: 3000 }).then(() => true, () => false);
+  check(paletteFromSearch, 'desktop list: ⌘K works from the search field');
+  if (paletteFromSearch) await page.keyboard.press('Escape');
   await docRows(page).first().click();
   await pane.getByTestId('reader').waitFor();
   const first = await paneTitle();
@@ -2602,7 +2612,14 @@ async function desktopList() {
   await page.getByTestId('ask-confirm').click();
   await page.getByText('Details written into 1 document.').waitFor({ timeout: 20000 }).then(() => check(true, 'desktop list: a row dropped on Tag gets the tag'), () => check(false, 'desktop list: a row dropped on Tag gets the tag'));
 
+  // Narrowed with a document beside the list: it goes on as a screen of its own.
+  await docRows(page).first().click();
+  await pane.getByTestId('reader').waitFor();
   await page.setViewportSize({ width: 1280, height: 860 });
+  await page.waitForURL(/\/read\//, { timeout: 5000 }).catch(() => {});
+  check(/\/read\//.test(page.url()) && (await page.getByTestId('reader').locator('visible=true').first().waitFor({ timeout: 5000 }).then(() => true, () => false)), `desktop list: narrowed with a document open, it goes on as a screen (${page.url()})`);
+  await page.goBack();
+  await docRows(page).first().waitFor();
   await page.waitForTimeout(500);
   check((await pane.count()) === 0, 'desktop list: narrower, documents open as a screen again');
   await page.locator('body').click({ position: { x: 5, y: 300 } });

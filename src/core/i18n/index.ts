@@ -46,6 +46,7 @@ export function aiMessage(e: unknown): string {
   if (m === 'ai:not-api') return t.aiNotApi;
   if (m === 'ai:offline') return t.aiOffline;
   if (m === 'ai:timeout') return t.aiTimeout;
+  if (m === 'ai:redirect') return t.aiRedirect;
   const host = /^ai:(unknown-host|unreachable):(.*)$/.exec(m);
   // The Android and desktop apps make the request themselves: no browser rules (CORS) to blame there.
   const inApp = typeof window !== 'undefined' && !!((window as { TesselShell?: unknown; TesselDesktop?: unknown }).TesselShell || (window as { TesselDesktop?: unknown }).TesselDesktop);

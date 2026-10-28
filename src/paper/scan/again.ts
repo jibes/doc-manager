@@ -24,6 +24,20 @@ const JPEG_QUALITY = 0.92;
  * (saveAgain). The scan must be empty.
  */
 export async function scanAgain(doc: DocRecord, handle: DocHandle, filter: FilterId, onProgress?: (done: number, total: number) => void): Promise<void> {
+  const run = addPages(doc, handle, filter, onProgress);
+  preparing = run;
+  try {
+    await run;
+  } finally {
+    if (preparing === run) preparing = null;
+  }
+}
+
+/** Pages being put into the scanner for scanAgain: a new scan waits for them (else they would end up in it). */
+let preparing: Promise<void> | null = null;
+export const preparingAgain = () => preparing;
+
+async function addPages(doc: DocRecord, handle: DocHandle, filter: FilterId, onProgress?: (done: number, total: number) => void): Promise<void> {
   const scan = useScan.getState();
   await scan.restore();
   for (let p = 0; p < handle.pageCount; p++) {

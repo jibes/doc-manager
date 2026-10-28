@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 
 import { t } from '@/core/i18n';
 import { ask, OTHER } from '@/paper/state/ask';
+import { preparingAgain } from './again';
 import { useScan } from './session';
 
 /**
@@ -9,6 +10,8 @@ import { useScan } from './session';
  * first: they would otherwise replace that document's pages when this scan is saved.
  */
 export async function startScan() {
+  // A document's pages still coming in to be cleaned up: once they are, they are asked about as below.
+  await preparingAgain()?.catch(() => {});
   await useScan.getState().restore();
   const { replaces, clear } = useScan.getState();
   if (replaces) {

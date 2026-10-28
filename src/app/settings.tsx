@@ -114,6 +114,8 @@ export default function Settings() {
         setError(move ? t.tesselMoved(moved) : t.tesselChanged);
       } catch (e) {
         setError(e instanceof Error && e.message === 'denied' ? t.writeDenied : opError(e));
+        // A folder picked for it that didn't become the Tessel folder is let go of (Android keeps few grants).
+        if (to && usePrefs.getState().archive !== to) await folders.forget(to).catch(() => {});
       }
       // The row follows by itself (it reads the folder again when the Tessel folder changes).
     };

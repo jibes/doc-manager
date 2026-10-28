@@ -3,6 +3,7 @@
 // AI requests without the browser's cross-origin rules, "Open with" for PDFs, and access to the chosen folder
 // that survives a restart.
 const { app, BrowserWindow, ipcMain, Menu, nativeTheme, net, protocol, screen, session, shell, systemPreferences } = require('electron');
+const { Buffer } = require('node:buffer');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -324,7 +325,12 @@ ipcMain.handle('http', async (e, { id, url, method, headers, body }) => {
   running.set(key, stop);
   try {
     // Not followed: a redirect could take the key and the pages elsewhere (the address was checked, not where it sends).
-    const res = await net.fetch(url, { method, headers, body, signal: stop.signal, redirect: 'manual' });
+    const res = await net.fetch(url, { method, headers, body, signal: stop.signal, redirect: 'manual' }).catch((error) => {
+      // Electron cancels a redirect not followed instead of answering with it: the app says what it was.
+      if (/redirect was cancelled/i.test(error?.message ?? '')) return null;
+      throw error;
+    });
+    if (!res) return { status: 308, body: '' };
     return { status: res.status, body: await res.text() };
   } finally {
     // A request after a reload can have the same id: only its own entry goes.
@@ -332,3 +338,43 @@ ipcMain.handle('http', async (e, { id, url, method, headers, body }) => {
   }
 });
 ipcMain.on('http-abort', (e, id) => running.get(`${e.sender.id}:${id}`)?.abort());
+
+/**
+ * Printing: the page's own print of a PDF (in a frame) does nothing here, as Electron has no PDF viewer to print
+ * from. The app draws the pages (JPEG, each as large as print needs) and they are printed from a hidden window
+ * of their own, with the system's print dialog. Where that fails, the PDF opens in the system's viewer to print.
+ */
+ipcMain.handle('print', async (e, { name, pages, pdf }) => {
+  if (!ours(e.senderFrame?.url) || !Array.isArray(pages)) throw new Error('Not allowed');
+  const dir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'tessel-print-'));
+  const clean = () => fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+  try {
+    const imgs = [];
+    for (const [i, page] of pages.entries()) {
+      await fs.promises.writeFile(path.join(dir, `${i}.jpg`), Buffer.from(page));
+      imgs.push(`<img src="${i}.jpg">`);
+    }
+    // Each page fills a sheet, in its own shape: margins as the printer needs them, never cut.
+    const html = `<!doctype html><meta charset="utf-8"><title>${String(name).replace(/[<&]/g, '')}</title><style>
+@page { margin: 0 } html, body { margin: 0 } img { display: block; width: 100vw; height: 100vh; object-fit: contain; break-after: page }
+img:last-child { break-after: auto }</style>${imgs.join('')}`;
+    const file = path.join(dir, 'print.html');
+    await fs.promises.writeFile(file, html);
+    const win = new BrowserWindow({ show: false, parent: BrowserWindow.fromWebContents(e.sender) ?? undefined, webPreferences: { sandbox: true, contextIsolation: true, javascript: false } });
+    try {
+      await win.loadFile(file);
+      const done = await new Promise((resolve) => win.webContents.print({ silent: false, printBackground: true }, (ok, reason) => resolve({ ok, reason })));
+      if (done.ok || /cancel/i.test(done.reason ?? '')) return true;
+    } finally {
+      win.destroy();
+    }
+  } catch {
+    // Through the system's viewer below.
+  } finally {
+    setTimeout(clean, 60_000);
+  }
+  if (!pdf) return false;
+  const copy = path.join(app.getPath('temp'), String(name).replace(/[\\/:*?"<>|]/g, '_') || 'Tessel.pdf');
+  await fs.promises.writeFile(copy, Buffer.from(pdf));
+  return (await shell.openPath(copy)) === '';
+});

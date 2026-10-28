@@ -113,11 +113,15 @@ export default function Documents() {
   // A wide desktop window: the list, and beside it the document opened from it.
   const split = Platform.OS === 'web' && (winWidth >= SPLIT_MIN || paneEdited);
   const mainWidth = split ? LIST_W : winWidth;
-  // Too narrow for it: the document beside the list is closed (not shown again when the window is wider).
-  useEffect(() => {
-    if (!split) closePane();
-  }, [split]);
   const focused = useIsFocused();
+  // Too narrow for it (the window made narrower, or saved changes no longer keep it): the document beside the
+  // list goes on as a screen of its own, where it was (its place is kept as it is read).
+  useEffect(() => {
+    if (split) return;
+    const open = usePane.getState().doc;
+    closePane();
+    if (open && focused) router.push({ pathname: '/read/[id]', params: { id: open.id } });
+  }, [split, focused]);
   // Only while the list is the screen shown: a document opened from Inbox or Duplicates on top opens as a screen.
   useEffect(() => {
     usePane.setState({ split: split && focused });
@@ -520,8 +524,14 @@ export default function Documents() {
       const gone = k.selected ? k.picked : hit ? [hit.doc] : [];
       if (((mod && key === 'Backspace') || key === 'Delete') && k.deletable(gone)) return e.preventDefault(), void k.remove(gone);
     };
+    // The search field keeps its keys from bubbling (react-native-web's TextInput): its own are taken on the way in.
+    const onSearchKey = (e: KeyboardEvent) => (e.target as HTMLElement | null)?.getAttribute?.('data-testid') === 'docs-search' && onKey(e);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onSearchKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onSearchKey, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is the screen's notice (stable enough); the rest is read from `keys`.
   }, [focused]);
   // The row with the cursor stays in sight.
@@ -967,7 +977,7 @@ const styles = StyleSheet.create({
   // The select bar over the top of the list while picking, wherever it is scrolled to.
   list: { width: LIST_W, borderRightWidth: StyleSheet.hairlineWidth },
   paneEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.md },
-  stickyBar: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', paddingBottom: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
+  stickyBar: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   fab: { position: 'absolute', width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   // Clear of + on either side, wherever the list ends.
   colophon: { alignSelf: 'center', marginTop: space.xxl, marginHorizontal: 56 + space.lg, paddingVertical: space.sm },

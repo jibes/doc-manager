@@ -77,6 +77,7 @@ export const AI_BAD_URL = 'ai:bad-url';
 export const AI_INSECURE = 'ai:insecure';
 /** "ai:unreachable:<host>": no answer at all (offline, wrong address, or a browser rule against the request). */
 export const AI_UNREACHABLE = 'ai:unreachable';
+export const AI_REDIRECT = 'ai:redirect';
 /** The address answered, but not as an AI API does (a login page, a proxy's error page). */
 export const AI_NOT_API = 'ai:not-api';
 /** "ai:server <status> <what it said>". */
@@ -257,7 +258,14 @@ async function post(url: string, init: { headers: Record<string, string>; body: 
   }
 }
 
+/** A redirect isn't followed (it could take the key and the pages elsewhere): said as such, on every platform. */
 async function request(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
+  const r = await requestOnce(url, init);
+  if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) throw new Error(AI_REDIRECT);
+  return r;
+}
+
+async function requestOnce(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }): Promise<Response> {
   // The desktop app makes the request itself: an address's cross-origin rules don't know the app's origin.
   if (desktop) {
     init.signal?.throwIfAborted();
@@ -270,8 +278,7 @@ async function request(url: string, init: { headers: Record<string, string>; bod
     return new Response(r.body, { status: r.status });
   }
   if (!shell)
-    // A redirect isn't followed (it could take the key and the pages elsewhere): it fails as no answer does.
-    return fetch(url, { method: 'POST', ...init, redirect: 'error' }).catch((e: unknown) => {
+    return fetch(url, { method: 'POST', ...init, redirect: 'manual' }).catch((e: unknown) => {
       // No answer at all (offline, a wrong address, or the browser's rules against the request): said as such.
       if (e instanceof TypeError) throw new Error(`${AI_UNREACHABLE}:${new URL(url).host}`);
       throw e;

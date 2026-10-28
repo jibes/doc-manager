@@ -27,7 +27,7 @@ async function mayLeave(): Promise<boolean> {
   const answer = await ask(
     edited
       ? { title: t.unsavedTitle, body: details ? t.unsavedSaveFirstDetails : t.unsavedSaveFirst, confirm: t.save, other: t.discard }
-      : { title: t.unsavedTitle, body: t.unsavedLeave, confirm: t.discard, destructive: true },
+      : { title: t.unsavedTitle, body: details && !useDrafts.getState().field ? t.unsavedLeaveDetails : t.unsavedLeave, confirm: t.discard, destructive: true },
   );
   if (answer === null) return false;
   if (edited && answer !== OTHER && !(await reader!.save())) return false;

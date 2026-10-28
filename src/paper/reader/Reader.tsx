@@ -598,10 +598,16 @@ export function Reader({
   );
   // Notes are addressed by their place on the page: one change at a time, and the list kept right meanwhile.
   const noteBusy = useRef(false);
+  // A note being edited is addressed by its place when saved: nothing may delete one meanwhile (the places after
+  // it would move, and another note's text be replaced).
+  const noteEditing = useRef(false);
   const onEditNote = useCallback(
     async (a: Annotation) => {
-      if (noteBusy.current) return;
-      const contents = await askNote(a.contents, a.quote);
+      if (noteBusy.current || noteEditing.current) return;
+      noteEditing.current = true;
+      const contents = await askNote(a.contents, a.quote).finally(() => {
+        noteEditing.current = false;
+      });
       if (contents == null || contents === a.contents || noteBusy.current) return;
       noteBusy.current = true;
       edits.step();
@@ -620,7 +626,7 @@ export function Reader({
   );
   const onDeleteNote = useCallback(
     async (a: Annotation) => {
-      if (noteBusy.current) return;
+      if (noteBusy.current || noteEditing.current) return;
       noteBusy.current = true;
       edits.step();
       await handle
@@ -639,7 +645,7 @@ export function Reader({
   // Undo, redo: the document comes back as it was; every page is drawn again, the notes read again.
   const travel = useCallback(
     async (back: boolean) => {
-      if (noteBusy.current || !(await (back ? edits.undo() : edits.redo()))) return;
+      if (noteBusy.current || noteEditing.current || !(await (back ? edits.undo() : edits.redo()))) return;
       for (let pg = 0; pg < handle.pageCount; pg++) cache.invalidate(pg);
       // The notes as they were are gone (their places may differ now): none listed until read again, and no menu
       // for one of them stays open. Text view reads the form's values as they are now.
@@ -967,7 +973,7 @@ export function Reader({
   );
   const onRecolor = useCallback(
     async (a: Annotation, color: string) => {
-      if (noteBusy.current) return;
+      if (noteBusy.current || noteEditing.current) return;
       noteBusy.current = true;
       edits.step();
       await handle
@@ -1341,7 +1347,8 @@ export function Reader({
       <Toast message={panel && !wide ? null : (edits.notice ?? reloaded)} onDismiss={() => (edits.clearNotice(), setReloaded(null))} />
     </View>
       {docked && (findPanel || detailsPanel) && (
-        <View testID="side-panels" style={[styles.side, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
+        // Under an open note dialog, as the page is (its scrim covers only the page).
+        <View testID="side-panels" pointerEvents={noteRequest ? 'none' : 'auto'} style={[styles.side, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: p.surface, borderColor: p.hairline }]}>
           <Docked.Provider value>
             {findPanel}
             {detailsPanel}

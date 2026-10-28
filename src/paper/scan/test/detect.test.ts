@@ -117,7 +117,17 @@ describe('camera selection', () => {
 describe('fullPicture', () => {
   it("asks for the camera's largest size, uncropped", () => {
     const caps = { width: { min: 1, max: 4000 }, height: { min: 1, max: 3000 }, resizeMode: ['none', 'crop-and-scale'] };
-    expect(fullPicture(caps as MediaTrackCapabilities)).toEqual({ width: { ideal: 4000 }, height: { ideal: 3000 }, resizeMode: { ideal: 'none' } });
+    expect(fullPicture(caps as MediaTrackCapabilities, false)).toEqual({ width: { ideal: 4000 }, height: { ideal: 3000 }, resizeMode: { ideal: 'none' } });
+  });
+
+  it('scales the preview down, in the sensor\'s shape, when ImageCapture takes the still', () => {
+    const caps = { width: { min: 1, max: 4000 }, height: { min: 1, max: 3000 }, resizeMode: ['none', 'crop-and-scale'] };
+    expect(fullPicture(caps as MediaTrackCapabilities, true)).toEqual({
+      width: { ideal: 1920 },
+      height: { ideal: 1440 },
+      frameRate: { ideal: 30 },
+      resizeMode: { ideal: 'crop-and-scale' },
+    });
   });
 
   it('asks for nothing a camera does not report', () => {

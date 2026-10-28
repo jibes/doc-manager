@@ -15,8 +15,12 @@ import { FilterChips } from '@/paper/scan/ui/FilterChips';
 import { HoldButton } from '@/paper/scan/ui/HoldButton';
 import { PageImage } from '@/paper/scan/ui/PageImage';
 import { Unsupported } from '@/paper/scan/ui/Unsupported';
+import { ZoomView } from '@/paper/scan/ui/ZoomView';
+import { RESOLUTION_LONG_EDGE } from '@/paper/scan/types';
 
 const PREVIEW_EDGE = 1600;
+/** Zoomed in: rendered as large as a saved page, so what is seen is what is saved. */
+const ZOOM_EDGE = RESOLUTION_LONG_EDGE.high;
 
 /** One scanned page: filter, turn, crop, retake or delete it; step through the others. */
 export default function ScanPage() {
@@ -25,6 +29,7 @@ export default function ScanPage() {
   const { pages, loaded, restore, update, remove, applyToAll } = useScan();
   const [comparing, setComparing] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
   const { text: message, undo, id: messageId } = useScanMessage();
   // Messages go above the filters and actions (Undo where Retake is would be a trap).
   const [panelH, setPanelH] = useState(0);
@@ -97,10 +102,13 @@ export default function ScanPage() {
       )}
 
       <View style={styles.preview}>
-        <View style={{ flex: 1, display: comparing ? 'none' : 'flex' }}>
-          <PageImage key={page.id} page={page} longEdge={PREVIEW_EDGE} channel="page-preview" onRendering={setRendering} />
-        </View>
-        {comparing && <PageImage page={page} longEdge={PREVIEW_EDGE} channel="page-original" unfiltered />}
+        {/* A new page starts unzoomed. */}
+        <ZoomView key={page.id} onZoomed={setZoomed}>
+          <View style={{ flex: 1, height: '100%', display: comparing ? 'none' : 'flex' }}>
+            <PageImage page={page} longEdge={zoomed ? ZOOM_EDGE : PREVIEW_EDGE} channel="page-preview" onRendering={setRendering} />
+          </View>
+          {comparing && <PageImage page={page} longEdge={zoomed ? ZOOM_EDGE : PREVIEW_EDGE} channel="page-original" unfiltered />}
+        </ZoomView>
         {rendering && (
           <View pointerEvents="none" style={styles.working}>
             <T v="caption" color="rgba(255,255,255,0.8)">

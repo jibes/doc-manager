@@ -12,11 +12,11 @@ import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Thumbnail } from '@/paper/components/DocItems';
 import { Field } from '@/paper/components/Field';
 import { Icon } from '@/paper/components/Icon';
-import { Button, IconButton, T } from '@/paper/components/primitives';
+import { Button, T } from '@/paper/components/primitives';
 import { ScreenHeader } from '@/paper/components/ScreenHeader';
 import { Toast } from '@/paper/components/Toast';
 import { fonts, radius, space } from '@/core/design/tokens';
-import { aiMessage, t } from '@/core/i18n';
+import { aiMessage, opError, t } from '@/core/i18n';
 import { aiReady } from '@/paper/scan/ai';
 import { libraryActions } from '@/paper/state/library';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
@@ -26,7 +26,14 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const AI_WAIT_MS = 120_000;
 
 type Edits = Partial<Omit<Details, 'tags'>> & { tags?: string };
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** What went wrong, in words: the codes storage throws ("denied") as the other screens put them. */
+const message = (e: unknown) => {
+  const m = e instanceof Error ? e.message : String(e);
+  const changed = /^changed:([^\n]*)\n(.*)$/s.exec(m);
+  if (changed) return t.inboxChangedMeanwhile(changed[1], changed[2]);
+  const known = opError(e);
+  return known !== t.opFailed ? known : m || known;
+};
 const tagsOf = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
 /** A proposal's details with what the user typed over them. */
@@ -41,6 +48,8 @@ const detailsOf = (p: Proposal, e: Edits = {}): Details => ({
 /** The inbox: each new document with its proposed details and destination, to check and file. */
 /** What was typed into the inbox's cards, by file (until filed or the app closes). */
 const useInboxEdits = create<{ edits: Record<string, Edits> }>(() => ({ edits: {} }));
+/** What a document's typed details are kept under: a later file of the same name (a scanner's next Scan.pdf) is another. */
+const editKey = (item: Proposal) => `${item.entry.id}|${item.entry.size}|${item.entry.modified}`;
 
 export default function Inbox() {
   const p = usePalette();
@@ -63,7 +72,13 @@ export default function Inbox() {
   const [filingAll, setFilingAll] = useState(false);
   // Filing with rules that couldn't be read would file by others (the default ones): it waits for them.
   const rulesUnreadable = useRulesUnreadable((s) => s.unreadable);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeText] = useState<string | null>(null);
+  // Each notice its own, so a second like the first (two discards) gets its own time and Undo.
+  const [noticeId, setNoticeId] = useState(0);
+  const setNotice = (text: string | null) => {
+    setNoticeText(text);
+    if (text) setNoticeId((n) => n + 1);
+  };
   // Undo for the last removed: put back from the trash, and the inbox read again.
   const [undo, setUndo] = useState<(() => void) | null>(null);
   const [reread, setReread] = useState(0);
@@ -93,9 +108,9 @@ export default function Inbox() {
   }, [archive, here, reread]);
 
   const proposals = (items ?? []).map((item) => withRules(item, rules));
-  const pathOf = (item: Proposal) => destination(detailsOf(item, edits[item.entry.id]), item.entry, rules, t.inboxUnknownSender);
+  const pathOf = (item: Proposal) => destination(detailsOf(item, edits[editKey(item)]), item.entry, rules, t.inboxUnknownSender);
   const valid = (item: Proposal) => {
-    const d = detailsOf(item, edits[item.entry.id]);
+    const d = detailsOf(item, edits[editKey(item)]);
     return !d.date || DATE.test(d.date);
   };
 
@@ -114,7 +129,7 @@ export default function Inbox() {
       archive,
       dir,
       item,
-      detailsOf(item, edits[id]),
+      detailsOf(item, edits[editKey(item)]),
       path,
       (done, total) => setProgress((all) => ({ ...all, [id]: t.searchableProgress(done, total) })),
       libraryActions().followEntry,
@@ -125,7 +140,7 @@ export default function Inbox() {
         return true;
       },
       (e: unknown) => {
-        setNotice(t.inboxFailed(message(e)));
+        setNotice(e instanceof Error && e.message.startsWith('changed:') ? message(e) : t.inboxFailed(message(e)));
         return false;
       },
     );
@@ -180,15 +195,15 @@ export default function Inbox() {
   // The model fills in the details; what the user types meanwhile stays. It gets two minutes.
   const askAi = async (item: Proposal) => {
     const id = item.entry.id;
-    const before = edits[id] ?? {};
+    const before = edits[editKey(item)] ?? {};
     setBusy((b) => new Set(b).add(id));
     await suggest({ ...item, details: detailsOf(item, before) }, ai, AbortSignal.timeout(AI_WAIT_MS)).then(
       (d) => {
         const got: Edits = { title: d.title, sender: d.sender, type: d.type, date: d.date, tags: d.tags.join(', ') };
         setEdits((all) => {
-          const now = all[id] ?? {};
+          const now = all[editKey(item)] ?? {};
           const kept = Object.fromEntries((Object.keys(got) as (keyof Edits)[]).filter((k) => now[k] !== before[k]).map((k) => [k, now[k]]));
-          return { ...all, [id]: { ...now, ...got, ...kept } };
+          return { ...all, [editKey(item)]: { ...now, ...got, ...kept } };
         });
       },
       (e: unknown) => setNotice(aiMessage(e)),
@@ -238,8 +253,8 @@ export default function Inbox() {
                     key={item.entry.id}
                     item={item}
                     archive={archive}
-                    edits={edits[item.entry.id] ?? {}}
-                    onEdit={(e) => setEdits((all) => ({ ...all, [item.entry.id]: { ...all[item.entry.id], ...e } }))}
+                    edits={edits[editKey(item)] ?? {}}
+                    onEdit={(e) => setEdits((all) => ({ ...all, [editKey(item)]: { ...all[editKey(item)], ...e } }))}
                     path={pathOf(item)}
                     valid={valid(item) && !rulesUnreadable}
                     busy={busy.has(item.entry.id)}
@@ -255,7 +270,7 @@ export default function Inbox() {
           )}
         </View>
       </ScrollView>
-      <Toast message={notice} onDismiss={() => (setNotice(null), setUndo(null))} action={undo && notice === t.trashedN(1) ? { label: t.undo, onPress: undo } : undefined} />
+      <Toast message={notice} id={noticeId} onDismiss={() => (setNotice(null), setUndo(null))} action={undo && notice === t.trashedN(1) ? { label: t.undo, onPress: undo } : undefined} />
     </SubFrame>
   );
 }

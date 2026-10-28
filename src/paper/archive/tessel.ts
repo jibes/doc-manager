@@ -75,15 +75,24 @@ export async function changeTessel(to: string | null, move: boolean): Promise<nu
   // The new folder is the Tessel folder before anything moves: a folder that can't take it is told before.
   await setArchive(to);
   if (move) {
-    if (await hasFolders(from)) await flatten(from);
-    const top = pdfs(await folders.list(from));
-    if (top.length) await folders.transfer({ root: from }, top, { root: target }, true);
-    moved += top.length;
-    const inbox = (await folders.list(from)).find((e) => e.kind === 'dir' && e.name === INBOX);
-    const waiting = inbox ? pdfs(await folders.list(from, inbox.id)) : [];
-    if (waiting.length) await folders.transfer({ root: from, dir: inbox!.id }, waiting, { root: target, dir: await inboxDir(target) }, true);
-    moved += waiting.length;
-    await moveTrash(from, target).catch((e: unknown) => log.warn('tessel', 'trash not moved', e));
+    try {
+      if (await hasFolders(from)) await flatten(from);
+      const top = pdfs(await folders.list(from));
+      if (top.length) await folders.transfer({ root: from }, top, { root: target }, true);
+      moved += top.length;
+      const inbox = (await folders.list(from)).find((e) => e.kind === 'dir' && e.name.toLowerCase() === INBOX.toLowerCase());
+      const waiting = inbox ? pdfs(await folders.list(from, inbox.id)) : [];
+      if (waiting.length) await folders.transfer({ root: from, dir: inbox!.id }, waiting, { root: target, dir: await inboxDir(target) }, true);
+      moved += waiting.length;
+    } catch (error) {
+      // Stopped part way: the old folder stays the Tessel folder, with its documents listed, so trying again
+      // moves the rest (what moved already is in the new folder).
+      await setArchive(from === APP_ROOT_ID ? null : from);
+      throw error;
+    }
+    // This device's own storage keeps no trash (nothing there would show or empty it): a folder left for it
+    // keeps its own, on the disk where it is.
+    if (to !== null) await moveTrash(from, target).catch((e: unknown) => log.warn('tessel', 'trash not moved', e));
   }
   // Out of the list at once (the new folder's come as it is read).
   forget(listed);

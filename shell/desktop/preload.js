@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('TesselDesktop', {
     ipcRenderer.send('ready-for-files');
     return stop;
   },
+  /** Prints pages drawn by the app (JPEG bytes each), with the system's dialog; the PDF opens to print where that fails. */
+  print: (job) => ipcRenderer.invoke('print', job),
   /** A command chosen in the menu bar ('undo', 'find', 'scan', …). Returns what stops listening. */
   onMenu: (cb) => listen('menu', cb),
   /** A newer version is out ({ version, url }), or (asked for) none newer { version: null } or the check failed

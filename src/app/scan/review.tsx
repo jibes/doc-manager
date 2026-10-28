@@ -176,7 +176,9 @@ export default function ScanReview() {
     );
     if (answer === null) return;
     clear();
-    if (was) router.replace({ pathname: '/read/[id]', params: { id: was.id } });
+    // Back to the document it came from (not a second copy of it on top).
+    if (was && router.canGoBack()) router.back();
+    else if (was) router.replace({ pathname: '/read/[id]', params: { id: was.id } });
     else router.replace('/');
   };
 

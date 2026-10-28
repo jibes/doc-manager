@@ -228,6 +228,14 @@ export const useLibrary = create<LibraryState>((set, get) => {
     const app = tessel ? null : await folders.appFolder().catch(() => null);
     const to = tessel ? { root: tessel, dir: await inboxDir(tessel).catch(() => undefined) } : app ? { root: app.id } : null;
     if (!to) return;
+    // What the shared folder has already (another device moved its copy, or it was filed there): not again.
+    const there = tessel
+      ? new Set(
+          (await import('@/paper/archive/indexer').then((m) => m.allDocs()).catch(() => []))
+            .filter((x) => x.place.kind === 'folder' && x.place.root === tessel)
+            .map((x) => x.share),
+        )
+      : new Set<string | undefined>();
     // One that can't be moved doesn't keep the others where they are.
     let failed = false;
     for (const d of get().docs) {
@@ -239,14 +247,18 @@ export const useLibrary = create<LibraryState>((set, get) => {
         continue;
       }
       if (src.kind !== 'bytes') continue;
+      if (there.size && there.has(await docKey(src.bytes).catch(() => ''))) continue;
+      let made: FolderEntry | null = null;
       try {
-        const made = await folders.create(to, d.fileName, new Blob([src.bytes], { type: 'application/pdf' }));
+        made = await folders.create(to, d.fileName, new Blob([src.bytes], { type: 'application/pdf' }));
         if (made.uri) await repo.relink(d.id, made.uri);
         else if (made.handle) await repo.saveFile(d.id, made.handle);
         else continue;
-        patch(d.id, (x) => ({ ...x, linked: true, fileName: made.name }));
+        patch(d.id, (x) => ({ ...x, linked: true, fileName: made!.name }));
       } catch {
         failed = true;
+        // Not left behind unlinked: the next try would make "Name (2).pdf".
+        if (made) await folders.delete(to.root, to.dir, [made]).catch(() => {});
       }
     }
     if (failed) writeStored(MOVE_FAILED, String(Date.now()));

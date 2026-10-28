@@ -5,7 +5,7 @@ import { INBOX } from './dirs';
 export type Flattened = { moved: number; renamed: number; kept: number };
 
 /** Folders of the Tessel folder that are its own: the inbox (and hidden ones, which aren't listed). */
-const own = (e: FolderEntry) => e.kind === 'dir' && e.name === INBOX;
+const own = (e: FolderEntry) => e.kind === 'dir' && e.name.toLowerCase() === INBOX.toLowerCase();
 
 /** Whether the Tessel folder still has folders with documents in them (from before it was flat). */
 export async function hasFolders(root: string): Promise<boolean> {

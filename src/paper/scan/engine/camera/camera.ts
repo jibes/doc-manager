@@ -75,13 +75,17 @@ export async function listCameras(): Promise<CameraDevice[]> {
 
 /* --------------------------------------------------------------- stream ---- */
 
+/** Long edge of the preview stream when stills come from ImageCapture. */
+export const PREVIEW_LONG_EDGE = 1920;
+
 function request(deviceId: string | null): Promise<MediaStream> {
   const video: MediaTrackConstraints = {
-    // A first guess at a phone sensor's full picture (4:3); `fullPicture` then
-    // asks for the camera's own largest size. A 16:9 request would cut the top
-    // and bottom off a 4:3 sensor.
-    width: { ideal: 4096 },
-    height: { ideal: 3072 },
+    // A first guess at a phone sensor's picture (4:3); `fullPicture` then asks
+    // for the camera's own size. A 16:9 request would cut the top and bottom
+    // off a 4:3 sensor.
+    ...(typeof ImageCapture !== 'undefined'
+      ? { width: { ideal: PREVIEW_LONG_EDGE }, height: { ideal: (PREVIEW_LONG_EDGE * 3) / 4 } }
+      : { width: { ideal: 4096 }, height: { ideal: 3072 } }),
   };
   if (deviceId) video.deviceId = { exact: deviceId };
   else video.facingMode = { ideal: 'environment' };
@@ -142,15 +146,26 @@ export async function openCamera(deviceId: string | null): Promise<OpenCamera> {
 }
 
 /**
- * The camera's whole picture: its largest size, uncropped and unscaled. The
- * preview then shows everything the sensor sees (black bars where its shape
- * differs from the screen's), and the video frame, the still on browsers
- * without ImageCapture, has every pixel the camera streams.
+ * The camera's whole picture, uncropped (black bars where its shape differs
+ * from the screen's): what is framed is what is taken. Where the still comes
+ * from the video frame (no ImageCapture: Safari), at the largest size the
+ * camera streams; where ImageCapture takes it from the sensor, scaled down to
+ * `PREVIEW_LONG_EDGE` with the sensor's shape, since phones stream their full
+ * sensor size at a fraction of the frame rate and every frame costs to draw.
  */
-export function fullPicture(caps: MediaTrackCapabilities): MediaTrackConstraints {
+export function fullPicture(caps: MediaTrackCapabilities, stills = typeof ImageCapture !== 'undefined'): MediaTrackConstraints {
   const width = caps.width?.max;
   const height = caps.height?.max;
   const native = (caps as { resizeMode?: string[] }).resizeMode?.includes('none');
+  if (stills && width && height && Math.max(width, height) > PREVIEW_LONG_EDGE) {
+    const k = PREVIEW_LONG_EDGE / Math.max(width, height);
+    return {
+      width: { ideal: Math.round(width * k) },
+      height: { ideal: Math.round(height * k) },
+      frameRate: { ideal: 30 },
+      ...(native ? { resizeMode: { ideal: 'crop-and-scale' } } : {}),
+    } as MediaTrackConstraints;
+  }
   return {
     ...(width && height ? { width: { ideal: width }, height: { ideal: height } } : {}),
     ...(native ? { resizeMode: { ideal: 'none' } } : {}),

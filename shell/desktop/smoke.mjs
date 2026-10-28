@@ -63,6 +63,25 @@ try {
   }
   const state = found ? '' : await page.evaluate(() => `${location.pathname}, ${innerWidth}px, active ${document.activeElement?.tagName}`);
   check(found, `a menu command does what its key does (Find) ${state}`);
+  // Print (⌘P): the pages, drawn by the app, go to the system's print dialog from a window of their own
+  // (Electron prints no PDF in a frame). The dialog is stood in for: what it was handed is kept.
+  await app.evaluate(({ BrowserWindow }) => {
+    const proto = Object.getPrototypeOf(BrowserWindow.getAllWindows()[0].webContents);
+    globalThis.printed = null;
+    proto.print = function (options, done) {
+      this.capturePage().then((img) => {
+        globalThis.printed = { url: this.getURL(), size: img.getSize() };
+        done(true, '');
+      });
+    };
+  });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+p' : 'Control+p');
+  let printed = null;
+  for (let i = 0; i < 40 && !printed; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    printed = await app.evaluate(() => globalThis.printed);
+  }
+  check(!!printed && /print\.html$/.test(printed.url), `print hands the pages to the print dialog (${printed?.url ?? 'nothing printed'})`);
   // A document in a window of its own: the app's own page, in a window of the app.
   const [second] = await Promise.all([app.waitForEvent('window', { timeout: 15000 }), page.evaluate(() => window.open('/', '_blank'))]);
   check(!!second && second.url().startsWith('app://tessel/'), `opens a second window of the app (${second?.url()})`);

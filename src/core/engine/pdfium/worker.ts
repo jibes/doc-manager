@@ -530,20 +530,29 @@ function continues(run: { rect: NormRect; right: number }, rc: NormRect): { left
 const lowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
 
 /**
- * A glyph's box as the page's content has it (before the page's own rotation; y down): text runs along it as
- * written, so a page turned a quarter (/Rotate 90) reads its lines as lines, not a run per glyph.
+ * A glyph's box in the space its line runs across (y down), and which space that is. Mostly the page as shown;
+ * but on a page turned a quarter (/Rotate 90) whose text was written across the unturned page (and so reads
+ * sideways), the content's own space: there its lines run across, where shown they run down, a run per glyph.
+ * Text written upright on the turned page (Tessel's own text layer on a turned scan) stays in shown space.
  */
-const rawBox = (l: number, t: number, r: number, b: number): NormRect => ({ x: l, y: -t, w: r - l, h: t - b });
+function glyphBox(text: number, i: number, quarter: number, norm: Norm, l: number, t: number, r: number, b: number): { rc: NormRect; raw: boolean } {
+  if (quarter % 2) {
+    const angle = M.FPDFText_GetCharAngle(text, i);
+    const across = angle >= 0 && Math.abs(Math.sin(angle)) < 0.38;
+    if (across) return { rc: { x: l, y: -t, w: r - l, h: t - b }, raw: true };
+  }
+  return { rc: norm(l, t, r, b), raw: false };
+}
 const shown = (norm: Norm, raw: NormRect) => norm(raw.x, -raw.y, raw.x + raw.w, -(raw.y + raw.h));
 const sameRow = (a: NormRect, b: NormRect) => Math.abs(a.y + a.h / 2 - (b.y + b.h / 2)) < Math.min(a.h, b.h) * 0.5;
 
-/** A run (its box as the content has it) taking in a glyph's; its box on the page shown follows. */
-function extend(run: { rect: NormRect; raw: NormRect; right: number }, rc: NormRect, norm: Norm) {
+/** A run (its box in its line's space) taking in a glyph's; its box on the page shown follows. */
+function extend(run: { rect: NormRect; raw: NormRect; right: number; inRaw: boolean }, rc: NormRect, norm: Norm) {
   const g = { rect: run.raw, right: run.right };
   grow(g, rc);
   run.raw = g.rect;
   run.right = g.right;
-  run.rect = shown(norm, run.raw);
+  run.rect = run.inRaw ? shown(norm, run.raw) : run.raw;
 }
 
 /** A run widened to take in a glyph's box, on either side. */
@@ -559,10 +568,11 @@ function grow(run: { rect: NormRect; right: number }, rc: NormRect) {
 /** Groups characters into same-line runs for the selectable text layer. */
 function pageText(docId: number, pageIndex: number): TextRun[] {
   const d = getDoc(docId);
-  return withTextPage(d, pageIndex, [], (_page, text, norm) => {
+  return withTextPage(d, pageIndex, [], (page, text, norm) => {
     const runs: TextRun[] = [];
     const n = M.FPDFText_CountChars(text);
-    let cur: (TextRun & { raw: NormRect; right: number }) | null = null;
+    const quarter = M.FPDFPage_GetRotation(page);
+    let cur: (TextRun & { raw: NormRect; right: number; inRaw: boolean }) | null = null;
     const flush = (eol: boolean) => {
       if (cur && cur.text.trim()) runs.push({ text: cur.text.replace(/\s+$/, ''), rect: cur.rect, eol });
       cur = null;
@@ -586,16 +596,16 @@ function pageText(docId: number, pageIndex: number): TextRun[] {
           if (cur && ch === ' ') cur.text += ' ';
           continue;
         }
-        const rc = rawBox(l, t, r, b);
-        const c = cur as (TextRun & { raw: NormRect; right: number }) | null;
-        const on = c && continues({ rect: c.raw, right: c.right }, rc);
+        const { rc, raw } = glyphBox(text, i, quarter, norm, l, t, r, b);
+        const c = cur as (TextRun & { raw: NormRect; right: number; inRaw: boolean }) | null;
+        const on = c && c.inRaw === raw && continues({ rect: c.raw, right: c.right }, rc);
         if (c && on) {
           if (on.gap > c.raw.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
           c.text += ch;
           extend(c, rc, norm);
         } else {
-          flush(!!c && !sameRow(rc, c.raw));
-          cur = { text: ch, rect: norm(l, t, r, b), raw: rc, eol: false, right: rc.x + rc.w };
+          flush(!!c && (c.inRaw !== raw || !sameRow(rc, c.raw)));
+          cur = { text: ch, rect: norm(l, t, r, b), raw: rc, inRaw: raw, eol: false, right: rc.x + rc.w };
         }
       }
     });
@@ -647,7 +657,8 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
   const roles = structRoles(page);
   const lines: TextLine[] = [];
   const n = M.FPDFText_CountChars(text);
-  let cur: (TextLine & { raw: NormRect; right: number }) | null = null;
+  const quarter = M.FPDFPage_GetRotation(page);
+  let cur: (TextLine & { raw: NormRect; right: number; inRaw: boolean }) | null = null;
   const flush = () => {
     const c = cur;
     cur = null;
@@ -694,9 +705,9 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
         if (cur && ch === ' ') cur.text += ' ';
         continue;
       }
-      const rc = rawBox(l, t, r, b);
-      const c = cur as (TextLine & { raw: NormRect; right: number }) | null;
-      const on = c && c.sid === role?.sid && continues({ rect: c.raw, right: c.right }, rc);
+      const { rc, raw } = glyphBox(text, i, quarter, norm, l, t, r, b);
+      const c = cur as (TextLine & { raw: NormRect; right: number; inRaw: boolean }) | null;
+      const on = c && c.sid === role?.sid && c.inRaw === raw && continues({ rect: c.raw, right: c.right }, rc);
       if (c && on) {
         if (on.gap > c.raw.h * 0.2 && !c.text.endsWith(' ')) c.text += ' ';
         c.text += ch;
@@ -714,6 +725,7 @@ function pageLines(page: number, text: number, norm: Norm): TextLine[] {
           text: ch,
           rect: norm(l, t, r, b),
           raw: rc,
+          inRaw: raw,
           right: rc.x + rc.w,
           size: Math.round(M.FPDFText_GetFontSize(text, i) * 10) / 10,
           bold: weight >= 600 || (f & 0x40000) !== 0 || /bold|black|heavy|semibold/i.test(fontName),

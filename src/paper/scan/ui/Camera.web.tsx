@@ -48,8 +48,27 @@ const DARK_LUMA = 0.16;
 /** A transparent pixel: no default poster while the stream starts. */
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 
+/**
+ * What the outline's colour says: looking (blue), keep still (amber: counting down or taking the photo) and
+ * taken, move on (green). Green only ever means the photo is safe, never "about to".
+ */
 const BLUE = '#5B8CFF';
+const AMBER = '#FFB238';
 const GREEN = '#3DDC84';
+/** How long "taken" is shown over the picture. */
+const TAKEN_MS = 900;
+/** Circumference of the shutter's countdown ring. */
+const RING = 2 * Math.PI * 35;
+
+type Phase = 'search' | 'hold' | 'shoot' | 'taken' | 'done';
+const TINT: Record<Phase, { stroke: string; fill: string }> = {
+  search: { stroke: BLUE, fill: 'rgba(91,140,255,0.14)' },
+  hold: { stroke: AMBER, fill: 'rgba(255,178,56,0.16)' },
+  shoot: { stroke: AMBER, fill: 'rgba(255,178,56,0.28)' },
+  taken: { stroke: GREEN, fill: 'rgba(61,220,132,0.28)' },
+  // Taken and still in view: green until the next page comes.
+  done: { stroke: GREEN, fill: 'rgba(61,220,132,0.1)' },
+};
 
 function maxMove(a: Quad, b: Quad): number {
   let m = 0;
@@ -88,6 +107,10 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
   const video = useRef<HTMLVideoElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const outline = useRef<SVGPolygonElement>(null);
+  const ring = useRef<SVGCircleElement>(null);
+  /** The picture's place on the stage, for the outline. */
+  const frameBox = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
@@ -95,9 +118,9 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
   const [cameraReady, setCameraReady] = useState(false);
   const [torch, setTorchState] = useState<{ available: boolean; on: boolean }>({ available: false, on: false });
   const [detectorState, setDetectorState] = useState<'loading' | 'ready' | 'failed'>('loading');
-  const [quad, setQuad] = useState<Quad | null>(null);
-  const [shown, setShown] = useState<Quad | null>(null);
-  const [steady, setSteady] = useState(0);
+  // What the status line needs of the page in view; the outline itself is drawn outside React, every frame.
+  const [inView, setInView] = useState<'none' | 'small' | 'yes'>('none');
+  const [phase, setPhase] = useState<Phase>('search');
   const [capturing, setCapturing] = useState(false);
   const [exposing, setExposing] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -121,6 +144,10 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
     lastCaptured: null as Quad | null,
     autoCapture,
     dark: false,
+    /** The countdown to an auto-capture, 0..1. */
+    held: 0,
+    shooting: false,
+    takenUntil: 0,
   });
   const capture = useRef<(auto: boolean) => Promise<void>>(async () => {});
 
@@ -149,8 +176,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
     l.raw = null;
     l.quad = null;
     l.misses = 0;
-    setQuad(null);
-    setSteady(0);
+    l.held = 0;
+    setInView('none');
   };
 
   // Camera: open, follow the track, close in the background (leave it to other apps) and under another screen.
@@ -242,8 +269,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
           l.quad = null;
           // The page left the frame: the next one may be taken by itself.
           l.armed = true;
-          setQuad(null);
-          setSteady(0);
+          l.held = 0;
+          setInView('none');
         }
         return;
       }
@@ -252,11 +279,11 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
       if (!l.raw || maxMove(l.raw, next) > STEADY_MOVE) l.steadySince = now;
       l.raw = next;
       l.quad = next;
-      setQuad(next);
+      setInView(area(next) < SMALL_AREA ? 'small' : 'yes');
       if (!l.armed && l.lastCaptured && maxMove(l.lastCaptured, next) > REARM_MOVE) l.armed = true;
-      const held = l.armed ? Math.min(1, (now - l.steadySince) / STEADY_MS) : 0;
-      setSteady(held);
-      if (l.autoCapture && l.armed && held >= 1 && !l.capturing) void capture.current(true);
+      // Counting down only when it ends in a photo: auto-capture on, a page near enough.
+      l.held = l.autoCapture && l.armed && area(next) >= SMALL_AREA ? Math.min(1, (now - l.steadySince) / STEADY_MS) : 0;
+      if (l.held >= 1 && !l.capturing) void capture.current(true);
     };
 
     void (async () => {
@@ -293,23 +320,44 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
             setDetectorState('failed');
             l.detectorReady = false;
             l.raw = l.quad = null;
-            setQuad(null);
-            setSteady(0);
+            l.held = 0;
+            setInView('none');
           }
           await sleep(300);
         }
-        // Leave the main thread some air on slow phones.
-        await sleep(Math.max(16, 70 - (performance.now() - started)));
+        // Up to ~30 detections a second: the model's time in the worker sets the pace, the main thread stays free.
+        await sleep(Math.max(8, 33 - (performance.now() - started)));
       }
     })();
 
+    // The outline, its colour and the shutter's countdown, set on the elements: re-rendering the whole camera
+    // 60 times a second would take the frames the picture needs.
     let last = 0;
+    let shown: Quad | null = null;
+    let points = '';
+    let phase: Phase = 'search';
     let frame = requestAnimationFrame(function animate(time) {
       const dt = Math.min(100, time - (last || time));
       last = time;
       const target = l.quad;
       // Exponential ease: ~90% of the way in 120 ms, whatever the frame rate.
-      setShown((prev) => (!target ? null : !prev ? target : maxMove(prev, target) > 0.0005 ? blend(prev, target, 1 - Math.exp(-dt / 52)) : prev));
+      shown = !target ? null : !shown ? target : maxMove(shown, target) > 0.0005 ? blend(shown, target, 1 - Math.exp(-dt / 52)) : shown;
+      const box = frameBox.current;
+      const next = shown && box ? shown.map(([x, y]) => `${(box.left + x * box.width).toFixed(1)},${(box.top + y * box.height).toFixed(1)}`).join(' ') : '';
+      if (next !== points && outline.current) {
+        points = next;
+        outline.current.setAttribute('points', next);
+        outline.current.style.visibility = next ? 'visible' : 'hidden';
+      }
+      const now = performance.now();
+      const nextPhase: Phase =
+        now < l.takenUntil ? 'taken' : l.shooting ? 'shoot' : l.held > 0.05 ? 'hold' : target && !l.armed && l.lastCaptured ? 'done' : 'search';
+      if (nextPhase !== phase) {
+        phase = nextPhase;
+        setPhase(nextPhase);
+      }
+      ring.current?.setAttribute('stroke-dasharray', `${(phase === 'shoot' ? 1 : l.held) * RING} 999`);
+      if (ring.current) ring.current.style.visibility = phase === 'hold' || phase === 'shoot' ? 'visible' : 'hidden';
       frame = requestAnimationFrame(animate);
     });
 
@@ -335,13 +383,16 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
       setExposing(true);
       l.lastCaptured = l.raw;
       l.armed = false;
-      setSteady(0);
+      l.held = 0;
+      l.shooting = true;
       // The page as the preview shows it now: the photo is cropped to it if the stricter search on the photo fails.
       const v = video.current;
       const hint = l.quad && v.videoWidth && v.videoHeight ? { quad: l.quad, aspect: v.videoWidth / v.videoHeight } : undefined;
       try {
         const still = await captureStill(l.track, v);
-        // The flash and buzz mean "done, you can move": only once the photo is actually taken.
+        // Green, the flash and the buzz mean "taken, you can move": only once the photo actually is.
+        l.shooting = false;
+        l.takenUntil = performance.now() + TAKEN_MS;
         setExposing(false);
         setFlash(true);
         setTimeout(() => setFlash(false), 180);
@@ -363,6 +414,7 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
         if (mounted && !l.hidden) say(t.scanCaptureFailed(scanError(error)));
       } finally {
         l.capturing = false;
+        l.shooting = false;
         setExposing(false);
         setCapturing(false);
       }
@@ -410,31 +462,40 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
   const { width: cw, height: ch } = stageSize;
   const scale = vw && vh && cw && ch ? Math.min(cw / vw, ch / vh) : 0;
   const frame = scale ? { left: (cw - vw * scale) / 2, top: ch - vh * scale, width: vw * scale, height: vh * scale } : null;
-  // Normalised frame points → stage pixels.
-  const polygon = shown && frame ? shown.map(([x, y]) => `${frame.left + x * frame.width},${frame.top + y * frame.height}`).join(' ') : '';
+  const fl = frame?.left;
+  const ft = frame?.top;
+  const fw = frame?.width;
+  const fh = frame?.height;
+  useEffect(() => {
+    frameBox.current = fl !== undefined && ft !== undefined && fw && fh ? { left: fl, top: ft, width: fw, height: fh } : null;
+  }, [fl, ft, fw, fh]);
 
   const status =
     detectorState === 'loading'
       ? t.scanDetectorLoading
       : detectorState === 'failed'
         ? t.scanDetectorFailed
-        : capturing
-          ? exposing
-            ? t.scanHoldStill
-            : t.scanProcessing
-          : added !== null
+        : capturing && exposing
+          ? t.scanHoldStill
+          : phase === 'taken'
+            ? t.scanTaken
+            : capturing
+              ? t.scanProcessing
+              : added !== null
             ? t.scanPageAdded(added)
             : dark && cameraReady
               ? torch.available && !torch.on
                 ? t.scanTooDarkFlash
                 : t.scanTooDark
-              : quad && area(quad) < SMALL_AREA
+              : inView === 'small'
                 ? t.scanMoveCloser
-                : quad && autoCapture && steady > 0
+                : phase === 'hold'
                   ? t.scanHoldSteady
-                  : !quad && cameraReady
-                    ? t.scanPointAtPage
-                    : '';
+                  : phase === 'done'
+                    ? t.scanNextPage
+                    : inView === 'none' && cameraReady
+                      ? t.scanPointAtPage
+                      : '';
   const last = pages.at(-1);
 
   return (
@@ -462,16 +523,20 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
           {flash && <div style={{ position: 'absolute', inset: 0, background: '#fff', opacity: 0.85 }} />}
         </div>
         <svg aria-hidden viewBox={`0 0 ${cw || 1} ${ch || 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-          {polygon && (
-            <polygon
-              points={polygon}
-              fill={steady > 0.05 ? 'rgba(61,220,132,0.16)' : 'rgba(91,140,255,0.14)'}
-              stroke={steady > 0.05 ? GREEN : BLUE}
-              strokeWidth={2.5}
-              strokeLinejoin="round"
-            />
-          )}
+          <polygon
+            ref={outline}
+            fill={TINT[phase].fill}
+            stroke={TINT[phase].stroke}
+            strokeWidth={phase === 'search' ? 2.5 : 3.5}
+            strokeLinejoin="round"
+            style={{ visibility: 'hidden', transition: 'fill 150ms, stroke 150ms' }}
+          />
         </svg>
+        {phase === 'taken' && frame && (
+          <View pointerEvents="none" style={[styles.taken, { left: frame.left + frame.width / 2 - 36, top: frame.top + frame.height / 2 - 36 }]}>
+            <Icon name="check" color="#fff" size={44} />
+          </View>
+        )}
         {cameraError ? (
           <View style={styles.notice}>
             <T v="body" color="#fff" style={{ textAlign: 'center' }}>
@@ -528,19 +593,18 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
         >
           <svg width={76} height={76} viewBox="0 0 76 76" aria-hidden style={{ position: 'absolute' }}>
             <circle cx={38} cy={38} r={35} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={4} />
-            {steady > 0 && (
-              <circle
-                cx={38}
-                cy={38}
-                r={35}
-                fill="none"
-                stroke={GREEN}
-                strokeWidth={4}
-                strokeLinecap="round"
-                strokeDasharray={`${steady * 2 * Math.PI * 35} 999`}
-                transform="rotate(-90 38 38)"
-              />
-            )}
+            <circle
+              ref={ring}
+              cx={38}
+              cy={38}
+              r={35}
+              fill="none"
+              stroke={AMBER}
+              strokeWidth={4}
+              strokeLinecap="round"
+              transform="rotate(-90 38 38)"
+              style={{ visibility: 'hidden' }}
+            />
           </svg>
           <View style={styles.shutterCore} />
         </Pressable>
@@ -615,5 +679,6 @@ const styles = StyleSheet.create({
   shutter: { width: 76, height: 76, alignItems: 'center', justifyContent: 'center' },
   shutterCore: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#fff' },
   done: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  taken: { position: 'absolute', width: 72, height: 72, borderRadius: 36, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' },
   thumb: { width: 40, height: 52, borderRadius: 6, overflow: 'hidden', backgroundColor: '#222' },
 });

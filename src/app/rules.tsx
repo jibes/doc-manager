@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -56,9 +56,16 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
   const [draft, setDraft] = useState({ match: '', sender: '', type: '', tags: '' });
   // No folders in the Tessel folder: a template names the file only.
   const slash = !!template?.includes('/');
+  // Once: leaving the field saves, and the Save button's press comes right after.
+  const savingTemplate = useRef(false);
   const saveTemplate = () => {
-    if (template === null || slash || template.trim() === rules.template) return;
-    changeRules(archive, (r) => ({ ...r, template: template.trim() || r.template })).then(() => setTemplate(null), onError);
+    if (template === null || slash || template.trim() === rules.template || savingTemplate.current) return;
+    savingTemplate.current = true;
+    changeRules(archive, (r) => ({ ...r, template: template.trim() || r.template }))
+      .then(() => setTemplate(null), onError)
+      .finally(() => {
+        savingTemplate.current = false;
+      });
   };
   // A rule fills in something: words to match alone would do nothing.
   const complete = !!draft.match.trim() && !!(draft.sender.trim() || draft.type.trim() || draft.tags.trim());
@@ -106,6 +113,12 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
         </View>
         <Field label={t.detailTags} value={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} testID="rule-tags" placeholder={t.inboxTags} />
         <View style={styles.actions}>
+          {/* Words to match alone: what is missing, rather than a button greyed out for no reason given. */}
+          {!!draft.match.trim() && !complete && (
+            <T v="caption" color={p.muted} style={{ flex: 1 }} testID="rule-incomplete">
+              {t.ruleNeedsTarget}
+            </T>
+          )}
           <Button testID="rule-add" kind="quiet" icon="plus" label={t.ruleAdd} onPress={add} disabled={!complete} />
         </View>
       </View>
@@ -119,7 +132,7 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
 const styles = StyleSheet.create({
   card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: space.lg, gap: space.md },
   fields: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: space.sm },
   list: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   ruleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingLeft: space.lg, paddingRight: space.sm, paddingVertical: space.sm },
 });
