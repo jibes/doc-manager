@@ -106,7 +106,7 @@ const object = (properties: Record<string, unknown>) => ({ type: 'object', addit
 /** Every field required and no others: the strict form both APIs accept for structured output. */
 export const RESULT_SCHEMA = object({
   title: { type: 'string', description: 'Short and specific, in the document’s language, e.g. "Rechnung 40217"' },
-  date: { type: 'string', description: 'The document’s own date as YYYY-MM-DD, or "" if it has none' },
+  date: { type: 'string', description: 'The document’s own date as YYYY-MM-DD, e.g. "2026-10-02" for 2 October 2026 (whatever form the document writes it in), or "" if it has none' },
   sender: { type: 'string', description: 'Who issued it (organisation or person), or ""' },
   type: { type: 'string', description: 'What it is, in the document’s language: invoice, receipt, letter, contract, delivery note, …' },
   keywords: { ...strings, description: 'Up to five words to find it by' },
