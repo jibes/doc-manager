@@ -19,6 +19,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { opError, scanError, t } from '@/core/i18n';
+import { log } from '@/core/lib/log';
 import { Button, IconButton, T } from '@/paper/components/primitives';
 import { Toast } from '@/paper/components/Toast';
 import { fonts, radius, space } from '@/core/design/tokens';
@@ -166,6 +167,11 @@ export function Reader({
   // A message from before the reopen, shown by this reader once (read while rendering, which may happen twice:
   // it is let go once the reader is up).
   const [reloaded, setReloaded] = useState(() => afterReload);
+  // Share, download, print: what went wrong is said and kept in the log, never swallowed.
+  const fileFailed = (e: unknown) => {
+    log.warn('reader', 'share, download or print failed', e);
+    setReloaded(opError(e));
+  };
   useEffect(() => {
     afterReload = null;
   }, []);
@@ -792,9 +798,9 @@ export function Reader({
         e.preventDefault();
         return void travel(!(key === 'y' || e.shiftKey));
       }
-      if (mod && key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(() => {});
+      if (mod && key === 'p') return e.preventDefault(), void printDoc(doc, edits.current).catch(fileFailed);
       // ⌘S saves edits when there are any; otherwise it downloads, as before.
-      if (mod && key === 's') return e.preventDefault(), void (edits.dirty || useDrafts.getState().field ? edits.save() : downloadDoc(doc, edits.current).catch(() => {}));
+      if (mod && key === 's') return e.preventDefault(), void (edits.dirty || useDrafts.getState().field ? edits.save() : downloadDoc(doc, edits.current).catch(fileFailed));
       if (mod && key === 'f') {
         e.preventDefault();
         setChrome(true);
@@ -1011,14 +1017,14 @@ export function Reader({
   const menuItems: MenuItem[] = [
     // Most used first.
     ...(doc.viewed ? [{ key: 'keep', icon: 'inbox' as const, label: t.keepInTessel, onPress: () => void keepViewed() }] : []),
-    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(() => {}) },
+    { key: 'share', icon: 'share', label: t.share, onPress: () => void shareDoc(doc, edits.current).catch(fileFailed) },
     { key: 'details', icon: 'tag', label: t.details, onPress: () => (docked && detailsOpen ? closeDetails() : openDetails()) },
     ...(outside && !doc.viewed && !edits.dirty ? [{ key: 'keep-archive', icon: 'inbox' as const, label: t.keepInArchive, onPress: () => void keepInArchive() }] : []),
     ...(textless && !edits.dirty && !intakeBusy ? [{ key: 'searchable', icon: 'searchable' as const, label: t.makeSearchable, onPress: () => void addText() }] : []),
     ...(canImprove && (improvable || textless) && !edits.dirty && !intakeBusy ? [{ key: 'improve', icon: 'sparkles' as const, label: t.improveWithAi, onPress: () => void improveText() }] : []),
     ...(Platform.OS === 'web' && (improvable || textless) && !edits.dirty && !intakeBusy && !preparing ? [{ key: 'again', icon: 'scan' as const, label: t.again, onPress: () => void cleanUp() }] : []),
-    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: edits.dirty ? undefined : shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(() => {}) }] : []),
-    { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(() => {}) },
+    ...(canDownload ? [{ key: 'download', icon: 'install' as const, label: t.download, hint: edits.dirty ? undefined : shortcut('S'), onPress: () => void downloadDoc(doc, edits.current).catch(fileFailed) }] : []),
+    { key: 'print', icon: 'print', label: t.print, hint: shortcut('P'), onPress: () => void printDoc(doc, edits.current).catch(fileFailed) },
   ];
   // Buttons that fit beside the title: back, Find, Text view and Aa are always there; undo, redo and Save while editing.
   const room = docked ? Math.floor(((vp?.w ?? 0) - TITLE_MIN) / BAR_BUTTON) - 4 - (narrow ? 0 : Math.min(1, edits.history.undo) + Math.min(1, edits.history.redo)) - (edits.dirty ? 2 : 0) : 0;

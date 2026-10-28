@@ -109,6 +109,9 @@ export type DocItemProps = {
   drag?: Drag;
 };
 
+/** How long the pointer rests on a row before its file is read ahead for dragging out. */
+const REST_MS = 250;
+
 export type Drag = { keys: () => string[]; type: string; file: () => { name: string; url: string } | undefined; prepare: () => void };
 
 const finePointer = () => typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
@@ -136,12 +139,25 @@ function useDrag(drag: Drag | undefined) {
       const file = d.file();
       if (file) e.dataTransfer.setData('DownloadURL', `application/pdf:${file.name}:${file.url}`);
     };
-    const enter = (e: PointerEvent) => e.pointerType === 'mouse' && latest.current?.prepare();
+    // The file is read ahead once the pointer rests on the row (or presses it), not for every row it passes over.
+    let rest: ReturnType<typeof setTimeout> | undefined;
+    const enter = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      clearTimeout(rest);
+      rest = setTimeout(() => latest.current?.prepare(), REST_MS);
+    };
+    const leave = () => clearTimeout(rest);
+    const down = (e: PointerEvent) => e.pointerType === 'mouse' && (clearTimeout(rest), latest.current?.prepare());
     node.addEventListener('dragstart', start);
     node.addEventListener('pointerenter', enter);
+    node.addEventListener('pointerleave', leave);
+    node.addEventListener('pointerdown', down);
     detach.current = () => {
+      clearTimeout(rest);
       node.removeEventListener('dragstart', start);
       node.removeEventListener('pointerenter', enter);
+      node.removeEventListener('pointerleave', leave);
+      node.removeEventListener('pointerdown', down);
     };
   }, []);
 }

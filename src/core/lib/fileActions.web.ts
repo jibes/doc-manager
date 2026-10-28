@@ -1,5 +1,6 @@
 import { engine } from '@/core/engine';
 import { desktop } from '@/core/lib/desktop';
+import { log } from '@/core/lib/log';
 import { sendToShell, shell, shellRequest } from '@/core/lib/shell';
 import { repo, type DocRecord } from '@/core/storage';
 
@@ -79,6 +80,7 @@ export async function shareDocs(docs: DocRecord[]) {
  * where PDFs can't load in frames (mobile), it opens in the browser's own viewer instead.
  */
 export async function printDoc(doc: DocRecord, current?: Current) {
+  log.info('print', desktop ? 'desktop' : shell ? 'android' : 'browser');
   // Android app: the system print service, with the PDF itself.
   if (shell) {
     const file = await asFile(doc, current);
@@ -137,5 +139,6 @@ async function printOnDesktop(doc: DocRecord, file: File) {
   } finally {
     handle.close();
   }
-  await desktop!.print({ name: file.name, pages, pdf });
+  const printed = await desktop!.print({ name: file.name, pages, pdf });
+  log.info('print', `${pages.length} pages ${printed ? 'sent to the print dialog' : 'not printed'}`);
 }
