@@ -28,7 +28,12 @@ const ai = createServer((req, res) => {
 await new Promise((r) => ai.listen(0, '127.0.0.1', r));
 const port = ai.address().port;
 
-const app = await electron.launch({ timeout: 120000, executablePath: electronPath, args: [here, '--no-sandbox', fixture], cwd: here, env: { ...process.env, LANG: process.env.LANG || 'C.UTF-8' } });
+// A launch on CI now and then never gets its debugger connected (the app itself isn't reached): tried once more.
+const launch = () => electron.launch({ timeout: 90000, executablePath: electronPath, args: [here, '--no-sandbox', fixture], cwd: here, env: { ...process.env, LANG: process.env.LANG || 'C.UTF-8' } });
+const app = await launch().catch((e) => {
+  console.log(`launch failed, once more: ${String(e?.message ?? e).split('\n')[0]}`);
+  return launch();
+});
 const errors = [];
 const page = await app.firstWindow();
 page.on('pageerror', (e) => errors.push(e.message));
