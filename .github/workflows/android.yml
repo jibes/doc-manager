@@ -79,6 +79,10 @@ jobs:
             if [ "${{ steps.version.outputs.release }}" = true ]; then echo "::error::Releases need the signing secrets."; exit 1; fi
           fi
 
+      # Gradle's downloads and build cache kept between runs (the APK step was mostly fetching them).
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: Build APK
         working-directory: shell/android
         env:

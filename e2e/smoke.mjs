@@ -3269,8 +3269,10 @@ async function upgrade() {
   await ctx.close();
 }
 
-// ONLY=linked,scan runs a subset while iterating.
+// ONLY=linked,scan runs a subset while iterating; SHARD=2/4 every fourth suite from the second (CI runs four at once).
 const only = process.env.ONLY?.split(',');
+const [shard, shards] = (process.env.SHARD ?? '1/1').split('/').map(Number);
+let suites = 0;
 // Scanner: import a phone photo, change the filter, keep the draft over a reload, save a searchable PDF into a folder.
 async function scanner() {
   const ctx = await newContext({ viewport: { width: 412, height: 860 }, deviceScaleFactor: 2 }, { fsa: true });
@@ -3744,11 +3746,14 @@ async function viewed() {
 // A suite that throws is a failed check; the others still run.
 const step = async (name, fn) => {
   if (only && !only.includes(name)) return;
+  if (suites++ % shards !== shard - 1) return;
+  const start = Date.now();
   try {
     await fn();
   } catch (e) {
     check(false, `${name}: stopped: ${String(e?.message ?? e).split('\n').slice(0, 3).join(' ')}`);
   }
+  console.log(`  (${name}: ${Math.round((Date.now() - start) / 1000)} s)`);
 };
 await step('german', german);
 await step('locked', locked);

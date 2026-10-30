@@ -15,6 +15,20 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Typecheck, lint and unit tests beside the build and the e2e shards (each a few minutes; together they used to queue).
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx eslint .
+      - run: npm test
+
   build:
     runs-on: ubuntu-latest
     env:
@@ -26,12 +40,34 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npx eslint .
-      - run: npm test
       - run: npm run build:web
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: dist
+          include-hidden-files: true
 
-      # Smoke-test the exact artifact under its sub-path before publishing.
+  # The exact artifact smoke-tested under its sub-path before publishing, in four shards at once (SHARD in e2e/smoke.mjs).
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      EXPO_BASE_URL: /${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v7
+        with:
+          name: web-dist
+          path: dist
       - run: npx playwright-core install --with-deps chromium
       - name: E2E smoke
         run: |
@@ -39,27 +75,16 @@ jobs:
           (cd site && python3 -m http.server 8080 >/dev/null 2>&1 &)
           # Up once it answers (not after a guessed pause).
           for i in $(seq 1 100); do curl -sf "http://localhost:8080${EXPO_BASE_URL}/" > /dev/null && break; sleep 0.2; done
-          BASE="http://localhost:8080${EXPO_BASE_URL}/" CHROMIUM=none npm run test:e2e
+          BASE="http://localhost:8080${EXPO_BASE_URL}/" CHROMIUM=none SHARD="${{ matrix.shard }}/4" npm run test:e2e
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: e2e-screenshots
+          name: e2e-screenshots-${{ matrix.shard }}
           path: e2e/out
-
-      # Enabling Pages needs repo admin; if the token can't, enable once in Settings → Pages → Source: GitHub Actions.
-      - uses: actions/configure-pages@v6
-        if: github.ref == 'refs/heads/main'
-        continue-on-error: true
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v5
-        if: github.ref == 'refs/heads/main'
-        with:
-          path: dist
 
   deploy:
     if: github.ref == 'refs/heads/main'
-    needs: build
+    needs: [checks, e2e]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -68,5 +93,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: web-dist
+          path: dist
+      # Enabling Pages needs repo admin; if the token can't, enable once in Settings → Pages → Source: GitHub Actions.
+      - uses: actions/configure-pages@v6
+        continue-on-error: true
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
       - id: deployment
         uses: actions/deploy-pages@v5
