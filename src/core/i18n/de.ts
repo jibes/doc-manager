@@ -528,6 +528,21 @@ export const de: Strings = {
   tidyChangeHint: 'Wählen, wohin es kommt',
   tidyDocs: (n) => (n === 1 ? '1 Dokument' : `${n} Dokumente`),
   tidyResult: 'Nach der Änderung: die verbleibenden Namen und wie viele Dokumente sie haben.',
+  tidyShort: 'Aufräumen',
+  tidyOnly: (n) => (n === 1 ? 'Nur das in der Liste gewählte Dokument.' : `Nur die ${n} in der Liste gewählten Dokumente.`),
+  analyse: 'Analysieren',
+  analyseAsk: (n) => (n === 1 ? '1 Dokument mit KI analysieren?' : `${n} Dokumente mit KI analysieren?`),
+  analyseAskBody: (host) => `Seiten ohne Text liest das Modell, und leere Angaben werden ergänzt. Die Seiten und ihr Text gehen dafür an ${host}. Was ein Dokument schon hat, bleibt.`,
+  analysing: (n) => (n === 1 ? 'Analysiere 1 Dokument …' : `Analysiere ${n} Dokumente …`),
+  analysed: (reading, described, failed, ai) =>
+    [
+      reading ? (reading === 1 ? '1 Dokument wird gelesen' : `${reading} Dokumente werden gelesen`) : '',
+      described ? (described === 1 ? 'Angaben für 1 ergänzt' : `Angaben für ${described} ergänzt`) : '',
+      failed ? (failed === 1 ? '1 ließ sich nicht öffnen oder schreiben' : `${failed} ließen sich nicht öffnen oder schreiben`) : '',
+    ]
+      .filter(Boolean)
+      .join('; ')
+      .replace(/^(.)(.*)$/s, (_, c: string, more: string) => `${c.toUpperCase()}${more}.`) || (ai ? 'Nichts zu ergänzen: Sie haben Text und Angaben.' : 'Nichts zu lesen: Jede Seite hat schon Text.'),
   tidyApply: (n) => (n === 1 ? '1 Dokument ändern' : `${n} Dokumente ändern`),
   tidyConfirmTitle: (n) => (n === 1 ? '1 Dokument ändern?' : `${n} Dokumente ändern?`),
   tidyConfirmBody: 'Ihre Schlagwörter und Arten werden so, wie gezeigt, in die Dateien geschrieben. Für alle auf einmal gibt es kein Rückgängig.',

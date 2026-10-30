@@ -110,6 +110,35 @@ export function ActionBar({ bottom, side = 0, children }: { bottom: number; side
   );
 }
 
+/** An action of the bar. `keep`: never behind ⋯ (the others go there, last first, when the bar is too narrow). */
+export type BarAction = { testID: string; icon: IconName; label: string; disabled?: boolean; keep?: boolean; onPress: () => void };
+
+/** Narrowest room an action gets (its icon and a short label on two lines). */
+const SLOT = 72;
+
+/** The bar with as many actions as fit; the rest behind ⋯ (in a sheet, in their order; the disabled ones left out). */
+export function ActionsBar({ bottom, side = 0, actions, onMore }: { bottom: number; side?: number; actions: BarAction[]; onMore: (rest: BarAction[]) => void }) {
+  const [width, setWidth] = useState(0);
+  const room = width ? Math.max(2, Math.floor(width / SLOT)) : actions.length;
+  let shown = actions;
+  if (actions.length > room) {
+    // Room for ⋯ too: the last actions that may go, go.
+    const hide = new Set<BarAction>();
+    for (let i = actions.length - 1; i >= 0 && actions.length - hide.size > room - 1; i--) if (!actions[i].keep) hide.add(actions[i]);
+    shown = actions.filter((a) => !hide.has(a));
+  }
+  const rest = actions.filter((a) => !shown.includes(a) && !a.disabled);
+  return (
+    <ActionBar bottom={bottom} side={side}>
+      <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ position: 'absolute', left: 0, right: 0, height: 0 }} />
+      {shown.map((a) => (
+        <Action key={a.testID} {...a} />
+      ))}
+      {shown.length < actions.length && <Action testID="act-more" icon="more" label={t.more} disabled={!rest.length} onPress={() => onMore(rest)} />}
+    </ActionBar>
+  );
+}
+
 export function Action({ icon, label, disabled, onPress, testID }: { icon: IconName; label: string; disabled?: boolean; onPress: () => void; testID: string }) {
   const p = usePalette();
   return (

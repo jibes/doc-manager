@@ -1698,6 +1698,39 @@ async function tidyTags() {
   await ctx.close();
 }
 
+// The selection's actions: what doesn't fit a phone's bar is behind ⋯; Analyse reads pages without text.
+async function selectionActions() {
+  const ctx = await newContext({ viewport: { width: 390, height: 800 } });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`selection actions: ${e.message}`));
+  await openFixture(page, 'scan.pdf');
+  await openFixture(page, 'columns.pdf');
+  await page.goto(BASE);
+  await docRows(page).nth(1).waitFor();
+  await pick(docRows(page).filter({ hasText: /scan/i }).first());
+  await vis('action-bar').waitFor();
+  const shown = await page.getByTestId('action-bar').locator('[data-testid^="act-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+  check(shown.includes('act-more') && !shown.includes('act-rename') && shown.includes('act-analyse') && shown.includes('act-delete'), `selection actions: on a phone, what doesn't fit is behind ⋯ (${shown.join(', ')})`);
+  await vis('act-more').click();
+  await page.getByTestId('action-sheet').waitFor();
+  // Rename (one document chosen); Tidy up only where there are tags or a type to tidy (a scan has none yet).
+  check((await page.getByTestId('action-act-rename').count()) === 1 && (await page.getByTestId('action-act-tidy').count()) === 0, 'selection actions: …the ones that apply, in a sheet');
+  await page.keyboard.press('Escape');
+  await vis('act-analyse').click();
+  await page.getByText('1 document is being read.').waitFor({ timeout: 20000 }).then(
+    () => check(true, 'selection actions: Analyse reads a document without text'),
+    () => check(false, 'selection actions: Analyse reads a document without text'),
+  );
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(BASE);
+  await docRows(page).nth(1).waitFor();
+  await pick(docRows(page).first());
+  await vis('action-bar').waitFor();
+  check((await vis('act-more').count()) === 0 && (await vis('act-tidy').count()) === 1, 'selection actions: on a wide screen all fit');
+  await ctx.close();
+}
+
 // A document without a date of its own: Details offers the first date in its text.
 async function foundDate() {
   const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
@@ -3706,6 +3739,7 @@ await step('opened-sync', openedSync);
 await step('desktop-list', desktopList);
 await step('found-date', foundDate);
 await step('tidy-tags', tidyTags);
+await step('selection-actions', selectionActions);
 await step('again', again);
 await step('docked', docked);
 await step('upgrade', upgrade);

@@ -123,3 +123,10 @@ export function resultCounts(docs: IndexedDoc[], edit: (d: Details) => Details, 
   const after = docs.map((doc) => edit({ title: doc.title, sender: doc.sender, type: doc.type, date: doc.date, tags: doc.tags }));
   return namesOf(after.map((d) => ({ ...d, sender: d.sender })), kind).map((n) => [n.name, n.count]);
 }
+
+/** The documents tidied: those chosen in the list (by key), or all (null). Set before the screen opens. */
+let scope: Set<string> | null = null;
+export const tidyOnly = (keys: string[] | null) => {
+  scope = keys ? new Set(keys) : null;
+};
+export const tidyScope = () => scope;

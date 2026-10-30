@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { allDocs, refreshSoon, useIndex } from '@/paper/archive/indexer';
 import { writeDetailsEach } from '@/paper/archive/manyDetails';
 import type { IndexedDoc } from '@/paper/archive/search';
-import { changedBy, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
+import { changedBy, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, tidyScope, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
 import { nameKey } from '@/paper/archive/vocabulary';
 import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Icon } from '@/paper/components/Icon';
@@ -40,6 +40,8 @@ export default function Tidy() {
   const canAsk = aiReady(ai);
   const changed = useThrottled(useIndex((s) => s.changed), 1500);
   const [docs, setDocs] = useState<IndexedDoc[] | null>(null);
+  // Only the documents chosen in the list, when it was opened from there.
+  const [only] = useState(tidyScope);
   const [kind, setKind] = useState<Kind>('tag');
   const [step, setStep] = useState<Step>(1);
   const [sort, setSort] = useState<Sort>('count');
@@ -56,13 +58,13 @@ export default function Tidy() {
   useEffect(() => {
     let alive = true;
     void allDocs().then(
-      (all) => alive && setDocs(all),
+      (all) => alive && setDocs(only ? all.filter((d) => only.has(d.key)) : all),
       () => alive && setDocs([]),
     );
     return () => {
       alive = false;
     };
-  }, [changed]);
+  }, [changed, only]);
 
   const rating = rated[kind];
   // The names in use, with what the model said about them.
@@ -179,6 +181,11 @@ export default function Tidy() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column, gap: space.md }}>
           <ScreenHeader title={t.tidyTitle} up={() => goTab('documents')} />
+          {only && (
+            <T v="caption" color={p.muted} testID="tidy-only">
+              {t.tidyOnly(only.size)}
+            </T>
+          )}
           <Segments
             palette={p}
             testID="tidy-kind"

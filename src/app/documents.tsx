@@ -22,10 +22,12 @@ import { Button, IconButton, T } from '@/paper/components/primitives';
 import { AppFrame, AppHeader, columnWidth, scanSupported, useMainWidth } from '@/paper/components/AppNav';
 import { DocList, gridOf, LayoutToggle, useLayout } from '@/paper/components/DocItems';
 import { SortChip } from '@/paper/components/SortChip';
-import { Action, ActionBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/paper/components/Selection';
+import { ActionsBar, BAR_ROOM, heldNow, justSelected, SelectBar, toggled, useEndPicking } from '@/paper/components/Selection';
 import { deleteAll, deletesForGood, renameDoc, shareAll, undoDelete } from '@/paper/archive/batch';
 import { readAdded, useIntake } from '@/paper/archive/intake';
-import { aiReady } from '@/paper/scan/ai';
+import { aiHost, aiReady } from '@/paper/scan/ai';
+import { analyseMany } from '@/paper/archive/analyse';
+import { tidyOnly } from '@/paper/archive/tidy';
 import { startScan } from '@/paper/scan/start';
 import { Toast } from '@/paper/components/Toast';
 import { useNotice } from '@/paper/components/useNotice';
@@ -284,7 +286,7 @@ export default function Documents() {
       ...(doubled > 0 ? [{ key: 'more-duplicates', icon: 'copy' as IconName, label: t.duplicatesN(doubled), onPress: () => router.push('/duplicates') }] : []),
       ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'sync' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
       ...(archive ? [{ key: 'more-rules', icon: 'rules' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
-      ...(hasNames ? [{ key: 'more-tidy', icon: 'tag' as IconName, label: t.tidyMenu, onPress: () => router.push('/tidy') }] : []),
+      ...(hasNames ? [{ key: 'more-tidy', icon: 'tag' as IconName, label: t.tidyMenu, onPress: () => (tidyOnly(null), router.push('/tidy')) }] : []),
       ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
   ];
   // ⋯ only for two or more; one is a button of its own, none is nothing.
@@ -419,6 +421,16 @@ export default function Documents() {
   const dropShown = (keys: Set<string>) => {
     setAll((a) => a.filter((d) => !keys.has(d.key)));
     setFound((f) => f && { ...f, hits: f.hits.filter((h) => !keys.has(h.doc.key)) });
+  };
+  // Analyse: pages without text read (on the device, or by the AI model), empty details filled in by the model.
+  const analyse = async () => {
+    const ai = usePrefs.getState().ai;
+    if (aiReady(ai) && (await ask({ title: t.analyseAsk(picked.length), body: t.analyseAskBody(aiHost(ai)), confirm: t.analyse })) === null) return;
+    const docs = picked;
+    setSelected(null);
+    say(t.analysing(docs.length));
+    const r = await analyseMany(docs);
+    say(t.analysed(r.reading, r.described, r.failed, aiReady(ai)));
   };
   const rename = async (d = picked[0]) => {
     // The list shows titles, the dialog the file's name: it says which one changes (a title is changed in Details).
@@ -801,18 +813,25 @@ export default function Documents() {
         </View>
       )}
       {selected && (
-        <ActionBar bottom={insets.bottom} side={space.xl - 4}>
-          {folders.canShare && <Action testID="act-share" icon="share" label={t.share} disabled={!picked.length} onPress={() => void batch(() => shareAll(picked))} />}
-          <Action
-            testID="act-rename"
-            icon="pencil"
-            label={t.rename}
-            disabled={picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry)}
-            onPress={() => void rename()}
-          />
- <Action testID="act-details" icon="tag" label={t.details} disabled={!picked.length} onPress={() => setMany(picked)} />
-          <Action testID="act-delete" icon="trash" label={onlyHere(picked) ? t.remove : t.delete} disabled={!deletable(picked)} onPress={() => void remove()} />
-        </ActionBar>
+        <ActionsBar
+          bottom={insets.bottom}
+          side={space.xl - 4}
+          onMore={(rest) => showActions(t.selectedCount(picked.length), rest.map((a) => ({ key: a.testID, icon: a.icon, label: a.label, onPress: a.onPress })))}
+          actions={[
+            ...(folders.canShare ? [{ testID: 'act-share', icon: 'share' as IconName, label: t.share, keep: true, disabled: !picked.length, onPress: () => void batch(() => shareAll(picked)) }] : []),
+            { testID: 'act-details', icon: 'tag', label: t.details, keep: true, disabled: !picked.length, onPress: () => setMany(picked) },
+            { testID: 'act-analyse', icon: aiReady(usePrefs.getState().ai) ? 'sparkles' : 'searchable', label: t.analyse, keep: true, disabled: !picked.length, onPress: () => void analyse() },
+            { testID: 'act-delete', icon: 'trash', label: onlyHere(picked) ? t.remove : t.delete, keep: true, disabled: !deletable(picked), onPress: () => void remove() },
+            {
+              testID: 'act-rename',
+              icon: 'pencil',
+              label: t.rename,
+              disabled: picked.length !== 1 || picked[0].place.kind !== 'folder' || !folders.canEdit(picked[0].place.root, picked[0].place.entry),
+              onPress: () => void rename(),
+            },
+            { testID: 'act-tidy', icon: 'tag', label: t.tidyShort, disabled: !picked.some((d) => d.type || d.tags.length), onPress: () => (tidyOnly(picked.map((d) => d.key)), setSelected(null), router.push('/tidy')) },
+          ]}
+        />
       )}
       {/* Add: the camera or files, into the Tessel folder. */}
       {!selected && (

@@ -547,6 +547,21 @@ export const en = {
   tidyChangeHint: 'Choose where it goes',
   tidyDocs: (n: number) => (n === 1 ? '1 document' : `${n} documents`),
   tidyResult: 'After the change: the names left, and how many documents have each.',
+  tidyShort: 'Tidy up',
+  tidyOnly: (n: number) => (n === 1 ? 'Only the document chosen in the list.' : `Only the ${n} documents chosen in the list.`),
+  analyse: 'Analyse',
+  analyseAsk: (n: number) => (n === 1 ? 'Analyse 1 document with AI?' : `Analyse ${n} documents with AI?`),
+  analyseAskBody: (host: string) => `Pages without text are read by the model, and empty details are filled in. The pages and their text are sent to ${host}. What a document already has stays.`,
+  analysing: (n: number) => (n === 1 ? 'Analysing 1 document…' : `Analysing ${n} documents…`),
+  analysed: (reading: number, described: number, failed: number, ai: boolean) =>
+    [
+      reading ? (reading === 1 ? '1 document is being read' : `${reading} documents are being read`) : '',
+      described ? (described === 1 ? 'details filled in for 1' : `details filled in for ${described}`) : '',
+      failed ? (failed === 1 ? '1 couldn’t be opened or written' : `${failed} couldn’t be opened or written`) : '',
+    ]
+      .filter(Boolean)
+      .join('; ')
+      .replace(/^(.)(.*)$/s, (_, c: string, more: string) => `${c.toUpperCase()}${more}.`) || (ai ? 'Nothing to add: they have text and details.' : 'Nothing to read: every page has text already.'),
   tidyApply: (n: number) => (n === 1 ? 'Change 1 document' : `Change ${n} documents`),
   tidyConfirmTitle: (n: number) => (n === 1 ? 'Change 1 document?' : `Change ${n} documents?`),
   tidyConfirmBody: 'Their tags and types are written into the files as shown. There is no undo for all of them at once.',
