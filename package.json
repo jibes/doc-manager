@@ -68,7 +68,7 @@
     "build:web": "npm run engine && expo export -p web && node scripts/postexport.mjs",
     "sample": "python3 scripts/make-sample-pdf.py assets/samples/welcome-to-tessel.pdf",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint",
+    "lint": "eslint .",
     "test:e2e": "node e2e/smoke.mjs",
     "test": "vitest run",
     "build:desktop-web": "npm run engine && expo export -p web --output-dir shell/desktop/www && OUT_DIR=shell/desktop/www node scripts/postexport.mjs",
@@ -76,5 +76,8 @@
     "test:scan": "node e2e/scan/run.mjs"
   },
   "private": true,
-  "license": "AGPL-3.0-or-later"
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=22 <23"
+  }
 }

@@ -13,12 +13,12 @@ val keystore = System.getenv("TESSEL_KEYSTORE_FILE")?.let { file(it) }?.takeIf {
 
 android {
     namespace = "app.tessel.viewer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.tessel.viewer"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = versionCodeProp
         versionName = versionNameProp
     }
