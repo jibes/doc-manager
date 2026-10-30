@@ -6,6 +6,10 @@ name: Desktop
 on:
   push:
     branches: [main]
+  # A pull request that changes the shell (Dependabot's Electron updates among them): Electron starts on Linux; the
+  # macOS build waits for main.
+  pull_request:
+    paths: ['shell/desktop/**', '.github/workflows/desktop.yml']
   workflow_dispatch:
 
 permissions:
@@ -40,6 +44,7 @@ jobs:
         run: xvfb-run -a npm run smoke
 
   mac:
+    if: github.event_name != 'pull_request'
     needs: smoke
     runs-on: macos-latest
     timeout-minutes: 30

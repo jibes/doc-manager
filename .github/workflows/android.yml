@@ -7,6 +7,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # A pull request that changes the shell (Dependabot's Gradle updates among them): the APK is built, debug-signed,
+  # without the emulator test, so a build that breaks shows on the PR and not first on main.
+  pull_request:
+    paths: ['shell/android/**', '.github/workflows/android.yml']
   workflow_dispatch:
     inputs:
       release:
@@ -107,6 +111,7 @@ jobs:
           path: out/*.apk
 
   smoke:
+    if: github.event_name != 'pull_request'
     needs: apk
     runs-on: ubuntu-latest
     timeout-minutes: 30

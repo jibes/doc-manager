@@ -34,7 +34,7 @@ Every platform runs the same web export; the shells only host it and add what a 
 | `@playwright/test` | Hand-rolled `e2e/smoke.mjs` on playwright-core (`ONLY=…`, `SHARD=i/n`) | ~3800 lines to port; sharding already works |
 | Prettier | None; never run `prettier --write` here | It would reformat every file in one diff |
 | PRs only (D4) | Agents push to `main` | Owner's choice; deploy and release run only after all checks pass |
-| `ci.yml` + `deploy.yml` | `web.yml` (checks, build, 4 e2e shards, deploy), `android.yml`, `desktop.yml`, `scan.yml` | Same gates, jobs in parallel |
+| `ci.yml` + `deploy.yml` | `web.yml` (checks, build, 4 e2e shards, deploy), `android.yml`, `desktop.yml`, `scan.yml`; PRs touching `shell/android` or `shell/desktop` also build the APK (no emulator) or start Electron (no macOS build) | Same gates, jobs in parallel |
 | Binaries over 1 MB out of git | ONNX models (17 MB) in `public/models` with NOTICE and SHA-256s | Already in history; release assets would clutter the releases Obtainium reads |
 | Files under 800 lines | Six above (largest `scan/engine/detect/quadSearch.ts`) | Split one when it is next changed, not in one go |
 
