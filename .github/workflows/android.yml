@@ -125,15 +125,37 @@ jobs:
             [ -f "$ANDROID_HOME/system-images/android-34/google_apis/x86_64/system.img" ] && break
             echo "Download failed (attempt $i), retrying"; sleep 15
           done
+      # The emulator booted once and kept as a snapshot: later runs start from it instead of a cold boot. The test
+      # itself never saves into it, so every run starts from the same clean device.
+      - name: Emulator snapshot
+        id: avd
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-34-google_apis-x86_64-v1
+      - name: Make the snapshot
+        if: steps.avd.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated
+          script: echo "Snapshot made"
       - name: Emulator smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
           arch: x86_64
           target: google_apis
+          force-avd-creation: false
           disable-animations: true
           # The scanner needs a camera: the emulated one (a generated picture, no GPU needed).
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot-save -noaudio -no-boot-anim -camera-back emulated
           script: ./scripts/android-smoke.sh "$(ls out/*.apk | head -1)" android-smoke
       - uses: actions/upload-artifact@v7
         if: always()
