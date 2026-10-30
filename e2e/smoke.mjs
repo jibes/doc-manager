@@ -1609,9 +1609,13 @@ async function tidyTags() {
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     const said = JSON.stringify(req.postDataJSON());
     prompts.push(said);
-    const reply = said.includes('Make them consistent')
-      ? { tags: [{ tag: 'Steuer', same: 'Steuer', broader: 'Finanzen' }, { tag: 'Tax', same: 'Steuer', broader: 'Finanzen' }], types: [{ type: 'Rechnung', same: 'Rechnung' }] }
-      : { title: 'Old title', date: '', sender: '', type: 'rechnungen', keywords: ['steuern', 'Neubau'] };
+    const reply = said.includes('rate how general')
+      ? said.includes('document types')
+        ? { names: [{ name: 'Rechnung', generality: 4, company: false }], suggested: ['Rechnung'] }
+        : { names: [{ name: 'Steuer', generality: 5, company: false }, { name: 'Tax', generality: 4, company: false }], suggested: ['Steuer'] }
+      : said.includes('categories chosen')
+        ? { names: [{ name: 'Tax', category: 'Steuer' }] }
+        : { title: 'Old title', date: '', sender: '', type: 'rechnungen', keywords: ['steuern', 'Neubau'] };
     return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(reply) } }] }) });
   });
   await page.goto(BASE);
@@ -1662,7 +1666,7 @@ async function tidyTags() {
   await page.keyboard.press('Escape');
   await page.getByTestId('ask-confirm').click().catch(() => {});
 
-  // Tidy up: spellings first (no model), then the same meaning (the model).
+  // Tidy up: 1. the model's categories ticked, 2. the rest sorted in, 3. checked and applied.
   await page.goto(BASE);
   await docRows(page).nth(1).waitFor();
   if (await vis('more-tidy').count()) await vis('more-tidy').click();
@@ -1670,16 +1674,20 @@ async function tidyTags() {
     await vis('docs-more').click();
     await page.getByTestId('action-more-tidy').click();
   }
-  await page.getByTestId('tidy-group').first().waitFor();
-  const groups = async () => (await page.getByTestId('tidy-group').allInnerTexts()).map((g) => g.replace(/\s+/g, ' '));
-  const spelling = await groups();
-  check(spelling.length === 2 && (await page.getByTestId('tidy-to').evaluateAll((els) => els.map((e) => e.value))).join('|') === 'Rechnung|Steuer', `tidy: spellings are put together (${spelling.join(' / ')})`);
-  check(/1 document/.test(await vis('tidy-apply').innerText()), 'tidy: …changing the one document written otherwise');
-  await page.getByTestId('tidy-level-same').click();
-  await page.getByTestId('tidy-group').first().waitFor();
-  const same = await groups();
-  await page.screenshot({ path: `${OUT}tidy-same.png` });
-  check(same.some((g) => /Tax/.test(g)) && /1 document/.test(await vis('tidy-apply').innerText()), `tidy: the model puts together what means the same (${same.join(' / ')})`);
+  await page.getByTestId('tidy-coverage').waitFor({ timeout: 15000 });
+  const rows = async (id) => (await page.getByTestId(id).allInnerTexts()).map((g) => g.replace(/\s+/g, ' '));
+  const ticked = await page.getByTestId('tidy-name').evaluateAll((els) => els.map((e) => `${e.textContent}:${e.getAttribute('aria-checked')}`));
+  check(ticked.some((x) => /^Steuer.*:true$/.test(x)) && ticked.some((x) => /^Tax.*:false$/.test(x)) && /1 category/.test(await page.getByTestId('tidy-coverage').innerText()), `tidy: the model’s categories come ticked, rated by generality (${ticked.join(' / ')})`);
+  check(/written several ways/.test(await page.getByTestId('tidy-cleanup').locator('..').innerText()), 'tidy: spellings are cleaned up along the way');
+  await page.screenshot({ path: `${OUT}tidy-step1.png` });
+  await page.getByTestId('tidy-next').click();
+  await page.getByTestId('tidy-section').first().waitFor({ timeout: 15000 });
+  const sections = await rows('tidy-section');
+  check(sections.some((x) => /STEUER.*Tax/i.test(x)), `tidy: the rest is sorted into the categories (${sections.join(' / ')})`);
+  await page.screenshot({ path: `${OUT}tidy-step2.png` });
+  await page.getByTestId('tidy-review').click();
+  const result = await rows('tidy-result');
+  check(result.join('|') === 'Steuer 2 documents' && /1 document/.test(await vis('tidy-apply').innerText()), `tidy: the result says what is left and what changes (${result.join(' | ')})`);
   await vis('tidy-apply').click();
   await page.getByTestId('ask-confirm').click();
   await page.getByText('1 document changed.').waitFor({ timeout: 30000 }).then(() => check(true, 'tidy: the documents are changed'), () => check(false, 'tidy: the documents are changed'));

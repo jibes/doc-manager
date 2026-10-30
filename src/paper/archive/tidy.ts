@@ -1,119 +1,125 @@
-import type { TidyAnswer } from '@/paper/scan/ai';
 import type { Details } from './pdfInfo';
 import type { IndexedDoc } from './search';
 import { nameKey, vocabularyOf } from './vocabulary';
 
 /**
- * Tidying the archive's tags and types, in three steps of growing reach, each including the ones before:
- * - spelling: the same word written differently ("Steuer", "steuern") becomes its most used spelling (no AI);
- * - same: names that mean the same (synonyms, translations: "Arzt", "Doctor") become one (AI);
- * - broader: tags become broader topics ("Zahnarzt", "Hausarzt" → "Gesundheit") (AI; types stay at "same").
- * Besides, a tag that only repeats the document's own type or sender goes (no AI). Nothing is written until the
- * groups, as reviewed, are applied.
+ * Tidying the archive's tags (or types) into a few categories, in three parts that don't overlap:
+ * 1. Clean-up, without asking: one spelling per word ("steuern" → "Steuer"); tags that only repeat the
+ *    document's type or sender go; tags that are names of companies or people go to the sender field (where it
+ *    is empty) and leave the tags.
+ * 2. Categories: the names the user keeps, chosen from all in use (sorted by use, generality or the model's
+ *    suggestion), new ones allowed.
+ * 3. Sorting in: every other name gets one destination: a category, itself (kept as it is), or removed.
+ * Nothing is written until the result is applied.
  */
-export type Level = 'spelling' | 'same' | 'broader';
+export type Kind = 'tag' | 'type';
 
-export type Member = { name: string; count: number; on: boolean };
-/** Names that become `to`. `on` per member: one can be left as it is. */
-export type Group = { id: string; kind: 'tag' | 'type'; to: string; members: Member[] };
+/** A name in use: how many documents have it, and what the model made of it (when asked). */
+export type NameInfo = { name: string; count: number; generality: number | null; company: boolean };
+
+/** Where a name that isn't a category goes. */
+export type Destination = { to: 'category'; category: string } | { to: 'keep' } | { to: 'remove' };
+
+export type Plan = {
+  kind: Kind;
+  /** The clean-up of part 1. */
+  cleanup: boolean;
+  categories: string[];
+  /** By nameKey; a name without one is kept. */
+  destinations: Map<string, Destination>;
+  /** By nameKey: names of companies or people (tags only). */
+  companies: Set<string>;
+};
 
 type Named = Pick<IndexedDoc, 'type' | 'tags' | 'sender'>;
 
-/** Every spelling and how many documents use it. */
-function spellings(values: string[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const v of values.map((x) => x.trim()).filter(Boolean)) out.set(v, (out.get(v) ?? 0) + 1);
-  return out;
-}
-
-/** As many use one as the other: the capitalised one ("Rechnung", not "rechnung"). */
-const capital = (s: string) => (s[0] !== s[0].toLocaleLowerCase() ? 1 : 0);
-
-/** The same word written in more than one way: each group goes to its most used spelling. */
-function spellingGroups(kind: Group['kind'], values: string[]): Group[] {
-  const byKey = new Map<string, [string, number][]>();
-  for (const [name, count] of spellings(values)) byKey.set(nameKey(name), [...(byKey.get(nameKey(name)) ?? []), [name, count]]);
-  return [...byKey.entries()]
-    .filter(([, forms]) => forms.length > 1)
-    .map(([key, forms]) => {
-      const sorted = forms.sort((a, b) => b[1] - a[1] || capital(b[0]) - capital(a[0]) || a[0].localeCompare(b[0]));
-      return { id: `${kind}:${key}`, kind, to: sorted[0][0], members: sorted.map(([name, count]) => ({ name, count, on: true })) };
-    });
-}
-
-/** Names grouped by where the model's answer takes them (names it left out, or answered with nothing, stay). */
-function answerGroups(kind: Group['kind'], counted: [string, number][], target: (name: string) => string): Group[] {
-  const known = new Map(counted.map(([n]) => [nameKey(n), n]));
-  const byKey = new Map<string, { to: string; members: Member[] }>();
-  for (const [name, count] of counted) {
-    const raw = target(name).trim() || name;
-    // A target that is a name in use is written as that name is.
-    const to = known.get(nameKey(raw)) ?? raw;
-    const g = byKey.get(nameKey(to)) ?? { to, members: [] };
-    g.members.push({ name, count, on: true });
-    byKey.set(nameKey(to), g);
-  }
-  return [...byKey.entries()]
-    .filter(([key, g]) => g.members.some((m) => nameKey(m.name) !== key))
-    .map(([key, g]) => ({ id: `${kind}:${key}`, kind, to: g.to, members: g.members.sort((a, b) => b.count - a.count) }));
-}
-
-/** The groups a level proposes for `docs` (the AI levels need the model's `answer`). */
-export function groupsFor(docs: Named[], level: Level, answer: TidyAnswer | null): Group[] {
-  if (level === 'spelling' || !answer) {
-    return [...spellingGroups('type', docs.map((d) => d.type)), ...spellingGroups('tag', docs.flatMap((d) => d.tags))];
-  }
+/** The names in use, most used first (spellings of one name counted together, the most used standing for it). */
+export function namesOf(docs: Named[], kind: Kind): NameInfo[] {
   const v = vocabularyOf(docs);
-  const lookup = <T extends { same: string }>(entries: T[], name: (e: T) => string) => {
-    const m = new Map(entries.map((e) => [nameKey(name(e)), e]));
-    return (n: string) => m.get(nameKey(n));
-  };
-  const tag = lookup(answer.tags, (e) => e.tag);
-  const type = lookup(answer.types, (e) => e.type);
-  const same = (n: string) => tag(n)?.same || n;
-  const tagTarget = level === 'same' ? same : (n: string) => tag(same(n))?.broader || tag(n)?.broader || same(n);
-  // A spelling variant counts with the name it is a spelling of (the vocabulary already put them together); names
-  // the model leaves as they are still get their spellings made one.
-  const ai = [...answerGroups('type', v.types, (n) => type(n)?.same || n), ...answerGroups('tag', v.tags, tagTarget)];
-  const covered = new Set(ai.flatMap((g) => g.members.map((m) => `${g.kind}:${nameKey(m.name)}`)));
-  return [...groupsFor(docs, 'spelling', null).filter((g) => !covered.has(g.id)), ...ai];
+  return (kind === 'tag' ? v.tags : v.types).map(([name, count]) => ({ name, count, generality: null, company: false }));
 }
 
-/** Tags that only repeat the document's own type or sender ("Rechnung" on an invoice): how many documents have one. */
-export function repeatsCount(docs: Named[]): number {
-  return docs.filter((d) => d.tags.some((x) => repeats(x, d))).length;
+/** How many names are written more than one way (part 1 makes each one). */
+export function spellingFixes(docs: Named[], kind: Kind): number {
+  const forms = new Map<string, Set<string>>();
+  for (const v of kind === 'tag' ? docs.flatMap((d) => d.tags) : docs.map((d) => d.type)) {
+    const s = v.trim();
+    if (s) forms.set(nameKey(s), (forms.get(nameKey(s)) ?? new Set()).add(s));
+  }
+  return [...forms.values()].filter((f) => f.size > 1).length;
 }
 
 const repeats = (tag: string, d: Pick<Details, 'type' | 'sender'>) => !!tag.trim() && (nameKey(tag) === nameKey(d.type) || nameKey(tag) === nameKey(d.sender));
 
+/** Documents with a tag that only repeats their type or sender. */
+export function repeatsCount(docs: Named[]): number {
+  return docs.filter((d) => d.tags.some((x) => repeats(x, d))).length;
+}
+
 /**
- * The change to one document: its tags and type as the groups that are on take them, each tag once; with
- * `dropRepeats`, without tags that repeat its type or sender. Spelling variants of a member go with it.
+ * Categories to start from: the model's suggestion where there is one; else the most used names until about
+ * `size` of them, or fewer where those already cover nearly every document that has any.
  */
-export function editFor(groups: Group[], dropRepeats: boolean): (d: Details) => Details {
-  const maps = { tag: new Map<string, string>(), type: new Map<string, string>() };
-  for (const g of groups) {
-    const to = g.to.trim();
-    if (!to) continue;
-    for (const m of g.members) if (m.on) maps[g.kind].set(nameKey(m.name), to);
+export function suggestedCategories(docs: Named[], names: NameInfo[], kind: Kind, suggested: string[] | null, size = 12): string[] {
+  if (suggested?.length) return suggested.slice(0, 15);
+  const withAny = docs.filter((d) => (kind === 'tag' ? d.tags.length : d.type)).length;
+  const out: string[] = [];
+  for (const n of names.filter((x) => !x.company)) {
+    if (out.length >= size || (withAny && directCoverage(docs, out, kind) / withAny >= 0.9)) break;
+    out.push(n.name);
   }
+  return out;
+}
+
+/** Documents that have one of `categories` as it is (before anything is sorted in). */
+export function directCoverage(docs: Named[], categories: string[], kind: Kind): number {
+  const keys = new Set(categories.map(nameKey));
+  return docs.filter((d) => (kind === 'tag' ? d.tags.some((x) => keys.has(nameKey(x))) : keys.has(nameKey(d.type)))).length;
+}
+
+/** The change to one document as the plan says (written only where it changes something). */
+export function editFor(plan: Plan, names: NameInfo[]): (d: Details) => Details {
+  // One spelling per name: the one standing for it.
+  const spelled = new Map(names.map((n) => [nameKey(n.name), n.name]));
+  const categories = new Map(plan.categories.map((c) => [nameKey(c), c]));
+  const target = (value: string): string | null => {
+    const k = nameKey(value);
+    const own = plan.cleanup ? (spelled.get(k) ?? value) : value;
+    if (categories.has(k)) return categories.get(k)!;
+    const dest = plan.destinations.get(k);
+    if (dest?.to === 'remove') return null;
+    if (dest?.to === 'category') return categories.get(nameKey(dest.category)) ?? dest.category;
+    return own;
+  };
+  if (plan.kind === 'type') return (d) => ({ ...d, type: d.type.trim() ? (target(d.type) ?? '') : d.type });
   return (d) => {
-    const type = maps.type.get(nameKey(d.type)) ?? d.type;
+    let sender = d.sender;
     const tags: string[] = [];
     for (const tag of d.tags) {
-      if (dropRepeats && repeats(tag, { type, sender: d.sender })) continue;
-      const to = maps.tag.get(nameKey(tag)) ?? tag;
-      if (!tags.some((x) => nameKey(x) === nameKey(to))) tags.push(to);
+      if (plan.cleanup && repeats(tag, d)) continue;
+      if (plan.companies.has(nameKey(tag))) {
+        // A company's or person's name: the sender, where none is given yet.
+        if (!sender.trim()) sender = spelled.get(nameKey(tag)) ?? tag;
+        continue;
+      }
+      const to = target(tag);
+      if (to && !tags.some((x) => nameKey(x) === nameKey(to))) tags.push(to);
     }
-    return { ...d, type, tags };
+    return { ...d, sender, tags };
   };
 }
 
-/** The documents the change would alter (the index's details, as the files have them). */
+/** The documents the plan would change (the index's details, as the files have them). */
 export function changedBy(docs: IndexedDoc[], edit: (d: Details) => Details): IndexedDoc[] {
   return docs.filter((doc) => {
     const now: Details = { title: doc.title, sender: doc.sender, type: doc.type, date: doc.date, tags: doc.tags };
     const next = edit(now);
-    return next.type !== now.type || next.tags.join('\n') !== now.tags.join('\n');
+    return next.type !== now.type || next.sender !== now.sender || next.tags.join('\n') !== now.tags.join('\n');
   });
+}
+
+/** After the plan: each category (and each name kept as it is) with how many documents have it. */
+export function resultCounts(docs: IndexedDoc[], edit: (d: Details) => Details, kind: Kind): [string, number][] {
+  const after = docs.map((doc) => edit({ title: doc.title, sender: doc.sender, type: doc.type, date: doc.date, tags: doc.tags }));
+  return namesOf(after.map((d) => ({ ...d, sender: d.sender })), kind).map((n) => [n.name, n.count]);
 }

@@ -1,59 +1,59 @@
 import { describe, expect, it } from 'vitest';
 
-import type { TidyAnswer } from '@/paper/scan/ai';
+import type { Details } from './pdfInfo';
 import type { IndexedDoc } from './search';
-import { changedBy, editFor, groupsFor, repeatsCount } from './tidy';
+import { changedBy, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, type Destination, type Plan } from './tidy';
 
 const doc = (type: string, tags: string[], sender = ''): IndexedDoc => ({ key: Math.random().toString(36), type, tags, sender, title: '', date: '' }) as unknown as IndexedDoc;
+const details = (d: IndexedDoc): Details => ({ title: '', date: '', sender: d.sender, type: d.type, tags: d.tags });
 
 const docs = [
-  doc('Rechnung', ['Steuer', 'Zahnarzt'], 'Dr. Muster'),
-  doc('rechnung', ['steuern', 'Hausarzt']),
-  doc('Invoice', ['Tax', 'Rechnung']),
-  doc('Brief', ['Dr. Muster'], 'Dr. Muster'),
+  doc('Rechnung', ['Gesundheit', 'Zahnarzt'], 'Dr. Muster'),
+  doc('rechnung', ['gesundheit', 'Hausarzt']),
+  doc('Brief', ['Zurich', 'Versicherung']),
+  doc('Brief', ['Dr. Muster', 'Steuer'], 'Dr. Muster'),
 ];
-
-const answer: TidyAnswer = {
-  tags: [
-    { tag: 'Steuer', same: 'Steuer', broader: 'Finanzen' },
-    { tag: 'Tax', same: 'Steuer', broader: 'Finanzen' },
-    { tag: 'Zahnarzt', same: 'Zahnarzt', broader: 'Gesundheit' },
-    { tag: 'Hausarzt', same: 'Hausarzt', broader: 'Gesundheit' },
-  ],
-  types: [{ type: 'Invoice', same: 'Rechnung' }],
-};
+const plan = (over: Partial<Plan>): Plan => ({ kind: 'tag', cleanup: true, categories: [], destinations: new Map(), companies: new Set(), ...over });
 
 describe('tidy', () => {
-  it('makes spellings one without the model', () => {
-    const g = groupsFor(docs, 'spelling', null);
-    expect(g.map((x) => [x.kind, x.to, x.members.map((m) => m.name)])).toEqual([
-      ['type', 'Rechnung', ['Rechnung', 'rechnung']],
-      ['tag', 'Steuer', ['Steuer', 'steuern']],
+  it('lists the names in use, spellings together, and counts what part 1 cleans up', () => {
+    expect(namesOf(docs, 'tag').map((n) => [n.name, n.count])).toEqual([['Gesundheit', 2], ['Dr. Muster', 1], ['Hausarzt', 1], ['Steuer', 1], ['Versicherung', 1], ['Zahnarzt', 1], ['Zurich', 1]]);
+    expect(spellingFixes(docs, 'tag')).toBe(1);
+    expect(spellingFixes(docs, 'type')).toBe(1);
+    expect(repeatsCount(docs)).toBe(1);
+  });
+
+  it('starts from the model’s categories, else the most used until nearly every document has one', () => {
+    const names = namesOf(docs, 'tag');
+    expect(suggestedCategories(docs, names, 'tag', ['Gesundheit', 'Finanzen'])).toEqual(['Gesundheit', 'Finanzen']);
+    expect(suggestedCategories(docs, names, 'tag', null, 3)).toEqual(['Gesundheit', 'Dr. Muster', 'Hausarzt']);
+    expect(directCoverage(docs, ['Gesundheit', 'Versicherung'], 'tag')).toBe(3);
+  });
+
+  it('changes each document: spellings, repeats and company names first, then the categories and destinations', () => {
+    const names = namesOf(docs, 'tag');
+    const dest = new Map<string, Destination>([
+      ['zahnarzt', { to: 'category', category: 'Gesundheit' }],
+      ['hausarzt', { to: 'category', category: 'Gesundheit' }],
+      ['steuer', { to: 'remove' }],
     ]);
+    const edit = editFor(plan({ categories: ['Gesundheit', 'Versicherung'], destinations: dest, companies: new Set(['zurich']) }), names);
+    expect(edit(details(docs[0]))).toMatchObject({ tags: ['Gesundheit'] });
+    expect(edit(details(docs[1]))).toMatchObject({ tags: ['Gesundheit'] });
+    // A company's name goes to the sender where there is none.
+    expect(edit(details(docs[2]))).toMatchObject({ sender: 'Zurich', tags: ['Versicherung'] });
+    // The sender repeated as a tag goes; a removed tag goes.
+    expect(edit(details(docs[3])).tags).toEqual([]);
+    expect(changedBy(docs, edit)).toHaveLength(4);
+    expect(resultCounts(docs, edit, 'tag')).toEqual([['Gesundheit', 2], ['Versicherung', 1]]);
+    // Without clean-up, the spellings, repeats and companies stay.
+    const plain = editFor(plan({ cleanup: false, categories: ['Gesundheit'] }), names);
+    expect(plain(details(docs[3])).tags).toEqual(['Dr. Muster', 'Steuer']);
   });
 
-  it('puts together what means the same, then broader topics', () => {
-    const same = groupsFor(docs, 'same', answer);
-    expect(same.find((g) => g.kind === 'type')?.members.map((m) => m.name)).toEqual(['Rechnung', 'Invoice']);
-    expect(same.find((g) => g.kind === 'tag' && g.to === 'Steuer')?.members.map((m) => m.name)).toEqual(['Steuer', 'Tax']);
-    const broader = groupsFor(docs, 'broader', answer);
-    expect(broader.find((g) => g.to === 'Gesundheit')?.members.map((m) => m.name).sort()).toEqual(['Hausarzt', 'Zahnarzt']);
-    expect(broader.find((g) => g.to === 'Finanzen')?.members.map((m) => m.name).sort()).toEqual(['Steuer', 'Tax']);
-  });
-
-  it('changes each document as the groups that are on say, spellings and repeats included', () => {
-    const groups = groupsFor(docs, 'same', answer);
-    const edit = editFor(groups, true);
-    const one = (d: IndexedDoc) => edit({ title: '', date: '', sender: d.sender, type: d.type, tags: d.tags });
-    expect(one(docs[1])).toMatchObject({ type: 'Rechnung', tags: ['Steuer', 'Hausarzt'] });
-    // "Rechnung" repeated the type once it is "Rechnung"; the sender as a tag goes too.
-    expect(one(docs[2])).toMatchObject({ type: 'Rechnung', tags: ['Steuer'] });
-    expect(one(docs[3]).tags).toEqual([]);
-    expect(repeatsCount(docs)).toBe(1); // the sender as a tag (the type repeated only once the types are made one)
-    // A member switched off stays as it is.
-    const off = groups.map((g) => (g.kind === 'tag' && g.to === 'Steuer' ? { ...g, members: g.members.map((m) => ({ ...m, on: m.name !== 'Tax' })) } : g));
-    expect(editFor(off, false)({ title: '', date: '', sender: '', type: 'Invoice', tags: ['Tax'] }).tags).toEqual(['Tax']);
-    expect(changedBy(docs, editFor([], false))).toHaveLength(0);
-    expect(changedBy(docs, edit)).toHaveLength(3); // the first has nothing to change
+  it('works on types the same way', () => {
+    const names = namesOf(docs, 'type');
+    const edit = editFor(plan({ kind: 'type', categories: ['Rechnung'], destinations: new Map([['brief', { to: 'category', category: 'Rechnung' }]]) }), names);
+    expect(docs.map((d) => edit(details(d)).type)).toEqual(['Rechnung', 'Rechnung', 'Rechnung', 'Rechnung']);
   });
 });

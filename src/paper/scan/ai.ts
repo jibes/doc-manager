@@ -655,53 +655,70 @@ export async function describeWithAi(s: AiSettings, text: string, signal?: Abort
 
 /* ------------------------------------------------------------ tidying ---- */
 
-/**
- * What the model makes of the archive's tags and types (tidy.ts): for each, the name it means the same as
- * (a synonym, a translation, another form of the word; itself when none) and, for tags, the broader topic it
- * belongs to (itself when it is one already). Names it doesn't give back stay as they are.
- */
-export type TidyAnswer = { tags: { tag: string; same: string; broader: string }[]; types: { type: string; same: string }[] };
+/** A name in use as the model sees it: how general (1 one thing … 5 a broad area) and whether it names a company or person. */
+export type NameRating = { name: string; generality: number; company: boolean };
 
-const TIDY_SCHEMA = object({
-  tags: {
+const RATE_SCHEMA = object({
+  names: {
     type: 'array',
     items: object({
-      tag: { type: 'string', description: 'A tag from the list, exactly as given' },
-      same: { type: 'string', description: 'The tag from the list that means the same (synonym, translation, other form), or the tag itself' },
-      broader: { type: 'string', description: 'A broader topic it belongs to, in the language asked for (a tag from the list where one fits), or the same name if it is broad already' },
+      name: { type: 'string', description: 'A name from the list, exactly as given' },
+      generality: { type: 'integer', description: 'From 1 (one specific thing: a contract, a case, a product) to 5 (a broad area of life)' },
+      company: { type: 'boolean', description: 'Whether it is the name of a company, an organisation or a person' },
     }),
   },
-  types: {
+  suggested: { ...strings, description: 'The categories suggested, each a name from the list or a new broader one' },
+});
+
+const SORT_SCHEMA = object({
+  names: {
     type: 'array',
     items: object({
-      type: { type: 'string', description: 'A type from the list, exactly as given' },
-      same: { type: 'string', description: 'The type from the list that means the same, or the type itself' },
+      name: { type: 'string', description: 'A name from the list, exactly as given' },
+      category: { type: 'string', description: 'The one category it belongs under, exactly as given, or "" if none fits well' },
     }),
   },
 });
 
-export async function tidyWithAi(s: AiSettings, tags: [string, number][], types: [string, number][], signal?: AbortSignal): Promise<TidyAnswer> {
+const listed = (xs: [string, number][]) => xs.map(([n, c]) => `${n} (${c})`).join('\n') || '(none)';
+const what = (kind: 'tag' | 'type') => (kind === 'tag' ? 'tags' : 'document types');
+
+/** How general each name is, which are names of companies or people, and 10–15 categories for the archive (tidy.ts). */
+export async function rateNames(s: AiSettings, kind: 'tag' | 'type', names: [string, number][], signal?: AbortSignal): Promise<{ ratings: NameRating[]; suggested: string[] }> {
   const { lang } = await knownWords();
-  const list = (xs: [string, number][]) => xs.map(([n, c]) => `${n} (${c})`).join('\n') || '(none)';
   const instructions = [
-    'These are the tags and the document types of one person’s archive of documents, each with how many documents have it.',
-    `Make them consistent: for each tag and type, give the one from the list it means the same as (a synonym, a translation, a singular or plural form; prefer the most used, and one in ${LANGUAGE[lang]}), or itself.`,
-    `For each tag, also give a broader topic it belongs to, in ${LANGUAGE[lang]}: a tag from the list where one fits, else a short new one; the tag itself if it is broad already. Aim for about ten to twenty broad topics in all.`,
-    'Give every tag and type of the list, each once. Reply with the JSON object only.',
+    `These are the ${what(kind)} of one person’s archive of documents, each with how many documents have it.`,
+    'For each, rate how general it is, from 1 (one specific thing: a contract, a case, a product) to 5 (a broad area of life, such as finances or health), and say whether it is the name of a company, an organisation or a person.',
+    `Then suggest ${kind === 'tag' ? '10 to 15 categories' : '8 to 12 types'} that together cover the archive: prefer names from the list that are both general and often used; add a new, broader one only where several specific names would fit under it and none in the list does. Write new ones in ${LANGUAGE[lang]}. Never suggest a company’s or person’s name.`,
+    'Give every name of the list, each once. Reply with the JSON object only.',
     '',
-    'Tags:',
-    list(tags),
-    '',
-    'Types:',
-    list(types),
+    listed(names),
   ].join('\n');
-  const raw = replyObject(await send(s, { images: [], text: instructions, schema: TIDY_SCHEMA }, signal), (v) => 'tags' in v || 'types' in v) as Partial<TidyAnswer> | undefined;
+  const raw = replyObject(await send(s, { images: [], text: instructions, schema: RATE_SCHEMA }, signal), (v) => 'names' in v) as { names?: unknown[]; suggested?: unknown[] } | undefined;
   if (!raw) throw new Error(AI_NO_JSON);
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
-  return {
-    tags: (Array.isArray(raw.tags) ? raw.tags : []).map((x) => ({ tag: str(x?.tag), same: str(x?.same), broader: str(x?.broader) })).filter((x) => x.tag),
-    types: (Array.isArray(raw.types) ? raw.types : []).map((x) => ({ type: str(x?.type), same: str(x?.same) })).filter((x) => x.type),
-  };
+  const ratings = (Array.isArray(raw.names) ? raw.names : []).map((x) => {
+    const r = x as { name?: unknown; generality?: unknown; company?: unknown };
+    const g = Math.round(Number(r.generality));
+    return { name: str(r.name), generality: g >= 1 && g <= 5 ? g : 3, company: r.company === true };
+  });
+  return { ratings: ratings.filter((r) => r.name), suggested: (Array.isArray(raw.suggested) ? raw.suggested : []).map(str).filter(Boolean) };
+}
+
+/** For each name of `rest`, the one of `categories` it belongs under ('' where none fits): the model's proposal. */
+export async function sortInNames(s: AiSettings, kind: 'tag' | 'type', categories: string[], rest: [string, number][], signal?: AbortSignal): Promise<{ name: string; category: string }[]> {
+  const instructions = [
+    `These are the categories chosen for the ${what(kind)} of one person’s archive of documents:`,
+    categories.join(', '),
+    '',
+    `For each of the other ${what(kind)} below (with how many documents have it), give the one category it belongs under, exactly as written above, or "" if none fits well. Give every name of the list, each once. Reply with the JSON object only.`,
+    '',
+    listed(rest),
+  ].join('\n');
+  const raw = replyObject(await send(s, { images: [], text: instructions, schema: SORT_SCHEMA }, signal), (v) => 'names' in v) as { names?: unknown[] } | undefined;
+  if (!raw) throw new Error(AI_NO_JSON);
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  return (Array.isArray(raw.names) ? raw.names : []).map((x) => ({ name: str((x as { name?: unknown }).name), category: str((x as { category?: unknown }).category) })).filter((x) => x.name);
 }
 
 /** A small request (a blank page) that checks the address, key and model, for Settings. */
