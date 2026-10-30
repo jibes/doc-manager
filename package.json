@@ -42,7 +42,7 @@
     "react-native-svg": "^15.15.4",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.10.1",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@tesseract.js-data/deu": "1.0.0",
@@ -51,8 +51,8 @@
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.0",
-    "onnxruntime-web": "^1.30.0",
-    "playwright-core": "^1.64.0",
+    "onnxruntime-web": "^1.31.1",
+    "playwright-core": "^1.64.1",
     "tesseract.js": "7.0.0",
     "tesseract.js-core": "7.0.0",
     "typescript": "~6.0.3",
