@@ -1,11 +1,16 @@
 # Weekly updates (STANDARD.md §9). Expo's packages move together with the SDK (`npx expo upgrade`, then
-# `npx expo install --fix`), never one by one: Dependabot leaves them alone.
+# `npx expo install --fix`), never one by one: Dependabot leaves them alone. Major versions are done on purpose,
+# one at a time (they change APIs, configs or the build), not by Dependabot; at most 2 open PRs per ecosystem,
+# so its PRs never queue ahead of main's CI.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
+    open-pull-requests-limit: 2
     ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
       - dependency-name: 'expo'
       - dependency-name: 'expo-*'
       - dependency-name: '@expo/*'
@@ -21,18 +26,30 @@ updates:
   - package-ecosystem: npm
     directory: /shell/desktop
     schedule: { interval: weekly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: gradle
     directory: /shell/android
     schedule: { interval: weekly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       actions:
         patterns: ['*']
