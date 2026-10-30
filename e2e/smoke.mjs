@@ -1770,10 +1770,13 @@ async function selectionActions() {
   check((await page.getByTestId('action-act-rename').count()) === 1 && (await page.getByTestId('action-act-tidy').count()) === 0, 'selection actions: …the ones that apply, in a sheet');
   await page.keyboard.press('Escape');
   await vis('act-analyse').click();
-  await page.getByText('1 document is being read.').waitFor({ timeout: 20000 }).then(
-    () => check(true, 'selection actions: Analyse reads a document without text'),
-    () => check(false, 'selection actions: Analyse reads a document without text'),
-  );
+  // Its outcome, whichever it is (named in the check, so a failure says what Analyse did instead).
+  const outcome = await page
+    .getByText(/being read\.|details filled in|couldn’t be opened|Nothing to (read|add)/i)
+    .first()
+    .innerText({ timeout: 45000 })
+    .catch(() => '(no outcome shown)');
+  check(outcome === '1 document is being read.', `selection actions: Analyse reads a document without text (${outcome})`);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(BASE);
   await docRows(page).nth(1).waitFor();
