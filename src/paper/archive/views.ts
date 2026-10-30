@@ -2,19 +2,19 @@ import { create } from 'zustand';
 
 import { folders } from '@/core/lib/folders';
 import { usePrefs } from '@/paper/state/prefs';
-import { parseViews, serializeViews, type SavedView } from './facets';
+import { mergeViews, parseViews, serializeViews, type SavedView } from './facets';
 import { schedule } from './indexer';
 import { loadKinds, moveKindsTo } from './kinds';
-import { readSettings } from './settingsFile';
+import { readSettingsMerged } from './settingsFile';
 
 /** Where saved views are kept in the archive folder: synced with the documents, so every device has them. */
 const PATH = ['.tessel', 'views.json'];
 
 export const useViews = create<{ views: SavedView[] }>(() => ({ views: usePrefs.getState().views }));
 
-/** The views as stored; throws when the file is there but can't be read (see readSettings). */
+/** The views as stored (sync conflicts merged in); throws when the file is there but can't be read (see readSettings). */
 async function read(archive: string): Promise<SavedView[]> {
-  const text = await readSettings(archive, PATH);
+  const text = await readSettingsMerged(archive, PATH, parseViews, mergeViews, serializeViews);
   return text ? parseViews(text) : [];
 }
 

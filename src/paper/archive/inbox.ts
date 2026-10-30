@@ -9,13 +9,13 @@ import { describeWithAi, type AiSettings } from '@/paper/scan/ai';
 import { usePrefs } from '@/paper/state/prefs';
 import { localDate } from './facets';
 import { allDocs, contentHash, schedule } from './indexer';
-import { readSettings } from './settingsFile';
+import { readSettingsMerged } from './settingsFile';
 import { docKey } from './docKey';
 import type { IndexedDoc } from './search';
 import { infoFor, parseTags, readTrailer, real, realTitle, withInfo, type Details } from './pdfInfo';
 import { makeSearchable, pagesWithoutText, readPages, textOf } from './searchable';
 import { childDir, ensureDir, inboxDir, INBOX } from './dirs';
-import { applyRules, DEFAULT_RULES, findDate, parseRules, pathFor, serializeRules, type Rules } from './rules';
+import { applyRules, DEFAULT_RULES, findDate, mergeRules, parseRules, pathFor, serializeRules, type Rules } from './rules';
 
 /**
  * The inbox: `Inbox/` in the archive folder, where new documents land (scans, downloads, other devices). One
@@ -59,7 +59,7 @@ export const useRulesUnreadable = create<{ unreadable: boolean }>(() => ({ unrea
 
 /** The rules as stored; those last read when the file can't be read now (no access yet), so nothing is lost. */
 export async function loadRules(archive: string): Promise<Rules> {
-  const text = await readSettings(archive, RULES_PATH).catch(() => undefined);
+  const text = await readSettingsMerged(archive, RULES_PATH, parseRules, mergeRules, serializeRules).catch(() => undefined);
   useRulesUnreadable.setState({ unreadable: text === undefined });
   if (text === undefined) return useRules.getState();
   const rules = text ? parseRules(text) : DEFAULT_RULES;
@@ -73,7 +73,7 @@ export async function loadRules(archive: string): Promise<Rules> {
  */
 export async function changeRules(archive: string, edit: (r: Rules) => Rules): Promise<void> {
   await folders.unlock(archive).catch(() => false);
-  const text = await readSettings(archive, RULES_PATH);
+  const text = await readSettingsMerged(archive, RULES_PATH, parseRules, mergeRules, serializeRules);
   const next = edit(text ? parseRules(text) : DEFAULT_RULES);
   await folders.writeText(archive, RULES_PATH, serializeRules(next));
   useRules.setState(next, true);

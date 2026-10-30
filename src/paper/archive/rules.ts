@@ -189,4 +189,7 @@ export function parseRules(json: string): Rules {
   }
 }
 
+/** Two devices' rules (a sync conflict): `kept`'s template and rules, then the rules only `copy` has. */
+export const mergeRules = (kept: Rules, copy: Rules): Rules => ({ ...kept, rules: [...kept.rules, ...copy.rules.filter((r) => !kept.rules.some((k) => k.id === r.id))] });
+
 export const serializeRules = (r: Rules) => `${JSON.stringify({ version: 1, ...r }, null, 2)}\n`;

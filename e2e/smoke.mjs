@@ -1216,6 +1216,7 @@ async function foldersShell() {
           .filter((n) => !n.includes('/')),
       readText: ({ root, path }) => (state.texts ?? {})[`${root}|${path.join('/')}`] ?? null,
       writeText: ({ root, path, text }) => (((state.texts ??= {})[`${root}|${path.join('/')}`] = text), null),
+      removeText: ({ root, path }) => (delete (state.texts ?? {})[`${root}|${path.join('/')}`], null),
       write: ({ token, uri }) => ((log.written[uri] = chunks[token].join('')), null),
       create: ({ root, dir, name, token }) => {
         const id = newId();

@@ -398,6 +398,11 @@ class Folders(private val context: Context) {
         else resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }
     }
 
+    /** Removes a text file at `path` below a place (a sync tool's conflict copy of one); nothing if there is none. */
+    fun removeText(root: String, path: List<String>) {
+        delete(fileAt(root, path, create = false) ?: return)
+    }
+
     private fun fileAt(root: String, path: List<String>, create: Boolean): Uri? {
         require(path.isNotEmpty() && path.none { it.isEmpty() || it == ".." || it.contains('/') }) { "Bad path" }
         if (root == "device" || root == "app") {

@@ -3,8 +3,8 @@ import { create } from 'zustand';
 import { lang } from '@/core/i18n';
 import { folders } from '@/core/lib/folders';
 import { usePrefs } from '@/paper/state/prefs';
-import { defaultKinds, parseKinds, serializeKinds, type Kinds } from './kindList';
-import { readSettings } from './settingsFile';
+import { defaultKinds, mergeKinds, parseKinds, serializeKinds, type Kinds } from './kindList';
+import { readSettings, readSettingsMerged } from './settingsFile';
 
 /** Where the types and tags are kept in the archive folder: synced with the documents, so every device has them. */
 const PATH = ['.tessel', 'kinds.json'];
@@ -15,7 +15,7 @@ export const useKinds = create<{ kinds: Kinds; loaded: boolean }>(() => ({ kinds
 
 /** As stored; the defaults where nothing is; throws when the file is there but can't be read (see readSettings). */
 async function read(archive: string): Promise<Kinds> {
-  const text = await readSettings(archive, PATH);
+  const text = await readSettingsMerged(archive, PATH, (t) => parseKinds(t, lang), mergeKinds, serializeKinds);
   return text ? parseKinds(text, lang) : defaultKinds(lang);
 }
 

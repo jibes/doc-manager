@@ -152,4 +152,7 @@ export function parseViews(json: string): SavedView[] {
   }
 }
 
+/** Two devices' views (a sync conflict): those of `kept`, then those only `copy` has. */
+export const mergeViews = (kept: SavedView[], copy: SavedView[]) => [...kept, ...copy.filter((v) => !kept.some((k) => k.id === v.id))];
+
 export const serializeViews = (views: SavedView[]) => `${JSON.stringify({ version: 1, views }, null, 2)}\n`;

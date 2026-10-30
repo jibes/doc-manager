@@ -74,6 +74,12 @@ export function parseKinds(text: string, lang: Lang): Kinds {
   return { types: types.length ? types : defaultKinds(lang).types, tags, onlyTags: !!raw.onlyTags && tags.length > 0 };
 }
 
+/** Two devices' lists (a sync conflict): `kept`'s names and descriptions, then the names only `copy` has. */
+export function mergeKinds(kept: Kinds, copy: Kinds): Kinds {
+  const more = (a: Named[], b: Named[]) => [...a, ...b.filter((x) => !a.some((y) => nameKey(y.name) === nameKey(x.name)))];
+  return { types: more(kept.types, copy.types), tags: more(kept.tags, copy.tags), onlyTags: kept.onlyTags };
+}
+
 export const serializeKinds = (k: Kinds) => `${JSON.stringify({ version: 1, types: cleaned(k.types), tags: cleaned(k.tags), onlyTags: k.onlyTags }, null, 2)}\n`;
 
 /** Where a document goes whose type fits none: the last one. */

@@ -97,6 +97,8 @@ export type FoldersApi = {
   readText(root: string, path: string[]): Promise<string | null>;
   /** Writes it, making the folders on the way and replacing what was there. */
   writeText(root: string, path: string[], text: string): Promise<void>;
+  /** Removes such a file (a sync tool's conflict copy of one); nothing when there is none. */
+  removeText(root: string, path: string[]): Promise<void>;
   /** Whether all files access is granted. */
   allFiles(): Promise<boolean>;
   /** Shows Android's screen for it; resolves with the outcome. */

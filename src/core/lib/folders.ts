@@ -33,6 +33,7 @@ export const folders: FoldersApi = {
   writeText: async () => {
     throw new Error('Unsupported');
   },
+  removeText: async () => {},
   allFiles: async () => false,
   requestAllFiles: async () => false,
 };

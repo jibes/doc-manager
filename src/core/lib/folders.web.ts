@@ -76,6 +76,7 @@ const shellFolders: FoldersApi = {
   listNames: (root, path) => shellRequest<string[]>('names', { root, path }),
   readText: (root, path) => shellRequest<string | null>('readText', { root, path }),
   writeText: (root, path, text) => shellRequest('writeText', { root, path, text }),
+  removeText: (root, path) => shellRequest('removeText', { root, path }),
   allFiles: async () => (await shellAccess()).allFiles,
   requestAllFiles: () => shellRequest<boolean>('requestAllFiles'),
 };
@@ -300,6 +301,16 @@ const browserFolders: FoldersApi = {
     let dir = await writable(root);
     for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
     await writeFile(await dir.getFileHandle(path[path.length - 1], { create: true }), new Blob([text], { type: 'application/json' }));
+  },
+  async removeText(root, path) {
+    try {
+      let dir = await writable(root);
+      for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
+      await dir.removeEntry(path[path.length - 1]);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'NotFoundError') return;
+      throw e;
+    }
   },
   allFiles: async () => false,
   requestAllFiles: async () => false,
