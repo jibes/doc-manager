@@ -31,7 +31,7 @@ export function DetailsPanel({
   onSuggest?: (now: Details) => Promise<Details>;
   /** The first date in the document's text: offered when it has none of its own. */
   findDate?: () => Promise<string>;
-  /** The tags the archive uses: one not among them is marked new (a suggestion making up a tag shows). */
+  /** The tags the archive uses: one not among them (nor the document's own already) is marked new (a suggestion making up a tag shows). */
   knownTags?: () => Promise<string[]>;
 }) {
   const [d, setD] = useState(initial);
@@ -146,7 +146,7 @@ export function DetailsPanel({
               <Pressable key={x} testID="detail-tag" accessibilityRole="button" accessibilityLabel={t.removeTag(x)} onPress={() => set({ tags: d.tags.filter((y) => y !== x) })} style={[styles.chip, { backgroundColor: p.accentSoft }]}>
                 <T v="label" color={p.accent}>
                   {x}
-                  {known && !known.has(nameKey(x)) ? ` · ${t.tagNew}` : ''}
+                  {known && !known.has(nameKey(x)) && !initial.tags.some((y) => nameKey(y) === nameKey(x)) ? ` · ${t.tagNew}` : ''}
                 </T>
                 <Icon name="close" size={14} color={p.accent} />
               </Pressable>
