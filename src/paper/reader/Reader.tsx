@@ -34,6 +34,7 @@ import { libraryActions } from '@/paper/state/library';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 import { repo, type DocRecord } from '@/core/storage';
 import { dateIn, detailsOf, saveDetails, suggestDetails } from '@/paper/archive/details';
+import { vocabulary } from '@/paper/archive/vocabulary';
 import { editing, readAdded, readText, useIntake } from '@/paper/archive/intake';
 import { allDocs, invalidate, pauseIndexing, schedule, useIndex } from '@/paper/archive/indexer';
 import type { IndexedDoc } from '@/paper/archive/search';
@@ -178,6 +179,7 @@ export function Reader({
   const [savingDetails, setSavingDetails] = useState(false);
   // The Details panel offers the first date in the text when the document has none.
   const findDateHere = useCallback(() => dateIn(handle), [handle]);
+  const knownTags = useCallback(() => vocabulary().then((v) => v.tags.map(([name]) => name)), []);
   // Indexing shares the PDF engine: it waits while a document is open (not beside the list, which it fills: the
   // engine draws pages first anyway).
   useEffect(() => (onClose ? undefined : pauseIndexing()), [onClose]);
@@ -1088,6 +1090,7 @@ export function Reader({
           onClose={closeDetails}
           onSuggest={canImprove ? (now) => suggestDetails(handle, doc.fileName, now, ai) : undefined}
           findDate={findDateHere}
+          knownTags={knownTags}
         />
   );
 

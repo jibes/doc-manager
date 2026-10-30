@@ -275,6 +275,8 @@ export default function Documents() {
     // Possible older versions counted too (the Duplicates screen reads the files to tell): it is the way there.
     return duplicateGroups(all, inTessel, () => true).length;
   }, [all, archive]);
+  // Tags or types to tidy: some document has one.
+  const hasNames = useMemo(() => all.some((d) => d.type || d.tags.length), [all]);
   // Everything else, one step away: the inbox, the trash, sync issues, the rules, installing the app.
   const moreItems = [
       ...(archive && inboxHere ? [{ key: 'more-inbox', icon: 'inbox' as IconName, label: inboxCount ? t.inboxWaiting(inboxCount) : t.inboxTitle, onPress: () => router.push('/inbox') }] : []),
@@ -282,6 +284,7 @@ export default function Documents() {
       ...(doubled > 0 ? [{ key: 'more-duplicates', icon: 'copy' as IconName, label: t.duplicatesN(doubled), onPress: () => router.push('/duplicates') }] : []),
       ...(syncIssues > 0 ? [{ key: 'more-sync', icon: 'sync' as IconName, label: t.syncIssues(syncIssues), onPress: () => router.push('/sync') }] : []),
       ...(archive ? [{ key: 'more-rules', icon: 'rules' as IconName, label: t.rulesTitle, onPress: () => router.push('/rules') }] : []),
+      ...(hasNames ? [{ key: 'more-tidy', icon: 'tag' as IconName, label: t.tidyMenu, onPress: () => router.push('/tidy') }] : []),
       ...(installKind ? [{ key: 'more-install', icon: 'install' as IconName, label: t.install, onPress: () => (installKind === 'prompt' ? void install() : say(t.installHintIos)) }] : []),
   ];
   // ⋯ only for two or more; one is a button of its own, none is nothing.

@@ -1595,6 +1595,101 @@ function textPdf(line) {
   return Buffer.from(out, 'latin1');
 }
 
+// Tags and types: AI suggestions choose from the words in use (in the app's language), and Tidy up makes spellings,
+// then names of the same meaning, one, across the documents' files.
+async function tidyTags() {
+  const ctx = await newContext({ viewport: { width: 1280, height: 860 } });
+  const page = await ctx.newPage();
+  const vis = (id) => page.getByTestId(id).locator('visible=true');
+  page.on('pageerror', (e) => errors.push(`tidy: ${e.message}`));
+  const prompts = [];
+  const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+  await ctx.route('https://ai.test/**', async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const said = JSON.stringify(req.postDataJSON());
+    prompts.push(said);
+    const reply = said.includes('Make them consistent')
+      ? { tags: [{ tag: 'Steuer', same: 'Steuer', broader: 'Finanzen' }, { tag: 'Tax', same: 'Steuer', broader: 'Finanzen' }], types: [{ type: 'Rechnung', same: 'Rechnung' }] }
+      : { title: 'Old title', date: '', sender: '', type: 'rechnungen', keywords: ['steuern', 'Neubau'] };
+    return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(reply) } }] }) });
+  });
+  await page.goto(BASE);
+  await vis('home-settings').click();
+  await vis('ai-api-openai').click();
+  await vis('ai-url').fill('https://ai.test/v1');
+  await vis('ai-key').fill('sk-test');
+  await vis('ai-model').fill('test-model');
+  const details = async (type, tags) => {
+    await page.getByTestId('open-more').click();
+    await page.getByTestId('menu-details').click();
+    await page.getByTestId('details-panel').waitFor();
+    await page.getByTestId('detail-type').fill(type);
+    for (const tag of tags) await page.getByTestId('detail-tag-input').fill(`${tag},`);
+    await page.getByTestId('details-save').click();
+    await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 });
+  };
+  await openFixture(page, 'columns.pdf');
+  await details('Rechnung', ['Steuer']);
+  await openFixture(page, 'xrefstream.pdf');
+  await details('rechnung', ['steuern', 'Tax']);
+
+  // Suggested details: the words in use go with the request; the answer's are matched onto them, a new one marked.
+  // (Once the index has the details just written.)
+  const tagFacet = async () => {
+    await page.getByTestId('facet-tag').click();
+    await page.getByTestId('action-sheet').waitFor({ timeout: 3000 }).catch(() => {});
+    const text = await page.getByTestId('action-sheet').innerText().catch(() => '');
+    await page.keyboard.press('Escape');
+    return text;
+  };
+  await page.goto(BASE);
+  await docRows(page).nth(1).waitFor();
+  for (let i = 0; i < 40 && !/Tax/.test(await tagFacet()); i++) await page.waitForTimeout(300);
+  await page.getByText('Old title').first().click();
+  await page.getByTestId('reader').waitFor();
+  await page.getByTestId('open-more').click();
+  await page.getByTestId('menu-details').click();
+  await page.getByTestId('details-panel').waitFor();
+  for (const tag of await page.getByTestId('detail-tag').all()) await page.getByTestId('detail-tag').first().click();
+  await page.getByTestId('detail-type').fill('');
+  await page.getByTestId('details-suggest').click();
+  let tags = [];
+  for (let i = 0; i < 40 && tags.length < 2; i++) tags = await page.waitForTimeout(250).then(() => page.getByTestId('detail-tag').allInnerTexts());
+  const asked = prompts.at(-1) ?? '';
+  check(asked.includes('Keywords already in use: Steuer') && asked.includes('in English'), 'tidy: a suggestion is asked for in the app’s language, from the words in use');
+  check((await page.getByTestId('detail-type').inputValue()) === 'Rechnung' && tags.join('|') === 'Steuer|Neubau · new', `tidy: the answer’s words become the ones in use, a new one marked (${await page.getByTestId('detail-type').inputValue()}; ${tags.join('|')})`);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('ask-confirm').click().catch(() => {});
+
+  // Tidy up: spellings first (no model), then the same meaning (the model).
+  await page.goto(BASE);
+  await docRows(page).nth(1).waitFor();
+  if (await vis('more-tidy').count()) await vis('more-tidy').click();
+  else {
+    await vis('docs-more').click();
+    await page.getByTestId('action-more-tidy').click();
+  }
+  await page.getByTestId('tidy-group').first().waitFor();
+  const groups = async () => (await page.getByTestId('tidy-group').allInnerTexts()).map((g) => g.replace(/\s+/g, ' '));
+  const spelling = await groups();
+  check(spelling.length === 2 && (await page.getByTestId('tidy-to').evaluateAll((els) => els.map((e) => e.value))).join('|') === 'Rechnung|Steuer', `tidy: spellings are put together (${spelling.join(' / ')})`);
+  check(/1 document/.test(await vis('tidy-apply').innerText()), 'tidy: …changing the one document written otherwise');
+  await page.getByTestId('tidy-level-same').click();
+  await page.getByTestId('tidy-group').first().waitFor();
+  const same = await groups();
+  await page.screenshot({ path: `${OUT}tidy-same.png` });
+  check(same.some((g) => /Tax/.test(g)) && /1 document/.test(await vis('tidy-apply').innerText()), `tidy: the model puts together what means the same (${same.join(' / ')})`);
+  await vis('tidy-apply').click();
+  await page.getByTestId('ask-confirm').click();
+  await page.getByText('1 document changed.').waitFor({ timeout: 30000 }).then(() => check(true, 'tidy: the documents are changed'), () => check(false, 'tidy: the documents are changed'));
+  await page.goto(BASE);
+  let facet = '';
+  for (let i = 0; i < 40 && !/Steuer · 2/.test(facet); i++) facet = await page.waitForTimeout(300).then(tagFacet);
+  check(/Steuer · 2/.test(facet) && !/Tax|steuern/.test(facet), `tidy: one tag left for both (${facet.replace(/\n/g, ' / ')})`);
+  await ctx.close();
+}
+
 // A document without a date of its own: Details offers the first date in its text.
 async function foundDate() {
   const ctx = await newContext({ viewport: { width: 1280, height: 800 } });
@@ -3602,6 +3697,7 @@ await step('multiline', multiline);
 await step('opened-sync', openedSync);
 await step('desktop-list', desktopList);
 await step('found-date', foundDate);
+await step('tidy-tags', tidyTags);
 await step('again', again);
 await step('docked', docked);
 await step('upgrade', upgrade);

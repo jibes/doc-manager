@@ -7,6 +7,7 @@ import { fonts, radius, space, type Palette } from '@/core/design/tokens';
 import { aiMessage, t } from '@/core/i18n';
 import type { Details } from '@/paper/archive/pdfInfo';
 import { typedDate } from '@/paper/archive/rules';
+import { nameKey } from '@/paper/archive/vocabulary';
 import { Panel } from './Panel';
 import { discardDetails, useDrafts } from './drafts';
 
@@ -19,6 +20,7 @@ export function DetailsPanel({
   onClose,
   onSuggest,
   findDate,
+  knownTags,
 }: {
   palette: Palette;
   initial: Details;
@@ -29,11 +31,25 @@ export function DetailsPanel({
   onSuggest?: (now: Details) => Promise<Details>;
   /** The first date in the document's text: offered when it has none of its own. */
   findDate?: () => Promise<string>;
+  /** The tags the archive uses: one not among them is marked new (a suggestion making up a tag shows). */
+  knownTags?: () => Promise<string[]>;
 }) {
   const [d, setD] = useState(initial);
   const [tag, setTag] = useState('');
   const [bad, setBad] = useState(false);
   const [found, setFound] = useState('');
+  const [known, setKnown] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!knownTags) return;
+    let live = true;
+    knownTags().then(
+      (tags) => live && setKnown(new Set(tags.map(nameKey))),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [knownTags]);
   useEffect(() => {
     if (initial.date || !findDate) return;
     let live = true;
@@ -130,6 +146,7 @@ export function DetailsPanel({
               <Pressable key={x} testID="detail-tag" accessibilityRole="button" accessibilityLabel={t.removeTag(x)} onPress={() => set({ tags: d.tags.filter((y) => y !== x) })} style={[styles.chip, { backgroundColor: p.accentSoft }]}>
                 <T v="label" color={p.accent}>
                   {x}
+                  {known && !known.has(nameKey(x)) ? ` · ${t.tagNew}` : ''}
                 </T>
                 <Icon name="close" size={14} color={p.accent} />
               </Pressable>

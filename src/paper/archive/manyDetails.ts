@@ -5,7 +5,7 @@ import { passwordFor } from '@/paper/state/password';
 import { detailsOf, saveDetails } from './details';
 import { invalidate } from './indexer';
 import { useIntake } from './intake';
-import { realTitle } from './pdfInfo';
+import { realTitle, type Details } from './pdfInfo';
 import { importFromFolder } from './Results';
 import type { IndexedDoc } from './search';
 
@@ -30,7 +30,22 @@ export type DetailsChange = { sender?: string; type?: string; date?: string; add
  * incremental update). Folder files come into the library linked in place, as when opened. A reader showing one
  * of them opens it again. Returns how many couldn't be written (protected, no write access).
  */
-export async function writeDetailsMany(docs: IndexedDoc[], change: DetailsChange, onProgress?: (done: number, total: number) => void): Promise<{ failed: number; changed: number }> {
+export function writeDetailsMany(docs: IndexedDoc[], change: DetailsChange, onProgress?: (done: number, total: number) => void): Promise<{ failed: number; changed: number }> {
+  return writeDetailsEach(
+    docs,
+    (now) => {
+      const drop = new Set((change.remove ?? []).map((x) => x.toLocaleLowerCase()));
+      // A tag once, whatever its case ("Tax" not added to "tax").
+      const kept = now.tags.filter((x) => !drop.has(x.toLocaleLowerCase()));
+      const tags = [...kept, ...(change.add ?? []).filter((x, i, all) => ![...kept, ...all.slice(0, i)].some((y) => y.toLocaleLowerCase() === x.toLocaleLowerCase()))];
+      return { ...now, sender: change.sender ?? now.sender, type: change.type ?? now.type, date: change.date ?? now.date, tags };
+    },
+    onProgress,
+  );
+}
+
+/** Like writeDetailsMany, each document's details changed by `edit` (written only where they differ then). */
+export async function writeDetailsEach(docs: IndexedDoc[], edit: (now: Details) => Details, onProgress?: (done: number, total: number) => void): Promise<{ failed: number; changed: number }> {
   let failed = 0;
   let changed = 0;
   for (const [i, doc] of docs.entries()) {
@@ -41,11 +56,7 @@ export async function writeDetailsMany(docs: IndexedDoc[], change: DetailsChange
       const handle = await engine.open(await repo.source(id), passwordFor(id));
       try {
         const now = detailsOf(handle, realTitle(doc.title) || doc.name.replace(/\.pdf$/i, ''));
-        const drop = new Set((change.remove ?? []).map((x) => x.toLocaleLowerCase()));
-        // A tag once, whatever its case ("Tax" not added to "tax").
-        const kept = now.tags.filter((x) => !drop.has(x.toLocaleLowerCase()));
-        const tags = [...kept, ...(change.add ?? []).filter((x, i, all) => ![...kept, ...all.slice(0, i)].some((y) => y.toLocaleLowerCase() === x.toLocaleLowerCase()))];
-        const next = { ...now, sender: change.sender ?? now.sender, type: change.type ?? now.type, date: change.date ?? now.date, tags };
+        const next = edit(now);
         if (JSON.stringify(next) === JSON.stringify(now)) continue;
         await saveDetails(id, handle, next);
         changed++;

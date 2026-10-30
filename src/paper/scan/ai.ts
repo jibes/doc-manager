@@ -1,6 +1,8 @@
 import { desktop } from '@/core/lib/desktop';
 import { log } from '@/core/lib/log';
+import type { Lang } from '@/core/i18n';
 import { findDate } from '@/paper/archive/rules';
+import { MAX_TAGS_SENT, snapName, snapTags, type Vocabulary } from '@/paper/archive/vocabulary';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
 import type { PdfWord } from './engine/pdf/writer';
@@ -108,8 +110,8 @@ export const RESULT_SCHEMA = object({
   title: { type: 'string', description: 'Short and specific, in the document’s language, e.g. "Rechnung 40217"' },
   date: { type: 'string', description: 'The document’s own date as YYYY-MM-DD, e.g. "2026-10-02" for 2 October 2026 (whatever form the document writes it in), or "" if it has none' },
   sender: { type: 'string', description: 'Who issued it (organisation or person), or ""' },
-  type: { type: 'string', description: 'What it is, in the document’s language: invoice, receipt, letter, contract, delivery note, …' },
-  keywords: { ...strings, description: 'Up to five words to find it by' },
+  type: { type: 'string', description: 'What kind of document it is (invoice, receipt, letter, contract, …), in the language asked for' },
+  keywords: { ...strings, description: 'Up to three topics to find it by, in the language asked for' },
   pages: {
     type: 'array',
     items: object({
@@ -177,28 +179,30 @@ function* objects(text: string): Generator<[number, number]> {
   }
 }
 
+/** The first top-level object in a reply that parses and `fits` (thinking and notes around it left out). */
+function replyObject(text: string, fits: (v: object) => boolean): object | undefined {
+  const paired = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Thinking whose opening tag was the prompt's (some served models): what comes after it is the reply.
+  const close = paired.toLowerCase().lastIndexOf('</think>');
+  const reply = close < 0 ? paired : paired.slice(close + '</think>'.length);
+  for (const [a, b] of objects(reply)) {
+    try {
+      const v = JSON.parse(reply.slice(a, b)) as unknown;
+      if (v && typeof v === 'object' && fits(v)) return v;
+    } catch {
+      // Not JSON (a note in braces): try the next one.
+    }
+  }
+  return undefined;
+}
+
 /**
  * The reply's JSON object. A model without structured output may wrap it in prose or a code fence, think aloud
  * first (`<think>…</think>`, which may quote the schema) or add a note with braces after it: the first top-level
  * object that parses and looks like a result.
  */
 export function parseResult(text: string, pageCount: number): AiResult {
-  const paired = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  // Thinking whose opening tag was the prompt's (some served models): what comes after it is the reply.
-  const close = paired.toLowerCase().lastIndexOf('</think>');
-  const reply = close < 0 ? paired : paired.slice(close + '</think>'.length);
-  let raw: Partial<AiResult> | undefined;
-  for (const [a, b] of objects(reply)) {
-    try {
-      const v = JSON.parse(reply.slice(a, b)) as unknown;
-      if (v && typeof v === 'object' && ('pages' in v || 'title' in v)) {
-        raw = v as Partial<AiResult>;
-        break;
-      }
-    } catch {
-      // Not JSON (a note in braces): try the next one.
-    }
-  }
+  const raw = replyObject(text, (v) => 'pages' in v || 'title' in v) as Partial<AiResult> | undefined;
   if (!raw) throw new Error(AI_NO_JSON);
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   type Entry = Partial<AiResult['pages'][number]> & { page?: unknown };
@@ -584,8 +588,49 @@ const send = (s: AiSettings, req: Request, signal?: AbortSignal) => {
 };
 
 export async function readWithAi(s: AiSettings, pages: AiPage[], signal?: AbortSignal): Promise<AiResult> {
-  const text = await send(s, { images: pages.map((p) => p.jpeg), text: prompt(pages), schema: RESULT_SCHEMA }, signal);
-  return parseResult(text, pages.length);
+  const { known, lang } = await knownWords();
+  const text = await send(s, { images: pages.map((p) => p.jpeg), text: `${prompt(pages)}\n\n${wording(known, lang).join('\n')}`, schema: RESULT_SCHEMA }, signal);
+  return inWords(parseResult(text, pages.length), known, lang);
+}
+
+/* ------------------------------------------------- types and keywords ---- */
+
+const LANGUAGE: Record<Lang, string> = { de: 'German', en: 'English' };
+
+/** Types offered while the archive has none yet. */
+const STARTER_TYPES: Record<Lang, string[]> = {
+  de: ['Rechnung', 'Quittung', 'Brief', 'Vertrag', 'Kontoauszug', 'Lohnabrechnung', 'Versicherung', 'Steuern', 'Arztbericht', 'Bestätigung', 'Mahnung', 'Ausweis'],
+  en: ['Invoice', 'Receipt', 'Letter', 'Contract', 'Bank statement', 'Payslip', 'Insurance', 'Tax', 'Medical report', 'Confirmation', 'Reminder', 'ID'],
+};
+
+/** The archive's vocabulary and the app's language (none and English where they can't be had, as in tests). */
+async function knownWords(): Promise<{ known: Vocabulary; lang: Lang }> {
+  const known = await import('@/paper/archive/vocabulary').then((m) => m.vocabulary()).catch(() => ({ types: [], tags: [] }));
+  const lang = await import('@/core/i18n').then((m) => m.lang).catch((): Lang => 'en');
+  return { known, lang };
+}
+
+/**
+ * How the model names the type and keywords: in the app's language (one archive, one vocabulary, whatever language
+ * each document is in), from the words the archive already uses, a new one only where none fits.
+ */
+export function wording(known: Vocabulary, language: Lang): string[] {
+  const types = known.types.map(([n]) => n);
+  const tags = known.tags.slice(0, MAX_TAGS_SENT).map(([n]) => n);
+  return [
+    `Write the title in the document’s own language; write the type and the keywords in ${LANGUAGE[language]}.`,
+    types.length
+      ? `Types already in use: ${types.join(', ')}. Use one of them if it fits; give a new type only if none does.`
+      : `Types to choose from: ${STARTER_TYPES[language].join(', ')}. Give another only if none fits.`,
+    tags.length ? `Keywords already in use: ${tags.join(', ')}. Use those that fit; add a new keyword only if none of them does.` : '',
+    'Give at most three keywords. A keyword names a topic (a subject, an account, a person, a property), not the type, the sender or the year: those have fields of their own.',
+  ].filter(Boolean);
+}
+
+/** The model's type and keywords as the archive writes them (the same word, or a typo of one, becomes that one). */
+export function inWords<R extends AiDescription>(r: R, known: Vocabulary, language: Lang): R {
+  const types = known.types.length ? known.types.map(([n]) => n) : STARTER_TYPES[language];
+  return { ...r, type: snapName(r.type, types), keywords: snapTags(r.keywords, known.tags.map(([n]) => n)) };
 }
 
 /** What a document is, from its text alone (cheaper than images): for documents that already have text. */
@@ -597,13 +642,66 @@ export const DESCRIBE_SCHEMA = object(describing);
 const DESCRIBE_CHARS = 12_000;
 
 export async function describeWithAi(s: AiSettings, text: string, signal?: AbortSignal): Promise<AiDescription> {
+  const { known, lang } = await knownWords();
   const instructions = [
     'Below is the text of a document. Describe it: title, date, sender, type and keywords. Reply with the JSON object only.',
+    ...wording(known, lang),
     '',
     text.slice(0, DESCRIBE_CHARS) || '(no text)',
   ].join('\n');
   const { pages: _ignored, ...description } = parseResult(await send(s, { images: [], text: instructions, schema: DESCRIBE_SCHEMA }, signal), 0);
-  return description;
+  return inWords(description, known, lang);
+}
+
+/* ------------------------------------------------------------ tidying ---- */
+
+/**
+ * What the model makes of the archive's tags and types (tidy.ts): for each, the name it means the same as
+ * (a synonym, a translation, another form of the word; itself when none) and, for tags, the broader topic it
+ * belongs to (itself when it is one already). Names it doesn't give back stay as they are.
+ */
+export type TidyAnswer = { tags: { tag: string; same: string; broader: string }[]; types: { type: string; same: string }[] };
+
+const TIDY_SCHEMA = object({
+  tags: {
+    type: 'array',
+    items: object({
+      tag: { type: 'string', description: 'A tag from the list, exactly as given' },
+      same: { type: 'string', description: 'The tag from the list that means the same (synonym, translation, other form), or the tag itself' },
+      broader: { type: 'string', description: 'A broader topic it belongs to, in the language asked for (a tag from the list where one fits), or the same name if it is broad already' },
+    }),
+  },
+  types: {
+    type: 'array',
+    items: object({
+      type: { type: 'string', description: 'A type from the list, exactly as given' },
+      same: { type: 'string', description: 'The type from the list that means the same, or the type itself' },
+    }),
+  },
+});
+
+export async function tidyWithAi(s: AiSettings, tags: [string, number][], types: [string, number][], signal?: AbortSignal): Promise<TidyAnswer> {
+  const { lang } = await knownWords();
+  const list = (xs: [string, number][]) => xs.map(([n, c]) => `${n} (${c})`).join('\n') || '(none)';
+  const instructions = [
+    'These are the tags and the document types of one person’s archive of documents, each with how many documents have it.',
+    `Make them consistent: for each tag and type, give the one from the list it means the same as (a synonym, a translation, a singular or plural form; prefer the most used, and one in ${LANGUAGE[lang]}), or itself.`,
+    `For each tag, also give a broader topic it belongs to, in ${LANGUAGE[lang]}: a tag from the list where one fits, else a short new one; the tag itself if it is broad already. Aim for about ten to twenty broad topics in all.`,
+    'Give every tag and type of the list, each once. Reply with the JSON object only.',
+    '',
+    'Tags:',
+    list(tags),
+    '',
+    'Types:',
+    list(types),
+  ].join('\n');
+  const raw = replyObject(await send(s, { images: [], text: instructions, schema: TIDY_SCHEMA }, signal), (v) => 'tags' in v || 'types' in v) as Partial<TidyAnswer> | undefined;
+  if (!raw) throw new Error(AI_NO_JSON);
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  return {
+    tags: (Array.isArray(raw.tags) ? raw.tags : []).map((x) => ({ tag: str(x?.tag), same: str(x?.same), broader: str(x?.broader) })).filter((x) => x.tag),
+    types: (Array.isArray(raw.types) ? raw.types : []).map((x) => ({ type: str(x?.type), same: str(x?.same) })).filter((x) => x.type),
+  };
 }
 
 /** A small request (a blank page) that checks the address, key and model, for Settings. */

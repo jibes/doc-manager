@@ -73,7 +73,7 @@ export function AppHeader({ children }: { tab?: Tab; children?: ReactNode }) {
 }
 
 /** A screen opened from Documents (Inbox, Trash, Settings, a folder…). */
-export type Sub = 'inbox' | 'trash' | 'settings' | 'sync' | 'rules' | 'duplicates';
+export type Sub = 'inbox' | 'trash' | 'settings' | 'sync' | 'rules' | 'duplicates' | 'tidy';
 
 export function SubFrame({ children }: { sub: Sub; children: ReactNode }) {
   const p = usePalette();
