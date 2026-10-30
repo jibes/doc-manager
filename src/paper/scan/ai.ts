@@ -591,6 +591,7 @@ async function viaOpenAi(s: AiSettings, req: Request, signal?: AbortSignal): Pro
 const send = (s: AiSettings, req: Request, signal?: AbortSignal) => {
   if (aiInsecure(s)) throw new Error(AI_INSECURE);
   if (!aiUrl(s)) throw new Error(AI_BAD_URL);
+  log.debug('ai', 'model', { api: s.api, model: s.model });
   return s.api === 'anthropic' ? viaAnthropic(s, req, signal) : viaOpenAi(s, req, signal);
 };
 
@@ -737,6 +738,23 @@ export async function rateNames(s: AiSettings, kind: 'tag' | 'type', names: [str
 /** Categories, each with its description where it has one (the types and tags of Settings). */
 export type Category = string | Named;
 const named = (categories: Category[]): Named[] => categories.map((c) => (typeof c === 'string' ? { name: c, about: '' } : c));
+/**
+ * The category a name from the model stands for: the same name (ignoring case, accents, plural endings), or a
+ * typo of one; also when it was written as listed ("- Health: doctors, …") or quoted. Null: none of them.
+ */
+export function matchCategory(name: string, categories: string[]): string | null {
+  const bare = name
+    .trim()
+    .replace(/^[-•*\s"'„“‚‘]+|["'“”‘’]+$/g, '')
+    .split(/:| [-–—] | \(/)[0]
+    .trim();
+  if (!bare) return null;
+  const same = categories.find((c) => nameKey(c) === nameKey(bare));
+  if (same) return same;
+  const near = snapName(bare, categories);
+  return categories.includes(near) ? near : null;
+}
+
 const categoryList = (categories: Category[]) => (named(categories).some((c) => c.about) ? describedList(named(categories)) : named(categories).map((c) => c.name).join(', '));
 
 /** For each name of `rest`, the one of `categories` it belongs under ('' where none fits): the model's proposal. */
@@ -779,14 +797,16 @@ export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categ
   for (let round = 0; round < 2; round++) {
     const left = docs.filter((d) => !out.has(d.id));
     if (!left.length) break;
-    const got = await askByContent(s, kind, categories, left, signal);
+    const { got, dropped } = await askByContent(s, kind, categories, left, signal);
     for (const [id, found] of got) out.set(id, found);
-    log.info('ai', 'sorted in by content', { asked: left.length, answered: got.size, round });
+    // What the model's answers came to: categories, none that fits, and names not in the list (dropped).
+    const counts = [...got.values()];
+    log.info('ai', 'sorted in by content', { model: s.model, asked: left.length, answered: got.size, matched: counts.filter((x) => x.length).length, none: counts.filter((x) => !x.length).length, dropped: [...new Set(dropped)].slice(0, 20), round });
   }
   return out;
 }
 
-async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Category[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
+async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Category[], docs: ContentDoc[], signal?: AbortSignal): Promise<{ got: Map<string, string[]>; dropped: string[] }> {
   const instructions = [
     `These are the only ${what(kind)} allowed in one person’s archive of documents:`,
     categoryList(categories),
@@ -815,8 +835,9 @@ async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Cat
   // The entries: in "documents" as asked, or bare (an array of them, or one object each).
   const entries = found.flatMap((v) => ('documents' in v && Array.isArray(v.documents) ? (v.documents as unknown[]) : 'id' in v ? [v] : []));
   if (!found.length || (!entries.length && !found.some((v) => 'documents' in v))) throw new Error(AI_NO_JSON);
-  const byKey = new Map(named(categories).map((c) => [nameKey(c.name), c.name]));
+  const names = named(categories).map((c) => c.name);
   const out = new Map<string, string[]>();
+  const dropped: string[] = [];
   for (const x of entries) {
     if (!x || typeof x !== 'object') continue;
     const { id, categories: named } = x as { id?: unknown; categories?: unknown };
@@ -824,10 +845,16 @@ async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Cat
     const doc = docs.find((d) => d.id === String(id ?? '').match(/\d+/)?.[0]);
     if (!doc) continue;
     const list = Array.isArray(named) ? named : typeof named === 'string' ? named.split(',') : [];
-    const names = list.flatMap((c) => (typeof c === 'string' && byKey.get(nameKey(c.trim())) ? [byKey.get(nameKey(c.trim()))!] : []));
-    out.set(doc.id, [...new Set([...(out.get(doc.id) ?? []), ...names])].slice(0, kind === 'tag' ? 3 : 1));
+    const matched: string[] = [];
+    for (const c of list) {
+      if (typeof c !== 'string' || !c.trim()) continue;
+      const m = matchCategory(c, names);
+      if (m) matched.push(m);
+      else dropped.push(c.trim());
+    }
+    out.set(doc.id, [...new Set([...(out.get(doc.id) ?? []), ...matched])].slice(0, kind === 'tag' ? 3 : 1));
   }
-  return out;
+  return { got: out, dropped };
 }
 
 /** A small request (a blank page) that checks the address, key and model, for Settings. */

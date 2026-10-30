@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, openAiReply, sortInByContent, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, matchCategory, openAiReply, sortInByContent, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -315,5 +315,15 @@ describe('sorting in by content', () => {
     expect([...got.keys()]).toEqual(['1', '3']);
     expect(asked).toHaveLength(2);
     expect(asked[1]).toContain('ids \\"2\\", \\"3\\"');
+  });
+});
+
+describe('matching an answer onto the categories', () => {
+  const cats = ['Gesundheit', 'Versicherung', 'Steuer'];
+  it('takes a name written as listed, quoted, with its description, in another case or with a typo', () => {
+    expect(['gesundheit', '- Gesundheit', '"Steuer"', 'Gesundheit: Ärzte, Krankenkasse', 'Versicherung – Policen', 'Versicherungen', 'Versicherrung'].map((x) => matchCategory(x, cats))).toEqual(['Gesundheit', 'Gesundheit', 'Steuer', 'Gesundheit', 'Versicherung', 'Versicherung', 'Versicherung']);
+  });
+  it('drops what is not one of them', () => {
+    expect(['Health', 'Auto', '', '- '].map((x) => matchCategory(x, cats))).toEqual([null, null, null, null]);
   });
 });

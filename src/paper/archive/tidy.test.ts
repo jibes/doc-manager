@@ -67,6 +67,18 @@ describe('tidy', () => {
     expect(types(details(docs[0]), docs[0].key).type).toBe('Brief');
   });
 
+  it('by content, switched on: a document without a category loses its names outside them', () => {
+    const names = namesOf(docs, 'tag');
+    const assigned = new Map([[docs[0].key, []], [docs[1].key, ['Gesundheit']]]);
+    const edit = editFor(plan({ categories: ['Gesundheit', 'Versicherung'], assigned, dropOthers: true }), names);
+    expect(edit(details(docs[0]), docs[0].key).tags).toEqual(['Gesundheit']);
+    expect(edit(details(docs[2]), docs[2].key).tags).toEqual(['Versicherung']);
+    // Off: kept as they are.
+    expect(editFor(plan({ categories: ['Gesundheit'], assigned }), names)(details(docs[0]), docs[0].key).tags).toEqual(['Gesundheit', 'Zahnarzt']);
+    const types = editFor(plan({ kind: 'type', categories: ['Rechnung'], assigned: new Map(), dropOthers: true }), namesOf(docs, 'type'));
+    expect(types(details(docs[2]), docs[2].key).type).toBe('');
+  });
+
   it('works on types the same way', () => {
     const names = namesOf(docs, 'type');
     const edit = editFor(plan({ kind: 'type', categories: ['Rechnung'], destinations: new Map([['brief', { to: 'category', category: 'Rechnung' }]]) }), names);

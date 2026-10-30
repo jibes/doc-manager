@@ -7,7 +7,7 @@ import { allDocs, refreshSoon, textsOf, useIndex } from '@/paper/archive/indexer
 import { loadKinds, useKinds } from '@/paper/archive/kinds';
 import { writeDetailsEach } from '@/paper/archive/manyDetails';
 import type { IndexedDoc } from '@/paper/archive/search';
-import { changedBy, CONTENT_BATCH, CONTENT_CHARS, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, tidyScope, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
+import { changedBy, CONTENT_BATCH, detailsIn, CONTENT_CHARS, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, tidyScope, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
 import { nameKey } from '@/paper/archive/vocabulary';
 import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Icon } from '@/paper/components/Icon';
@@ -18,7 +18,7 @@ import { useNotice } from '@/paper/components/useNotice';
 import { fonts, radius, space, type Palette } from '@/core/design/tokens';
 import { aiMessage, t } from '@/core/i18n';
 import { useThrottled } from '@/core/lib/useThrottled';
-import { aiHost, aiReady, rateNames, sortInByContent, sortInNames, type NameRating } from '@/paper/scan/ai';
+import { aiHost, aiReady, matchCategory, rateNames, sortInByContent, sortInNames, type NameRating } from '@/paper/scan/ai';
 import { showActions } from '@/paper/state/actions';
 import { ask } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
@@ -60,6 +60,7 @@ export default function Tidy() {
   const [method, setMethod] = useState<Method>(only ? 'content' : 'name');
   const [assigned, setAssigned] = useState<PerKind<Map<string, string[]>>>({});
   const [skip, setSkip] = useState<PerKind<Set<string>>>({});
+  const [dropOthers, setDropOthers] = useState<PerKind<boolean>>({});
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
   const stop = useRef<AbortController | null>(null);
   useEffect(() => () => stop.current?.abort(), []);
@@ -108,9 +109,9 @@ export default function Tidy() {
       categories,
       destinations: step === 1 || byContent ? new Map<string, Destination>() : dests,
       companies: cleanup ? companies : new Set<string>(),
-      ...(byContent && step > 1 && { assigned: found, skip: skipped }),
+      ...(byContent && step > 1 && { assigned: found, skip: skipped, dropOthers: !!dropOthers[kind] }),
     }),
-    [kind, cleanup, categories, step, dests, companies, byContent, found, skipped],
+    [kind, cleanup, categories, step, dests, companies, byContent, found, skipped, dropOthers],
   );
   const edit = useMemo(() => editFor(plan, names), [plan, names]);
   const toChange = useMemo(() => (docs ? changedBy(docs, edit) : []), [docs, edit]);
@@ -167,7 +168,7 @@ export default function Tidy() {
       );
       const map = new Map<string, Destination>();
       for (const a of answer) {
-        const cat = categories.find((c) => nameKey(c) === nameKey(a.category));
+        const cat = matchCategory(a.category, categories);
         if (cat && rest.some((n) => nameKey(n.name) === nameKey(a.name))) map.set(nameKey(a.name), { to: 'category', category: cat });
       }
       setDestinations((x) => ({ ...x, [kind]: map }));
@@ -240,6 +241,7 @@ export default function Tidy() {
     setRated({});
     setAssigned({});
     setSkip({});
+    setDropOthers({});
     asked.current.clear();
     setStep(1);
     refreshSoon();
@@ -394,6 +396,13 @@ export default function Tidy() {
                 const fits = all.filter((d) => found.get(d.key)?.length);
                 const changes = fits.filter((d) => !same(now(d), found.get(d.key)!));
                 const none = all.filter((d) => found.get(d.key)?.length === 0).length;
+                // Answered, but with no category: what they keep outside the categories (tags, or a type).
+                const cats = new Set(categories.map(nameKey));
+                const outside = all.filter((d) => found.has(d.key) && !found.get(d.key)!.length && now(d).some((x) => !cats.has(nameKey(x))));
+                const after = (d: IndexedDoc) => {
+                  const next = edit(detailsIn(d), d.key);
+                  return kind === 'tag' ? next.tags : next.type ? [next.type] : [];
+                };
                 return (
                   <>
                     {open > 0 && !reading && (
@@ -416,29 +425,9 @@ export default function Tidy() {
                       <>
                         <T color={p.muted}>{t.tidyContentList}</T>
                         <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                          {changes.map((d) => {
-                            const on = !skipped.has(d.key);
-                            return (
-                              <Pressable
-                                key={d.key}
-                                testID="tidy-doc"
-                                accessibilityRole="checkbox"
-                                aria-checked={on}
-                                onPress={() => toggleDoc(d.key)}
-                                style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.row, styles.rowLine, { borderColor: p.hairline, backgroundColor: hovered ? p.raised : 'transparent' }]}
-                              >
-                                <View style={[styles.box, { borderColor: on ? p.accent : p.hairline, backgroundColor: on ? p.accent : 'transparent' }]}>{on && <Icon name="check" size={14} color={p.accentInk} />}</View>
-                                <View style={{ flex: 1, minWidth: 0 }}>
-                                  <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium }}>
-                                    {d.title || d.name}
-                                  </T>
-                                  <T v="caption" color={p.muted} numberOfLines={2}>
-                                    {`${now(d).join(', ') || t.tidyNothing} → ${found.get(d.key)!.join(', ')}`}
-                                  </T>
-                                </View>
-                              </Pressable>
-                            );
-                          })}
+                          {changes.map((d) => (
+                            <DocRow key={d.key} palette={p} testID="tidy-doc" title={d.title || d.name} change={`${now(d).join(', ') || t.tidyNothing} → ${found.get(d.key)!.join(', ')}`} on={!skipped.has(d.key)} onPress={() => toggleDoc(d.key)} />
+                          ))}
                         </View>
                       </>
                     )}
@@ -451,6 +440,38 @@ export default function Tidy() {
                       <T v="caption" color={p.muted} testID="tidy-content-none">
                         {t.tidyContentNone(none)}
                       </T>
+                    )}
+                    {outside.length > 0 && !reading && (
+                      <>
+                        <Pressable
+                          testID="tidy-drop-others"
+                          accessibilityRole="switch"
+                          aria-checked={!!dropOthers[kind]}
+                          onPress={() => setDropOthers((x) => ({ ...x, [kind]: !x[kind] }))}
+                          style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.card, styles.row, { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline }]}
+                        >
+                          <View style={{ flex: 1, gap: 2 }}>
+                            <T style={{ fontFamily: fonts.sansMedium }}>{kind === 'tag' ? t.tidyDropOtherTags : t.tidyDropOtherTypes}</T>
+                            <T v="caption" color={p.muted}>
+                              {t.tidyDropOthersNote(outside.length)}
+                            </T>
+                          </View>
+                          <Switch value={!!dropOthers[kind]} onValueChange={(v) => setDropOthers((x) => ({ ...x, [kind]: v }))} />
+                        </Pressable>
+                        <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+                          {outside.map((d) => (
+                            <DocRow
+                              key={d.key}
+                              palette={p}
+                              testID="tidy-outside"
+                              title={d.title || d.name}
+                              change={dropOthers[kind] ? `${now(d).join(', ')} → ${after(d).join(', ') || t.tidyNothing}` : now(d).join(', ')}
+                              on={!skipped.has(d.key)}
+                              onPress={() => toggleDoc(d.key)}
+                            />
+                          ))}
+                        </View>
+                      </>
                     )}
                     {found.size > 0 && open > 0 && !reading && (
                       <T v="caption" color={p.muted}>
@@ -540,6 +561,29 @@ export default function Tidy() {
       </ScrollView>
       <Toast message={notice} id={noticeId} onDismiss={dismiss} />
     </SubFrame>
+  );
+}
+
+/** A document with its change, ticked to be changed (untick: left as it is). */
+function DocRow({ palette: p, testID, title, change, on, onPress }: { palette: Palette; testID: string; title: string; change: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="checkbox"
+      aria-checked={on}
+      onPress={onPress}
+      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.row, styles.rowLine, { borderColor: p.hairline, backgroundColor: hovered ? p.raised : 'transparent' }]}
+    >
+      <View style={[styles.box, { borderColor: on ? p.accent : p.hairline, backgroundColor: on ? p.accent : 'transparent' }]}>{on && <Icon name="check" size={14} color={p.accentInk} />}</View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium }}>
+          {title}
+        </T>
+        <T v="caption" color={p.muted} numberOfLines={2}>
+          {change}
+        </T>
+      </View>
+    </Pressable>
   );
 }
 

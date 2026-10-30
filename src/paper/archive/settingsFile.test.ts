@@ -1,3 +1,4 @@
+/* eslint-disable import/first -- the mocks come before the modules they replace */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // A folder in memory: path → text.

@@ -35,6 +35,8 @@ export type Plan = {
   assigned?: Map<string, string[]>;
   /** By document key: documents left as they are. */
   skip?: Set<string>;
+  /** By content: a document without a category from it also loses its tags (or type) outside the categories. */
+  dropOthers?: boolean;
 };
 
 /** A document's change: `key` picks its assignment (by content) and whether it is skipped. */
@@ -92,7 +94,12 @@ export function editFor(plan: Plan, names: NameInfo[]): Edit {
   return (d, key) => {
     if (key && plan.skip?.has(key)) return d;
     const found = key ? plan.assigned?.get(key) : undefined;
-    if (!found?.length) return byName(d);
+    if (!found?.length) {
+      const named = byName(d);
+      if (!plan.assigned || !plan.dropOthers) return named;
+      const kept = new Set(plan.categories.map(nameKey));
+      return plan.kind === 'type' ? { ...named, type: kept.has(nameKey(named.type)) ? named.type : '' } : { ...named, tags: named.tags.filter((x) => kept.has(nameKey(x))) };
+    }
     if (plan.kind === 'type') return { ...d, type: found[0] ?? d.type };
     // The company names still go to the sender; the tags are what the content says.
     const moved = byName({ ...d, tags: d.tags.filter((x) => plan.companies.has(nameKey(x))) });

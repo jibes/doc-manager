@@ -1617,7 +1617,7 @@ async function tidyTags() {
       : said.includes('categories chosen')
         ? { names: [{ name: 'Tax', category: 'Steuer' }] }
         : said.includes('the only tags allowed')
-          ? { documents: [{ id: '1', categories: ['Steuer', 'Unlisted'] }, { id: '2', categories: ['steuer'] }] }
+          ? { documents: [{ id: '1', categories: ['Steuer', 'Unlisted'] }, { id: 2, categories: ['- steuer: Tax returns'] }] }
         : { title: 'Old title', date: '', sender: '', type: 'invoices', keywords: ['steuern', 'Neubau', 'Receipt'] };
     return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(reply) } }] }) });
   });
