@@ -1425,7 +1425,7 @@ async function aiReading() {
   const vis = (id) => page.getByTestId(id).locator('visible=true');
   page.on('pageerror', (e) => errors.push(`ai: ${e.message}`));
   const reply = {
-    title: 'Rechnung 40217', date: '2026-10-02', sender: 'Musterwerke Zürich', type: 'Rechnung', keywords: ['Strom'],
+    title: 'Rechnung 40217', date: '2026-10-02', sender: 'Musterwerke Zürich', type: 'Invoice', keywords: ['Strom'],
     pages: [{ lines: [{ id: '1.1', text: 'ACME Instruments GmbH' }], added: [{ text: 'bez zum 30.10.2026', box: [500, 900, 900, 950] }] }],
   };
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
@@ -1540,7 +1540,7 @@ async function aiReading() {
   let suggested = '';
   for (let i = 0; i < 40 && suggested !== 'Musterwerke Zürich'; i++) suggested = await page.waitForTimeout(250).then(() => vis('detail-sender').inputValue());
   const prompt = JSON.stringify(sent.slice(before).at(-1)?.body ?? {});
-  check(suggested === 'Musterwerke Zürich' && (await vis('detail-type').inputValue()) === 'Rechnung' && /columns/i.test(prompt), `ai: the model suggests the details of a document already kept (${suggested})`);
+  check(suggested === 'Musterwerke Zürich' && (await vis('detail-type').inputValue()) === 'Invoice' && /columns/i.test(prompt), `ai: the model suggests the details of a document already kept (${suggested})`);
   await vis('details-save').click();
   await page.getByText('Details saved in the file.').waitFor({ timeout: 15000 }).catch(() => {});
 
