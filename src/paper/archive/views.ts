@@ -4,6 +4,7 @@ import { folders } from '@/core/lib/folders';
 import { usePrefs } from '@/paper/state/prefs';
 import { parseViews, serializeViews, type SavedView } from './facets';
 import { schedule } from './indexer';
+import { loadKinds, moveKindsTo } from './kinds';
 import { readSettings } from './settingsFile';
 
 /** Where saved views are kept in the archive folder: synced with the documents, so every device has them. */
@@ -61,7 +62,9 @@ export async function setArchive(archive: string | null): Promise<void> {
     }
     set({ views: [] });
   }
+  if (archive) await moveKindsTo(archive).catch(() => {});
   await loadViews();
+  await loadKinds();
   // Which documents are the archive's changes: indexed again.
   if (archive !== before) schedule(1000);
 }

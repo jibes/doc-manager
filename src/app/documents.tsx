@@ -17,6 +17,7 @@ import { dropOldState } from '@/paper/archive/dirs';
 import { dropSources } from '@/paper/archive/tessel';
 import type { Hit, IndexedDoc } from '@/paper/archive/search';
 import { loadViews, removeView, saveView, useViews } from '@/paper/archive/views';
+import { loadKinds } from '@/paper/archive/kinds';
 import { Icon, type IconName } from '@/paper/components/Icon';
 import { Button, IconButton, T } from '@/paper/components/primitives';
 import { AppFrame, AppHeader, columnWidth, scanSupported, useMainWidth } from '@/paper/components/AppNav';
@@ -240,6 +241,7 @@ export default function Documents() {
   useFocusEffect(
     useCallback(() => {
       loadViews().catch(() => {});
+      loadKinds().catch(() => {});
       // Left by versions before 3.0 (shared reading): removed once.
       const tessel = usePrefs.getState().archive;
       if (tessel) void dropOldState(tessel).catch(() => {});

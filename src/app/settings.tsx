@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 
 import { version } from '../../package.json';
 import { clearLog, LOG_MAX_CHARS, logSize, readLog } from '@/core/lib/log';
@@ -615,6 +616,20 @@ function AiSection() {
           </T>
         </>
       )}
+      <Pressable
+        testID="open-kinds"
+        accessibilityRole="button"
+        onPress={() => router.push('/kinds')}
+        style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.card, styles.row, { backgroundColor: hovered ? p.raised : p.surface, borderColor: p.hairline, paddingRight: space.lg, marginTop: space.lg }]}
+      >
+        <T v="label" style={{ flex: 1, fontFamily: fonts.sansMedium, fontSize: 15 }}>
+          {t.kindsTitle}
+        </T>
+        <Icon name="chevronRight" size={16} color={p.muted} />
+      </Pressable>
+      <T v="caption" color={p.muted} style={styles.note}>
+        {t.kindsMenuNote}
+      </T>
     </>
   );
 }

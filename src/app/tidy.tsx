@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 
 import { allDocs, refreshSoon, textsOf, useIndex } from '@/paper/archive/indexer';
+import { loadKinds, useKinds } from '@/paper/archive/kinds';
 import { writeDetailsEach } from '@/paper/archive/manyDetails';
 import type { IndexedDoc } from '@/paper/archive/search';
 import { changedBy, CONTENT_BATCH, CONTENT_CHARS, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, tidyScope, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
@@ -64,6 +66,10 @@ export default function Tidy() {
   const { notice, id: noticeId, say, dismiss } = useNotice();
 
   useEffect(() => refreshSoon(), []);
+  useEffect(() => void loadKinds().catch(() => {}), []);
+  const kinds = useKinds((s) => s.kinds);
+  // The types (and, where only those are allowed, the tags) are the lists of Settings: the categories to start from.
+  const fixed = kind === 'type' ? kinds.types : kinds.onlyTags ? kinds.tags : null;
   useEffect(() => {
     let alive = true;
     void allDocs().then(
@@ -86,7 +92,9 @@ export default function Tidy() {
     [docs, kind, rating],
   );
   const companies = useMemo(() => new Set(names.filter((n) => n.company).map((n) => nameKey(n.name))), [names]);
-  const categories = useMemo(() => chosen[kind] ?? suggestedCategories(docs ?? [], names, kind, rating?.suggested ?? null), [chosen, kind, docs, names, rating]);
+  const categories = useMemo(() => chosen[kind] ?? (fixed ? fixed.map((x) => x.name) : suggestedCategories(docs ?? [], names, kind, rating?.suggested ?? null)), [chosen, kind, fixed, docs, names, rating]);
+  // With their descriptions where Settings gives them, for the model.
+  const described = categories.map((c) => fixed?.find((x) => nameKey(x.name) === nameKey(c)) ?? c);
   const catKeys = useMemo(() => new Set(categories.map(nameKey)), [categories]);
   const rest = useMemo(() => names.filter((n) => !catKeys.has(nameKey(n.name)) && !n.company), [names, catKeys]);
   const dests = useMemo(() => destinations[kind] ?? new Map<string, Destination>(), [destinations, kind]);
@@ -110,7 +118,7 @@ export default function Tidy() {
   const covered = docs ? directCoverage(docs, categories, kind) : 0;
 
   // The model's view of the names, once per kind (when it is set up): asked for while it is missing.
-  const toRate = canAsk && !rated[kind] ? names.length : 0;
+  const toRate = canAsk && !fixed && !rated[kind] ? names.length : 0;
   const asked = useRef(new Set<Kind>());
   useEffect(() => {
     if (!toRate || !docs || asked.current.has(kind)) return;
@@ -154,7 +162,7 @@ export default function Tidy() {
       const answer = await sortInNames(
         ai,
         kind,
-        categories,
+        described,
         rest.map((n) => [n.name, n.count]),
       );
       const map = new Map<string, Destination>();
@@ -190,7 +198,7 @@ export default function Tidy() {
         const answer = await sortInByContent(
           ai,
           kind,
-          categories,
+          described,
           batch.map((d, j) => ({ id: String(j + 1), name: d.name, title: d.title, sender: d.sender, type: d.type, tags: d.tags, text: texts[j] })),
           ctl.signal,
         );
@@ -313,11 +321,16 @@ export default function Tidy() {
 
           {step === 1 && !asking && (
             <>
-              <T color={p.muted}>{kind === 'tag' ? t.tidyChooseTags : t.tidyChooseTypes}</T>
+              <T color={p.muted}>{fixed ? (kind === 'type' ? t.tidyTypesFixed : t.tidyTagsFixed) : kind === 'tag' ? t.tidyChooseTags : t.tidyChooseTypes}</T>
+              {fixed && (
+                <View style={styles.actions}>
+                  <Button testID="tidy-edit-kinds" kind="quiet" icon="settings" label={t.kindsEdit} onPress={() => router.push('/kinds')} />
+                </View>
+              )}
               <T testID="tidy-coverage" style={{ fontFamily: fonts.sansMedium }}>
                 {t.tidyCoverage(categories.length, withAny ? Math.round((100 * covered) / withAny) : 0)}
               </T>
-              {canAsk && (
+              {canAsk && !fixed && (
                 <Segments
                   palette={p}
                   testID="tidy-sort"
@@ -333,7 +346,7 @@ export default function Tidy() {
                 {categories
                   .filter((c) => !names.some((n) => nameKey(n.name) === nameKey(c)))
                   .map((c) => (
-                    <NameRow key={c} palette={p} name={c} detail={t.tidyNewCategory} on onPress={() => toggleCategory(c)} />
+                    <NameRow key={c} palette={p} name={c} detail={fixed ? t.tidyDocs(0) : t.tidyNewCategory} on onPress={() => toggleCategory(c)} />
                   ))}
                 {sorted.map((n) => (
                   <NameRow key={n.name} palette={p} name={n.name} detail={detail(n)} on={catKeys.has(nameKey(n.name))} onPress={() => toggleCategory(n.name)} />

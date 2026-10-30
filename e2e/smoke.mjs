@@ -1617,7 +1617,7 @@ async function tidyTags() {
         ? { names: [{ name: 'Tax', category: 'Steuer' }] }
         : said.includes('the only tags allowed')
           ? { documents: [{ id: '1', categories: ['Steuer', 'Unlisted'] }, { id: '2', categories: ['steuer'] }] }
-        : { title: 'Old title', date: '', sender: '', type: 'rechnungen', keywords: ['steuern', 'Neubau'] };
+        : { title: 'Old title', date: '', sender: '', type: 'invoices', keywords: ['steuern', 'Neubau', 'Receipt'] };
     return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(reply) } }] }) });
   });
   await page.goto(BASE);
@@ -1626,6 +1626,15 @@ async function tidyTags() {
   await vis('ai-url').fill('https://ai.test/v1');
   await vis('ai-key').fill('sk-test');
   await vis('ai-model').fill('test-model');
+  // Types and tags: a tag with its description added in Settings; saved for the model's requests.
+  await vis('open-kinds').click();
+  await page.getByTestId('kind-type').first().waitFor();
+  check((await page.getByTestId('kind-type-name').count()) === 15 && (await page.getByTestId('kind-type-name').first().inputValue()) === 'Invoice', 'kinds: the default types are listed');
+  await vis('kinds-add-tag').click();
+  await page.getByTestId('kind-tag-name').fill('Taxes');
+  await page.getByTestId('kind-tag-about').fill('Tax returns and notices');
+  await vis('kinds-save').click();
+  await page.getByText(/^Saved\./).waitFor({ timeout: 5000 }).then(() => check(true, 'kinds: saved'), () => check(false, 'kinds: saved'));
   const details = async (type, tags) => {
     await page.getByTestId('open-more').click();
     await page.getByTestId('menu-details').click();
@@ -1664,7 +1673,8 @@ async function tidyTags() {
   for (let i = 0; i < 40 && tags.length < 2; i++) tags = await page.waitForTimeout(250).then(() => page.getByTestId('detail-tag').allInnerTexts());
   const asked = prompts.at(-1) ?? '';
   check(asked.includes('Keywords already in use: Steuer') && asked.includes('in English'), 'tidy: a suggestion is asked for in the app’s language, from the words in use');
-  check((await page.getByTestId('detail-type').inputValue()) === 'Rechnung' && tags.join('|') === 'Steuer|Neubau · new', `tidy: the answer’s words become the ones in use, a new one marked (${await page.getByTestId('detail-type').inputValue()}; ${tags.join('|')})`);
+  check(asked.includes('- Invoice: Asks for money') && asked.includes('- Taxes: Tax returns and notices'), 'kinds: the types and listed tags go with their descriptions');
+  check((await page.getByTestId('detail-type').inputValue()) === 'Invoice' && tags.join('|') === 'Steuer|Neubau · new', `tidy: the type is one of the list, the keywords the words in use (a new one marked, a type left out) (${await page.getByTestId('detail-type').inputValue()}; ${tags.join('|')})`);
   await page.keyboard.press('Escape');
   await page.getByTestId('ask-confirm').click().catch(() => {});
 
@@ -1718,6 +1728,20 @@ async function tidyTags() {
   let facet = '';
   for (let i = 0; i < 40 && !/Steuer · 2/.test(facet); i++) facet = await page.waitForTimeout(300).then(tagFacet);
   check(/Steuer · 2/.test(facet) && !/Tax|steuern/.test(facet), `tidy: one tag left for both (${facet.replace(/\n/g, ' / ')})`);
+  // Types: the list of Settings is what they are tidied into.
+  if (await vis('more-tidy').count()) await vis('more-tidy').click();
+  else {
+    await vis('docs-more').click();
+    await page.getByTestId('action-more-tidy').click();
+  }
+  await vis('tidy-kind-type').click();
+  await vis('tidy-edit-kinds').waitFor({ timeout: 10000 });
+  const types = await page.getByTestId('tidy-name').evaluateAll((els) => els.map((e) => `${e.textContent}:${e.getAttribute('aria-checked')}`));
+  check(types.some((x) => /^Invoice0 documents:true$/.test(x)) && types.some((x) => /^Rechnung.*:false$/.test(x)), `kinds: types are tidied into the list of Settings (${types.slice(0, 4).join(' / ')} …)`);
+  await page.screenshot({ path: `${OUT}tidy-types.png` });
+  await vis('tidy-edit-kinds').click();
+  await page.getByTestId('kind-type').first().waitFor();
+  await page.screenshot({ path: `${OUT}kinds.png`, fullPage: true });
   await ctx.close();
 }
 

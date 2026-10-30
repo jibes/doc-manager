@@ -2,6 +2,7 @@ import { desktop } from '@/core/lib/desktop';
 import { log } from '@/core/lib/log';
 import type { Lang } from '@/core/i18n';
 import { findDate } from '@/paper/archive/rules';
+import { defaultKinds, describedList, fallbackType, type Kinds, type Named } from '@/paper/archive/kindList';
 import { MAX_TAGS_SENT, nameKey, snapName, snapTags, type Vocabulary } from '@/paper/archive/vocabulary';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
@@ -594,49 +595,71 @@ const send = (s: AiSettings, req: Request, signal?: AbortSignal) => {
 };
 
 export async function readWithAi(s: AiSettings, pages: AiPage[], signal?: AbortSignal): Promise<AiResult> {
-  const { known, lang } = await knownWords();
-  const text = await send(s, { images: pages.map((p) => p.jpeg), text: `${prompt(pages)}\n\n${wording(known, lang).join('\n')}`, schema: RESULT_SCHEMA }, signal);
-  return inWords(parseResult(text, pages.length), known, lang);
+  const { known, lang, kinds } = await knownWords();
+  const text = await send(s, { images: pages.map((p) => p.jpeg), text: `${prompt(pages)}\n\n${wording(known, lang, kinds).join('\n')}`, schema: RESULT_SCHEMA }, signal);
+  return inWords(parseResult(text, pages.length), known, lang, kinds);
 }
 
 /* ------------------------------------------------- types and keywords ---- */
 
 const LANGUAGE: Record<Lang, string> = { de: 'German', en: 'English' };
 
-/** Types offered while the archive has none yet. */
-const STARTER_TYPES: Record<Lang, string[]> = {
-  de: ['Rechnung', 'Quittung', 'Brief', 'Vertrag', 'Kontoauszug', 'Lohnabrechnung', 'Versicherung', 'Steuern', 'Arztbericht', 'Bestätigung', 'Mahnung', 'Ausweis'],
-  en: ['Invoice', 'Receipt', 'Letter', 'Contract', 'Bank statement', 'Payslip', 'Insurance', 'Tax', 'Medical report', 'Confirmation', 'Reminder', 'ID'],
-};
-
-/** The archive's vocabulary and the app's language (none and English where they can't be had, as in tests). */
-async function knownWords(): Promise<{ known: Vocabulary; lang: Lang }> {
+/** The archive's vocabulary, its types and tags (kinds.ts), and the app's language (none, the defaults and English
+ * where they can't be had, as in tests). */
+async function knownWords(): Promise<{ known: Vocabulary; lang: Lang; kinds: Kinds }> {
   const known = await import('@/paper/archive/vocabulary').then((m) => m.vocabulary()).catch(() => ({ types: [], tags: [] }));
   const lang = await import('@/core/i18n').then((m) => m.lang).catch((): Lang => 'en');
-  return { known, lang };
+  const kinds = await import('@/paper/archive/kinds').then((m) => m.currentKinds()).catch(() => defaultKinds(lang));
+  return { known, lang, kinds };
 }
 
 /**
- * How the model names the type and keywords: in the app's language (one archive, one vocabulary, whatever language
- * each document is in), from the words the archive already uses, a new one only where none fits.
+ * How the model names the type and keywords, so the two never overlap: the type is what the document is (its
+ * form), exactly one of the list in Settings, by its description; the keywords what it is about (a topic), from
+ * those listed in Settings, or else the ones in use, a new one only where none fits. Both in the app's language
+ * (one archive, one vocabulary, whatever language each document is in).
  */
-export function wording(known: Vocabulary, language: Lang): string[] {
-  const types = known.types.map(([n]) => n);
-  const tags = known.tags.slice(0, MAX_TAGS_SENT).map(([n]) => n);
+export function wording(known: Vocabulary, language: Lang, kinds: Kinds = defaultKinds(language)): string[] {
+  const listed = new Set(kinds.tags.map((x) => nameKey(x.name)));
+  const inUse = known.tags
+    .map(([n]) => n)
+    .filter((n) => !listed.has(nameKey(n)))
+    .slice(0, MAX_TAGS_SENT);
   return [
     `Write the title in the document’s own language; write the type and the keywords in ${LANGUAGE[language]}.`,
-    types.length
-      ? `Types already in use: ${types.join(', ')}. Use one of them if it fits; give a new type only if none does.`
-      : `Types to choose from: ${STARTER_TYPES[language].join(', ')}. Give another only if none fits.`,
-    tags.length ? `Keywords already in use: ${tags.join(', ')}. Use those that fit; add a new keyword only if none of them does.` : '',
-    'Give at most three keywords. A keyword names a topic (a subject, an account, a person, a property), not the type, the sender or the year: those have fields of their own.',
+    'The type says what the document is (its form), not what it is about. Choose exactly one of these types, by its description:',
+    describedList(kinds.types),
+    `If none fits, use "${fallbackType(kinds)}". Never give a type that isn't in this list.`,
+    'The keywords say what the document is about: a topic or area of life (such as health, a car, a flat, taxes, a trip). Give one to three. A keyword is never a type of document, the sender, a company or a person, or a year: those have fields of their own.',
+    kinds.onlyTags
+      ? `Choose the keywords only from this list, by their descriptions, or none if none fits:\n${describedList(kinds.tags)}`
+      : [
+          kinds.tags.length ? `Keywords to prefer, by their descriptions:\n${describedList(kinds.tags)}` : '',
+          inUse.length ? `Keywords already in use: ${inUse.join(', ')}.` : '',
+          kinds.tags.length || inUse.length ? 'Use those that fit; add a new keyword only if none of them does.' : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
   ].filter(Boolean);
 }
 
-/** The model's type and keywords as the archive writes them (the same word, or a typo of one, becomes that one). */
-export function inWords<R extends AiDescription>(r: R, known: Vocabulary, language: Lang): R {
-  const types = known.types.length ? known.types.map(([n]) => n) : STARTER_TYPES[language];
-  return { ...r, type: snapName(r.type, types), keywords: snapTags(r.keywords, known.tags.map(([n]) => n)) };
+/**
+ * The model's type and keywords as the archive writes them: the type one of the list (the same word, or a typo of
+ * one, becomes that one; any other the last, "Other"); keywords the same way onto those listed and in use, without
+ * one that is a type or the sender, only listed ones where only those are allowed.
+ */
+export function inWords<R extends AiDescription>(r: R, known: Vocabulary, language: Lang, kinds: Kinds = defaultKinds(language)): R {
+  const types = kinds.types.map((x) => x.name);
+  const snapped = snapName(r.type, types);
+  const type = !snapped || types.some((x) => x === snapped) ? snapped : fallbackType(kinds);
+  const listed = kinds.tags.map((x) => x.name);
+  const not = new Set([...types, r.sender].filter(Boolean).map(nameKey));
+  const keywords = snapTags(
+    r.keywords.filter((x) => !not.has(nameKey(x))),
+    kinds.onlyTags ? listed : [...listed, ...known.tags.map(([n]) => n)],
+    3,
+  ).filter((x) => !not.has(nameKey(x)) && (!kinds.onlyTags || listed.includes(x)));
+  return { ...r, type, keywords };
 }
 
 /** What a document is, from its text alone (cheaper than images): for documents that already have text. */
@@ -648,15 +671,15 @@ export const DESCRIBE_SCHEMA = object(describing);
 const DESCRIBE_CHARS = 12_000;
 
 export async function describeWithAi(s: AiSettings, text: string, signal?: AbortSignal): Promise<AiDescription> {
-  const { known, lang } = await knownWords();
+  const { known, lang, kinds } = await knownWords();
   const instructions = [
     'Below is the text of a document. Describe it: title, date, sender, type and keywords. Reply with the JSON object only.',
-    ...wording(known, lang),
+    ...wording(known, lang, kinds),
     '',
     text.slice(0, DESCRIBE_CHARS) || '(no text)',
   ].join('\n');
   const { pages: _ignored, ...description } = parseResult(await send(s, { images: [], text: instructions, schema: DESCRIBE_SCHEMA }, signal), 0);
-  return inWords(description, known, lang);
+  return inWords(description, known, lang, kinds);
 }
 
 /* ------------------------------------------------------------ tidying ---- */
@@ -711,11 +734,16 @@ export async function rateNames(s: AiSettings, kind: 'tag' | 'type', names: [str
   return { ratings: ratings.filter((r) => r.name), suggested: (Array.isArray(raw.suggested) ? raw.suggested : []).map(str).filter(Boolean) };
 }
 
+/** Categories, each with its description where it has one (the types and tags of Settings). */
+export type Category = string | Named;
+const named = (categories: Category[]): Named[] => categories.map((c) => (typeof c === 'string' ? { name: c, about: '' } : c));
+const categoryList = (categories: Category[]) => (named(categories).some((c) => c.about) ? describedList(named(categories)) : named(categories).map((c) => c.name).join(', '));
+
 /** For each name of `rest`, the one of `categories` it belongs under ('' where none fits): the model's proposal. */
-export async function sortInNames(s: AiSettings, kind: 'tag' | 'type', categories: string[], rest: [string, number][], signal?: AbortSignal): Promise<{ name: string; category: string }[]> {
+export async function sortInNames(s: AiSettings, kind: 'tag' | 'type', categories: Category[], rest: [string, number][], signal?: AbortSignal): Promise<{ name: string; category: string }[]> {
   const instructions = [
     `These are the categories chosen for the ${what(kind)} of one person’s archive of documents:`,
-    categories.join(', '),
+    categoryList(categories),
     '',
     `For each of the other ${what(kind)} below (with how many documents have it), give the one category it belongs under, exactly as written above, or "" if none fits well. Give every name of the list, each once. Reply with the JSON object only.`,
     '',
@@ -746,7 +774,7 @@ export type ContentDoc = { id: string; name: string; title: string; sender: stri
  * that fits: an empty list). A model held to no schema writes the ids its own way (3, "Document 3") and may answer
  * for fewer documents than asked: those it left out are asked for once more. Not in the map: no answer.
  */
-export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categories: string[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
+export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categories: Category[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   for (let round = 0; round < 2; round++) {
     const left = docs.filter((d) => !out.has(d.id));
@@ -758,14 +786,14 @@ export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categ
   return out;
 }
 
-async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: string[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
+async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Category[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
   const instructions = [
     `These are the only ${what(kind)} allowed in one person’s archive of documents:`,
-    categories.join(', '),
+    categoryList(categories),
     '',
     kind === 'tag'
       ? 'For each document below, choose the one to three tags from that list that fit what it is about. Use only tags from the list, exactly as written, or none if none fits.'
-      : 'For each document below, choose the one document type from that list that fits what it is. Use only a type from the list, exactly as written, or none if none fits.',
+      : 'For each document below, choose the one document type from that list that fits what it is (its form, not what it is about). Use only a type from the list, exactly as written, or none if none fits.',
     'Go by its content. Its current details are only a hint and may be wrong.',
     `There ${docs.length === 1 ? 'is 1 document' : `are ${docs.length} documents`} (ids ${docs.map((d) => `"${d.id}"`).join(', ')}): give one entry for each of them in "documents", with its id as a string. Reply with the JSON object only.`,
     '',
@@ -787,7 +815,7 @@ async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: str
   // The entries: in "documents" as asked, or bare (an array of them, or one object each).
   const entries = found.flatMap((v) => ('documents' in v && Array.isArray(v.documents) ? (v.documents as unknown[]) : 'id' in v ? [v] : []));
   if (!found.length || (!entries.length && !found.some((v) => 'documents' in v))) throw new Error(AI_NO_JSON);
-  const byKey = new Map(categories.map((c) => [nameKey(c), c]));
+  const byKey = new Map(named(categories).map((c) => [nameKey(c.name), c.name]));
   const out = new Map<string, string[]>();
   for (const x of entries) {
     if (!x || typeof x !== 'object') continue;

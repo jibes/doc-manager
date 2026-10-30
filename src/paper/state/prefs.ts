@@ -3,6 +3,7 @@ import { log } from '@/core/lib/log';
 import { create } from 'zustand';
 
 import type { SavedView } from '@/paper/archive/facets';
+import type { Kinds } from '@/paper/archive/kindList';
 import { palettes, type Palette } from '@/core/design/tokens';
 import { DEFAULT_AI, type AiSettings } from '@/paper/scan/ai';
 import { DEFAULT_SCAN_SETTINGS, type ScanSettings } from '@/paper/scan/types';
@@ -37,6 +38,8 @@ type Prefs = {
   archive: string | null;
   /** Saved views while there is no archive folder (this device only). */
   views: SavedView[];
+  /** The types and tags while there is no archive folder (this device only; null: the defaults). */
+  kinds: Kinds | null;
   /** This device sorts the archive's inbox (one device should, so two never file the same document). */
   inboxHere: boolean;
   /** How every list of documents shows them: small pictures beside the text, or big ones above it. */
@@ -51,7 +54,7 @@ type PrefsState = Prefs & {
   set(patch: Partial<Prefs>): void;
 };
 
-const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, pickerDevice: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], inboxHere: false, layout: 'list', side: { find: true, details: true }, debugLog: false };
+const defaults: Prefs = { appearance: 'auto', fit: 'width', textFont: 'serif', textScale: 1, textLeading: 'normal', textWidth: 'medium', improveAdded: false, pickerDevice: false, scan: DEFAULT_SCAN_SETTINGS, ai: DEFAULT_AI, archive: null, views: [], kinds: null, inboxHere: false, layout: 'list', side: { find: true, details: true }, debugLog: false };
 
 export const usePrefs = create<PrefsState>((set, get) => ({
   ...defaults,
@@ -63,8 +66,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   set(patch) {
     set(patch);
     log.info('settings', 'changed', patch);
-    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout, side, debugLog } = get();
-    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, inboxHere, layout, side, debugLog });
+    const { appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, kinds, inboxHere, layout, side, debugLog } = get();
+    savePrefs<Prefs>({ appearance, fit, textFont, textScale, textLeading, textWidth, improveAdded, pickerDevice, scan, ai, archive, views, kinds, inboxHere, layout, side, debugLog });
   },
 }));
 

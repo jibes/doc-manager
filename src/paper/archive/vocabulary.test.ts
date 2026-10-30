@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { inWords, wording } from '@/paper/scan/ai';
+import { defaultKinds, parseKinds, serializeKinds } from './kindList';
 import { nameKey, snapName, snapTags, vocabularyOf } from './vocabulary';
 
 describe('vocabulary', () => {
@@ -40,21 +41,45 @@ describe('vocabulary', () => {
 });
 
 describe('AI wording', () => {
-  it('asks for the app’s language and the words in use, or starter types', () => {
+  it('asks for one type from the list by its description, and topics as keywords, in the app’s language', () => {
     const used = wording({ types: [['Rechnung', 3]], tags: [['Steuer', 2]] }, 'de').join('\n');
     expect(used).toContain('in German');
-    expect(used).toContain('Types already in use: Rechnung');
-    expect(used).toContain('Keywords already in use: Steuer');
+    expect(used).toContain('- Rechnung: Fordert Geld');
+    expect(used).toContain('If none fits, use "Sonstiges"');
+    expect(used).toContain('Keywords already in use: Steuer.');
+    expect(used).toContain('never a type of document, the sender');
     const none = wording({ types: [], tags: [] }, 'en').join('\n');
-    expect(none).toContain('Types to choose from: Invoice');
+    expect(none).toContain('- Invoice: Asks for money');
     expect(none).not.toContain('Keywords already in use');
   });
 
-  it('matches the model’s type and keywords onto them', () => {
-    const r = { title: 'x', date: '', sender: '', type: 'Rechnungen', keywords: ['steuern', 'Haus', 'Neu', 'Vier'] };
+  it('offers the listed tags first, or only them', () => {
+    const kinds = { ...defaultKinds('en'), tags: [{ name: 'Health', about: 'Doctors, insurance' }], onlyTags: false };
+    const prefer = wording({ types: [], tags: [['Health', 1], ['Car', 2]] }, 'en', kinds).join('\n');
+    expect(prefer).toContain('Keywords to prefer, by their descriptions:\n- Health: Doctors, insurance');
+    expect(prefer).toContain('Keywords already in use: Car.');
+    const only = wording({ types: [], tags: [['Car', 2]] }, 'en', { ...kinds, onlyTags: true }).join('\n');
+    expect(only).toContain('only from this list');
+    expect(only).not.toContain('Car');
+  });
+
+  it('matches the model’s type onto the list (any other: the last one) and keeps types and the sender out of the keywords', () => {
+    const r = { title: 'x', date: '', sender: 'Allianz', type: 'Rechnungen', keywords: ['steuern', 'Haus', 'Allianz', 'Vertrag', 'Neu'] };
     const out = inWords(r, { types: [['Rechnung', 3]], tags: [['Steuer', 2]] }, 'de');
     expect(out.type).toBe('Rechnung');
     expect(out.keywords).toEqual(['Steuer', 'Haus', 'Neu']);
+    expect(inWords({ ...r, type: 'Versicherung' }, { types: [], tags: [] }, 'de').type).toBe('Sonstiges');
     expect(inWords({ ...r, type: 'invoices' }, { types: [], tags: [] }, 'en').type).toBe('Invoice');
+    const only = { ...defaultKinds('de'), tags: [{ name: 'Gesundheit', about: '' }], onlyTags: true };
+    expect(inWords({ ...r, keywords: ['gesundheit', 'Haus'] }, { types: [], tags: [['Haus', 4]] }, 'de', only).keywords).toEqual(['Gesundheit']);
+  });
+});
+
+describe('types and tags list', () => {
+  it('reads what was stored, without empty or repeated names; the defaults where it has no types', () => {
+    const k = parseKinds(JSON.stringify({ types: [{ name: ' Rechnung ', about: 'Geld' }, { name: 'rechnung' }, { name: '' }], tags: [], onlyTags: true }), 'de');
+    expect(k).toEqual({ types: [{ name: 'Rechnung', about: 'Geld' }], tags: [], onlyTags: false });
+    expect(parseKinds('{}', 'en').types[0].name).toBe('Invoice');
+    expect(parseKinds(serializeKinds(defaultKinds('de')), 'de')).toEqual(defaultKinds('de'));
   });
 });
