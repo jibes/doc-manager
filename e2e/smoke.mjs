@@ -1773,6 +1773,7 @@ async function selectionActions() {
   // Its outcome, whichever it is (named in the check, so a failure says what Analyse did instead).
   const outcome = await page
     .getByText(/being read\.|details filled in|couldn’t be opened|Nothing to (read|add)/i)
+    .locator('visible=true')
     .first()
     .innerText({ timeout: 45000 })
     .catch(() => '(no outcome shown)');

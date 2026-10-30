@@ -72,7 +72,8 @@ kotlin {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.19.1")
+    // 1.18+ needs compileSdk 37 and AGP 9.1 (the AGP 9 upgrade is still to be done).
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.webkit:webkit:1.18.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.1")
