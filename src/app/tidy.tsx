@@ -71,6 +71,8 @@ export default function Tidy() {
   const kinds = useKinds((s) => s.kinds);
   // The types (and, where only those are allowed, the tags) are the lists of Settings: the categories to start from.
   const fixed = kind === 'type' ? kinds.types : kinds.onlyTags ? kinds.tags : null;
+  // Where to start: the list of Settings when it has one (tags too, only these allowed or not), else the model's.
+  const start = fixed ?? (kind === 'tag' && kinds.tags.length ? kinds.tags : null);
   useEffect(() => {
     let alive = true;
     void allDocs().then(
@@ -93,9 +95,9 @@ export default function Tidy() {
     [docs, kind, rating],
   );
   const companies = useMemo(() => new Set(names.filter((n) => n.company).map((n) => nameKey(n.name))), [names]);
-  const categories = useMemo(() => chosen[kind] ?? (fixed ? fixed.map((x) => x.name) : suggestedCategories(docs ?? [], names, kind, rating?.suggested ?? null)), [chosen, kind, fixed, docs, names, rating]);
+  const categories = useMemo(() => chosen[kind] ?? (start ? start.map((x) => x.name) : suggestedCategories(docs ?? [], names, kind, rating?.suggested ?? null)), [chosen, kind, start, docs, names, rating]);
   // With their descriptions where Settings gives them, for the model.
-  const described = categories.map((c) => fixed?.find((x) => nameKey(x.name) === nameKey(c)) ?? c);
+  const described = categories.map((c) => start?.find((x) => nameKey(x.name) === nameKey(c)) ?? c);
   const catKeys = useMemo(() => new Set(categories.map(nameKey)), [categories]);
   const rest = useMemo(() => names.filter((n) => !catKeys.has(nameKey(n.name)) && !n.company), [names, catKeys]);
   const dests = useMemo(() => destinations[kind] ?? new Map<string, Destination>(), [destinations, kind]);
@@ -323,8 +325,8 @@ export default function Tidy() {
 
           {step === 1 && !asking && (
             <>
-              <T color={p.muted}>{fixed ? (kind === 'type' ? t.tidyTypesFixed : t.tidyTagsFixed) : kind === 'tag' ? t.tidyChooseTags : t.tidyChooseTypes}</T>
-              {fixed && (
+              <T color={p.muted}>{fixed ? (kind === 'type' ? t.tidyTypesFixed : t.tidyTagsFixed) : start ? t.tidyTagsListed : kind === 'tag' ? t.tidyChooseTags : t.tidyChooseTypes}</T>
+              {start && (
                 <View style={styles.actions}>
                   <Button testID="tidy-edit-kinds" kind="quiet" icon="settings" label={t.kindsEdit} onPress={() => router.push('/kinds')} />
                 </View>
@@ -348,7 +350,7 @@ export default function Tidy() {
                 {categories
                   .filter((c) => !names.some((n) => nameKey(n.name) === nameKey(c)))
                   .map((c) => (
-                    <NameRow key={c} palette={p} name={c} detail={fixed ? t.tidyDocs(0) : t.tidyNewCategory} on onPress={() => toggleCategory(c)} />
+                    <NameRow key={c} palette={p} name={c} detail={start ? t.tidyDocs(0) : t.tidyNewCategory} on onPress={() => toggleCategory(c)} />
                   ))}
                 {sorted.map((n) => (
                   <NameRow key={n.name} palette={p} name={n.name} detail={detail(n)} on={catKeys.has(nameKey(n.name))} onPress={() => toggleCategory(n.name)} />

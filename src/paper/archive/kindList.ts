@@ -54,7 +54,43 @@ const DEFAULT_TYPES: Record<Lang, [string, string][]> = {
   ],
 };
 
-export const defaultKinds = (lang: Lang): Kinds => ({ types: DEFAULT_TYPES[lang].map(([name, about]) => ({ name, about })), tags: [], onlyTags: false });
+/** Areas of life, each a topic of its own: none contains another, none is a type of document or a kind of sender. */
+const DEFAULT_TAGS: Record<Lang, [string, string][]> = {
+  de: [
+    ['Gesundheit', 'Ärzte, Spital, Krankenkasse, Medikamente, Therapien.'],
+    ['Versicherung', 'Policen, Prämien und Schadenfälle jeder Versicherung.'],
+    ['Steuern', 'Steuererklärung, Steuerbescheide und Belege dafür.'],
+    ['Finanzen', 'Bank, Karten, Kredite, Anlagen, Vorsorge.'],
+    ['Arbeit', 'Arbeitgeber, Lohn, Arbeitsvertrag, Bewerbungen.'],
+    ['Bildung', 'Schule, Studium, Kurse, Zeugnisse und Diplome.'],
+    ['Wohnen', 'Miete oder Eigentum, Nebenkosten, Energie, Haushalt.'],
+    ['Mobilität', 'Auto, öffentlicher Verkehr, Reisen.'],
+    ['Telefon & Internet', 'Mobilabo, Internetanschluss, digitale Abos.'],
+    ['Identität', 'Ausweis, Pass, Zivilstand, Wohnsitz und Meldewesen.'],
+    ['Familie', 'Ehe, Kinder, Betreuung, Erbschaft.'],
+    ['Recht', 'Anwalt, Gericht, Bussen, Streitfälle.'],
+  ],
+  en: [
+    ['Health', 'Doctors, hospital, health insurer, medication, therapy.'],
+    ['Insurance', 'Policies, premiums and claims of any insurance.'],
+    ['Taxes', 'Tax returns, tax assessments and the receipts for them.'],
+    ['Finances', 'Bank, cards, loans, investments, pensions.'],
+    ['Work', 'Employer, pay, employment contract, job applications.'],
+    ['Education', 'School, studies, courses, certificates and diplomas.'],
+    ['Home', 'Rent or ownership, utilities, energy, household.'],
+    ['Transport', 'Car, public transport, travel.'],
+    ['Phone & Internet', 'Mobile plan, internet connection, digital subscriptions.'],
+    ['Identity', 'ID card, passport, civil status, residence registration.'],
+    ['Family', 'Marriage, children, childcare, inheritance.'],
+    ['Legal', 'Lawyer, court, fines, disputes.'],
+  ],
+};
+
+export const defaultKinds = (lang: Lang): Kinds => ({
+  types: DEFAULT_TYPES[lang].map(([name, about]) => ({ name, about })),
+  tags: DEFAULT_TAGS[lang].map(([name, about]) => ({ name, about })),
+  onlyTags: false,
+});
 
 /** Names once each (by nameKey), trimmed, without empty ones. */
 const cleaned = (list: unknown): Named[] => {

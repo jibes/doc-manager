@@ -1631,8 +1631,12 @@ async function tidyTags() {
   await vis('open-kinds').click();
   await page.getByTestId('kind-type').first().waitFor();
   check((await page.getByTestId('kind-type-name').count()) === 15 && (await page.getByTestId('kind-type-name').first().inputValue()) === 'Invoice', 'kinds: the default types are listed');
+  // The default tags, each with its description: replaced by one of the archive's own.
+  const defaults = await page.getByTestId('kind-tag-name').evaluateAll((els) => els.map((e) => e.value));
+  check(defaults.length === 12 && defaults[0] === 'Health' && defaults.includes('Phone & Internet'), `kinds: the default tags are listed (${defaults.join(', ')})`);
+  while (await page.getByTestId('kind-tag-remove').count()) await page.getByTestId('kind-tag-remove').first().click();
   await vis('kinds-add-tag').click();
-  await page.getByTestId('kind-tag-name').fill('Taxes');
+  await page.getByTestId('kind-tag-name').fill('Steuer');
   await page.getByTestId('kind-tag-about').fill('Tax returns and notices');
   await vis('kinds-save').click();
   await page.getByText(/^Saved\./).waitFor({ timeout: 5000 }).then(() => check(true, 'kinds: saved'), () => check(false, 'kinds: saved'));
@@ -1673,8 +1677,8 @@ async function tidyTags() {
   let tags = [];
   for (let i = 0; i < 40 && tags.length < 2; i++) tags = await page.waitForTimeout(250).then(() => page.getByTestId('detail-tag').allInnerTexts());
   const asked = prompts.at(-1) ?? '';
-  check(asked.includes('Keywords already in use: Steuer') && asked.includes('in English'), 'tidy: a suggestion is asked for in the app’s language, from the words in use');
-  check(asked.includes('- Invoice: Asks for money') && asked.includes('- Taxes: Tax returns and notices'), 'kinds: the types and listed tags go with their descriptions');
+  check(asked.includes('Keywords already in use: Tax') && asked.includes('in English') && asked.includes('two areas joined into one'), 'tidy: a suggestion is asked for in the app’s language, from the words in use and by the tag rules');
+  check(asked.includes('- Invoice: Asks for money') && asked.includes('- Steuer: Tax returns and notices'), 'kinds: the types and listed tags go with their descriptions');
   check((await page.getByTestId('detail-type').inputValue()) === 'Invoice' && tags.join('|') === 'Steuer|Neubau · new', `tidy: the type is one of the list, the keywords the words in use (a new one marked, a type left out) (${await page.getByTestId('detail-type').inputValue()}; ${tags.join('|')})`);
   await page.keyboard.press('Escape');
   await page.getByTestId('ask-confirm').click().catch(() => {});
@@ -1690,7 +1694,7 @@ async function tidyTags() {
   await page.getByTestId('tidy-coverage').waitFor({ timeout: 15000 });
   const rows = async (id) => (await page.getByTestId(id).allInnerTexts()).map((g) => g.replace(/\s+/g, ' '));
   const ticked = await page.getByTestId('tidy-name').evaluateAll((els) => els.map((e) => `${e.textContent}:${e.getAttribute('aria-checked')}`));
-  check(ticked.some((x) => /^Steuer.*:true$/.test(x)) && ticked.some((x) => /^Tax.*:false$/.test(x)) && /1 category/.test(await page.getByTestId('tidy-coverage').innerText()), `tidy: the model’s categories come ticked, rated by generality (${ticked.join(' / ')})`);
+  check(ticked.some((x) => /^Steuer.*:true$/.test(x)) && ticked.some((x) => /^Tax.*:false$/.test(x)) && /1 category/.test(await page.getByTestId('tidy-coverage').innerText()), `tidy: the tags of Settings come ticked, rated by generality (${ticked.join(' / ')})`);
   check(/written several ways/.test(await page.getByTestId('tidy-cleanup').locator('..').innerText()), 'tidy: spellings are cleaned up along the way');
   await page.screenshot({ path: `${OUT}tidy-step1.png` });
   await page.getByTestId('tidy-next').click();

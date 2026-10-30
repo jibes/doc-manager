@@ -42,15 +42,19 @@ describe('vocabulary', () => {
 
 describe('AI wording', () => {
   it('asks for one type from the list by its description, and topics as keywords, in the app’s language', () => {
-    const used = wording({ types: [['Rechnung', 3]], tags: [['Steuer', 2]] }, 'de').join('\n');
+    const used = wording({ types: [['Rechnung', 3]], tags: [['Steuern', 2], ['Haus', 1]] }, 'de').join('\n');
     expect(used).toContain('in German');
     expect(used).toContain('- Rechnung: Fordert Geld');
     expect(used).toContain('If none fits, use "Sonstiges"');
-    expect(used).toContain('Keywords already in use: Steuer.');
-    expect(used).toContain('never a type of document, the sender');
+    // The default tags first, with their descriptions; the others in use after them.
+    expect(used).toContain('- Gesundheit: Ärzte');
+    expect(used).toContain('Keywords already in use: Haus.');
+    expect(used).toContain('- a type of document (invoice');
+    expect(used).toContain('- two areas joined into one');
     const none = wording({ types: [], tags: [] }, 'en').join('\n');
     expect(none).toContain('- Invoice: Asks for money');
     expect(none).not.toContain('Keywords already in use');
+    expect(wording({ types: [], tags: [] }, 'en', { ...defaultKinds('en'), tags: [] }).join('\n')).not.toContain('Keywords to prefer');
   });
 
   it('offers the listed tags first, or only them', () => {
@@ -67,7 +71,8 @@ describe('AI wording', () => {
     const r = { title: 'x', date: '', sender: 'Allianz', type: 'Rechnungen', keywords: ['steuern', 'Haus', 'Allianz', 'Vertrag', 'Neu'] };
     const out = inWords(r, { types: [['Rechnung', 3]], tags: [['Steuer', 2]] }, 'de');
     expect(out.type).toBe('Rechnung');
-    expect(out.keywords).toEqual(['Steuer', 'Haus', 'Neu']);
+    // "steuern" is the default tag Steuern; the rest as the archive writes them.
+    expect(out.keywords).toEqual(['Steuern', 'Haus', 'Neu']);
     expect(inWords({ ...r, type: 'Versicherung' }, { types: [], tags: [] }, 'de').type).toBe('Sonstiges');
     expect(inWords({ ...r, type: 'invoices' }, { types: [], tags: [] }, 'en').type).toBe('Invoice');
     const only = { ...defaultKinds('de'), tags: [{ name: 'Gesundheit', about: '' }], onlyTags: true };

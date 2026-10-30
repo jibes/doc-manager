@@ -620,6 +620,20 @@ async function knownWords(): Promise<{ known: Vocabulary; lang: Lang; kinds: Kin
  * those listed in Settings, or else the ones in use, a new one only where none fits. Both in the app's language
  * (one archive, one vocabulary, whatever language each document is in).
  */
+/**
+ * What makes a good tag, for every request that gives or proposes tags: one area of life the document is about,
+ * never what the type or the sender field already say, never two areas in one, and none inside another.
+ */
+export const TAG_RULES = [
+  'A tag names one topic or area of life a document is about, as someone looking for it would think of it (health, taxes, a flat, a car, work). A tag is never:',
+  '- a type of document (invoice, receipt, contract, letter, notice, certificate, statement): the type says that;',
+  '- a kind of sender or party (authorities, offices, banks, insurers, a company, a person): the sender says that;',
+  '- a date, a year or a state (paid, open, important, archived);',
+  '- two areas joined into one ("education and career", "society and leisure"): give each its own tag;',
+  '- a kind of data rather than a topic (personal data, documents, miscellaneous).',
+  'Tags do not overlap: where one would contain another ("doctor" in "health"), use the broader one that matches the others in generality.',
+].join('\n');
+
 export function wording(known: Vocabulary, language: Lang, kinds: Kinds = defaultKinds(language)): string[] {
   const listed = new Set(kinds.tags.map((x) => nameKey(x.name)));
   const inUse = known.tags
@@ -631,7 +645,8 @@ export function wording(known: Vocabulary, language: Lang, kinds: Kinds = defaul
     'The type says what the document is (its form), not what it is about. Choose exactly one of these types, by its description:',
     describedList(kinds.types),
     `If none fits, use "${fallbackType(kinds)}". Never give a type that isn't in this list.`,
-    'The keywords say what the document is about: a topic or area of life (such as health, a car, a flat, taxes, a trip). Give one to three. A keyword is never a type of document, the sender, a company or a person, or a year: those have fields of their own.',
+    'The keywords are the document’s tags. Give one to three.',
+    TAG_RULES,
     kinds.onlyTags
       ? `Choose the keywords only from this list, by their descriptions, or none if none fits:\n${describedList(kinds.tags)}`
       : [
@@ -715,11 +730,19 @@ const what = (kind: 'tag' | 'type') => (kind === 'tag' ? 'tags' : 'document type
 
 /** How general each name is, which are names of companies or people, and 10–15 categories for the archive (tidy.ts). */
 export async function rateNames(s: AiSettings, kind: 'tag' | 'type', names: [string, number][], signal?: AbortSignal): Promise<{ ratings: NameRating[]; suggested: string[] }> {
-  const { lang } = await knownWords();
+  const { lang, kinds } = await knownWords();
   const instructions = [
     `These are the ${what(kind)} of one person’s archive of documents, each with how many documents have it.`,
     'For each, rate how general it is, from 1 (one specific thing: a contract, a case, a product) to 5 (a broad area of life, such as finances or health), and say whether it is the name of a company, an organisation or a person.',
     `Then suggest ${kind === 'tag' ? '10 to 15 categories' : '8 to 12 types'} that together cover the archive: prefer names from the list that are both general and often used; add a new, broader one only where several specific names would fit under it and none in the list does. Write new ones in ${LANGUAGE[lang]}. Never suggest a company’s or person’s name.`,
+    ...(kind === 'tag'
+      ? [
+          'The categories are tags, so they follow these rules:',
+          TAG_RULES,
+          `These are the document types, which are never tags: ${kinds.types.map((x) => x.name).join(', ')}.`,
+          'Together the categories should be like the chapters of one table of contents: each a single area, all at the same level, none overlapping another, and every document fitting under one or two of them.',
+        ]
+      : []),
     'Give every name of the list, each once. Reply with the JSON object only.',
     '',
     listed(names),
@@ -732,7 +755,13 @@ export async function rateNames(s: AiSettings, kind: 'tag' | 'type', names: [str
     const g = Math.round(Number(r.generality));
     return { name: str(r.name), generality: g >= 1 && g <= 5 ? g : 3, company: r.company === true };
   });
-  return { ratings: ratings.filter((r) => r.name), suggested: (Array.isArray(raw.suggested) ? raw.suggested : []).map(str).filter(Boolean) };
+  // What the rules can check without the model: a suggested tag that is a type, or a company's name, goes.
+  const types = kind === 'tag' ? kinds.types.map((x) => x.name) : [];
+  const companies = new Set(ratings.filter((r) => r.company).map((r) => nameKey(r.name)));
+  const suggested = (Array.isArray(raw.suggested) ? raw.suggested : [])
+    .map(str)
+    .filter((x) => x && !companies.has(nameKey(x)) && !matchCategory(x, types));
+  return { ratings: ratings.filter((r) => r.name), suggested };
 }
 
 /** Categories, each with its description where it has one (the types and tags of Settings). */

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, matchCategory, openAiReply, sortInByContent, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, matchCategory, openAiReply, rateNames, TAG_RULES, sortInByContent, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -325,5 +325,20 @@ describe('matching an answer onto the categories', () => {
   });
   it('drops what is not one of them', () => {
     expect(['Health', 'Auto', '', '- '].map((x) => matchCategory(x, cats))).toEqual([null, null, null, null]);
+  });
+});
+
+describe('suggesting tag categories', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('asks for areas of life by the tag rules, and drops a suggested type or company name', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      asked.push(init.body);
+      const reply = { names: [{ name: 'Allianz', generality: 2, company: true }], suggested: ['Health', 'Invoices', 'Allianz', 'Contract'] };
+      return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(reply) } }] }));
+    });
+    const got = await rateNames({ api: 'openai', url: 'https://ai.test/v1', key: 'k', model: 'm' }, 'tag', [['Allianz', 3], ['Health', 5]]);
+    expect(got.suggested).toEqual(['Health']);
+    expect(JSON.parse(asked[0]).messages[0].content[0].text).toContain(TAG_RULES.split('\n')[1]);
   });
 });

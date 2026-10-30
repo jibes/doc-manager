@@ -563,6 +563,7 @@ export const de: Strings = {
   kindsSaved: 'Gespeichert. Neue Vorschläge halten sich daran; Aufräumen ändert Dokumente, die andere haben.',
   kindsEdit: 'In den Einstellungen ändern',
   tidyTypesFixed: 'Die Arten sind die Liste aus den Einstellungen. Jede andere Art wird danach einer davon zugeordnet.',
+  tidyTagsListed: 'Die Schlagwörter aus den Einstellungen sind angehakt. Nimm Haken weg, setze andere oder füge neue hinzu; jedes andere Schlagwort wird danach einem angehakten zugeordnet.',
   tidyTagsFixed: 'Erlaubt sind nur die Schlagwörter aus den Einstellungen. Jedes andere wird danach einer davon zugeordnet.',
   tidyShort: 'Aufräumen',
   tidyOnly: (n) => (n === 1 ? 'Nur das in der Liste gewählte Dokument.' : `Nur die ${n} in der Liste gewählten Dokumente.`),
