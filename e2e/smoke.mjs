@@ -1615,6 +1615,8 @@ async function tidyTags() {
         : { names: [{ name: 'Steuer', generality: 5, company: false }, { name: 'Tax', generality: 4, company: false }], suggested: ['Steuer'] }
       : said.includes('categories chosen')
         ? { names: [{ name: 'Tax', category: 'Steuer' }] }
+        : said.includes('the only tags allowed')
+          ? { documents: [{ id: '1', categories: ['Steuer', 'Unlisted'] }, { id: '2', categories: ['steuer'] }] }
         : { title: 'Old title', date: '', sender: '', type: 'rechnungen', keywords: ['steuern', 'Neubau'] };
     return route.fulfill({ headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(reply) } }] }) });
   });
@@ -1685,6 +1687,27 @@ async function tidyTags() {
   const sections = await rows('tidy-section');
   check(sections.some((x) => /STEUER.*Tax/i.test(x)), `tidy: the rest is sorted into the categories (${sections.join(' / ')})`);
   await page.screenshot({ path: `${OUT}tidy-step2.png` });
+  // A name kept as it is; all of those removed at once, and kept again; then back under its category.
+  const moveTax = async (key) => {
+    await page.getByTestId('tidy-rest').filter({ hasText: 'Tax' }).click();
+    await page.getByTestId(`action-${key}`).click();
+  };
+  await moveTax('keep');
+  await vis('tidy-remove-all').click();
+  check((await rows('tidy-section')).some((x) => /REMOVED.*Tax/i.test(x)), 'tidy: the names staying as they are can all be removed at once');
+  await vis('tidy-keep-all').click();
+  check((await rows('tidy-section')).some((x) => /STAY AS THEY ARE.*Tax/i.test(x)), 'tidy: …and all kept again');
+  await moveTax('to-Steuer');
+  // By content: each document's text goes to the model, which may only pick the categories.
+  await vis('tidy-method-content').click();
+  await vis('tidy-content-start').click();
+  await page.getByTestId('tidy-doc').first().waitFor({ timeout: 15000 });
+  const byContent = await rows('tidy-doc');
+  const sent = prompts.at(-1) ?? '';
+  check(sent.includes('the only tags allowed') && sent.includes('Steuer') && /Text:\\n\S/.test(sent), `tidy: by content, the documents' text goes with the categories (${sent.slice(0, 120)})`);
+  check(byContent.length === 1 && /steuern, Tax → Steuer$/.test(byContent[0]), `tidy: …each document gets only categories, what already fits not listed (${byContent.join(' | ')})`);
+  await page.screenshot({ path: `${OUT}tidy-content.png` });
+  await vis('tidy-method-name').click();
   await page.getByTestId('tidy-review').click();
   const result = await rows('tidy-result');
   check(result.join('|') === 'Steuer 2 documents' && /1 document/.test(await vis('tidy-apply').innerText()), `tidy: the result says what is left and what changes (${result.join(' | ')})`);

@@ -9,7 +9,8 @@ import { nameKey, vocabularyOf } from './vocabulary';
  *    is empty) and leave the tags.
  * 2. Categories: the names the user keeps, chosen from all in use (sorted by use, generality or the model's
  *    suggestion), new ones allowed.
- * 3. Sorting in: every other name gets one destination: a category, itself (kept as it is), or removed.
+ * 3. Sorting in, one of two ways: by name, every other name gets one destination (a category, itself, or removed);
+ *    or by content, each document gets the categories the model finds for its text, in place of what it had.
  * Nothing is written until the result is applied.
  */
 export type Kind = 'tag' | 'type';
@@ -29,7 +30,14 @@ export type Plan = {
   destinations: Map<string, Destination>;
   /** By nameKey: names of companies or people (tags only). */
   companies: Set<string>;
+  /** By document key: the categories found in its content, in place of its tags (or type). Others go by name. */
+  assigned?: Map<string, string[]>;
+  /** By document key: documents left as they are. */
+  skip?: Set<string>;
 };
+
+/** A document's change: `key` picks its assignment (by content) and whether it is skipped. */
+export type Edit = (d: Details, key?: string) => Details;
 
 type Named = Pick<IndexedDoc, 'type' | 'tags' | 'sender'>;
 
@@ -78,7 +86,20 @@ export function directCoverage(docs: Named[], categories: string[], kind: Kind):
 }
 
 /** The change to one document as the plan says (written only where it changes something). */
-export function editFor(plan: Plan, names: NameInfo[]): (d: Details) => Details {
+export function editFor(plan: Plan, names: NameInfo[]): Edit {
+  const byName = editByName(plan, names);
+  return (d, key) => {
+    if (key && plan.skip?.has(key)) return d;
+    const found = key ? plan.assigned?.get(key) : undefined;
+    if (!found) return byName(d);
+    if (plan.kind === 'type') return { ...d, type: found[0] ?? d.type };
+    // The company names still go to the sender; the tags are what the content says.
+    const moved = byName({ ...d, tags: d.tags.filter((x) => plan.companies.has(nameKey(x))) });
+    return { ...d, sender: moved.sender, tags: found.filter((x, i) => found.findIndex((y) => nameKey(y) === nameKey(x)) === i) };
+  };
+}
+
+function editByName(plan: Plan, names: NameInfo[]): (d: Details) => Details {
   // One spelling per name: the one standing for it.
   const spelled = new Map(names.map((n) => [nameKey(n.name), n.name]));
   const categories = new Map(plan.categories.map((c) => [nameKey(c), c]));
@@ -110,19 +131,25 @@ export function editFor(plan: Plan, names: NameInfo[]): (d: Details) => Details 
 }
 
 /** The documents the plan would change (the index's details, as the files have them). */
-export function changedBy(docs: IndexedDoc[], edit: (d: Details) => Details): IndexedDoc[] {
+export function changedBy(docs: IndexedDoc[], edit: Edit): IndexedDoc[] {
   return docs.filter((doc) => {
-    const now: Details = { title: doc.title, sender: doc.sender, type: doc.type, date: doc.date, tags: doc.tags };
-    const next = edit(now);
+    const now = detailsIn(doc);
+    const next = edit(now, doc.key);
     return next.type !== now.type || next.sender !== now.sender || next.tags.join('\n') !== now.tags.join('\n');
   });
 }
 
 /** After the plan: each category (and each name kept as it is) with how many documents have it. */
-export function resultCounts(docs: IndexedDoc[], edit: (d: Details) => Details, kind: Kind): [string, number][] {
-  const after = docs.map((doc) => edit({ title: doc.title, sender: doc.sender, type: doc.type, date: doc.date, tags: doc.tags }));
+export function resultCounts(docs: IndexedDoc[], edit: Edit, kind: Kind): [string, number][] {
+  const after = docs.map((doc) => edit(detailsIn(doc), doc.key));
   return namesOf(after.map((d) => ({ ...d, sender: d.sender })), kind).map((n) => [n.name, n.count]);
 }
+
+export const detailsIn = (doc: IndexedDoc): Details => ({ title: doc.title, sender: doc.sender, type: doc.type, date: doc.date, tags: doc.tags });
+
+/** Documents sent to the model at once to be sorted in by content, and how much of each one's text. */
+export const CONTENT_BATCH = 5;
+export const CONTENT_CHARS = 2000;
 
 /** The documents tidied: those chosen in the list (by key), or all (null). Set before the screen opens. */
 let scope: Set<string> | null = null;

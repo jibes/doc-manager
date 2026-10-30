@@ -169,6 +169,10 @@ async function handle(req: SearchRequest | { id: 0; type: 'save' }): Promise<unk
       const texts = await getMany<string[] | undefined>(ranked.map((r) => r.key), textStore);
       return ranked.map((r, i) => ({ key: r.key, score: r.score, ...snippetFor(texts[i] ?? [], r.terms) }));
     }
+    case 'text': {
+      const texts = await getMany<string[] | undefined>(req.keys, textStore);
+      return texts.map((pages) => (pages ?? []).join('\n').replace(/[ \t]+/g, ' ').trim().slice(0, req.chars));
+    }
   }
 }
 

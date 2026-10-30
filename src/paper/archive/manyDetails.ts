@@ -45,7 +45,7 @@ export function writeDetailsMany(docs: IndexedDoc[], change: DetailsChange, onPr
 }
 
 /** Like writeDetailsMany, each document's details changed by `edit` (written only where they differ then). */
-export async function writeDetailsEach(docs: IndexedDoc[], edit: (now: Details) => Details, onProgress?: (done: number, total: number) => void): Promise<{ failed: number; changed: number }> {
+export async function writeDetailsEach(docs: IndexedDoc[], edit: (now: Details, key: string) => Details, onProgress?: (done: number, total: number) => void): Promise<{ failed: number; changed: number }> {
   let failed = 0;
   let changed = 0;
   for (const [i, doc] of docs.entries()) {
@@ -56,7 +56,7 @@ export async function writeDetailsEach(docs: IndexedDoc[], edit: (now: Details) 
       const handle = await engine.open(await repo.source(id), passwordFor(id));
       try {
         const now = detailsOf(handle, realTitle(doc.title) || doc.name.replace(/\.pdf$/i, ''));
-        const next = edit(now);
+        const next = edit(now, doc.key);
         if (JSON.stringify(next) === JSON.stringify(now)) continue;
         await saveDetails(id, handle, next);
         changed++;

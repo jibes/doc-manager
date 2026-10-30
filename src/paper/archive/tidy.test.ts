@@ -51,6 +51,22 @@ describe('tidy', () => {
     expect(plain(details(docs[3])).tags).toEqual(['Dr. Muster', 'Steuer']);
   });
 
+  it('by content: a document gets what was found for it, in place of its tags; company names still go to the sender', () => {
+    const names = namesOf(docs, 'tag');
+    const assigned = new Map([
+      [docs[0].key, ['Versicherung', 'versicherung']],
+      [docs[2].key, ['Gesundheit']],
+    ]);
+    const edit = editFor(plan({ categories: ['Gesundheit', 'Versicherung'], companies: new Set(['zurich']), assigned, skip: new Set([docs[3].key]) }), names);
+    expect(edit(details(docs[0]), docs[0].key).tags).toEqual(['Versicherung']);
+    expect(edit(details(docs[2]), docs[2].key)).toMatchObject({ sender: 'Zurich', tags: ['Gesundheit'] });
+    // Without an answer: by name (here only the clean-up); skipped: as it is.
+    expect(edit(details(docs[1]), docs[1].key).tags).toEqual(['Gesundheit', 'Hausarzt']);
+    expect(edit(details(docs[3]), docs[3].key)).toEqual(details(docs[3]));
+    const types = editFor(plan({ kind: 'type', categories: ['Brief'], assigned: new Map([[docs[0].key, ['Brief']]]) }), namesOf(docs, 'type'));
+    expect(types(details(docs[0]), docs[0].key).type).toBe('Brief');
+  });
+
   it('works on types the same way', () => {
     const names = namesOf(docs, 'type');
     const edit = editFor(plan({ kind: 'type', categories: ['Rechnung'], destinations: new Map([['brief', { to: 'category', category: 'Rechnung' }]]) }), names);

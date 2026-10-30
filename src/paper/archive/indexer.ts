@@ -216,6 +216,13 @@ export async function snippetsFor(query: string, keys: string[]): Promise<Map<st
   return new Map(matches.map(({ key, page, snippet }) => [key, { page, snippet: snippet ?? null }]));
 }
 
+/** The start of each document's text as indexed (up to `chars`; '' where it has none), by key. */
+export async function textsOf(keys: string[], chars: number): Promise<string[]> {
+  if (Platform.OS !== 'web' || !keys.length) return keys.map(() => '');
+  await load();
+  return ask<string[]>({ type: 'text', keys, chars });
+}
+
 /** Every indexed document's details (for the Documents screen's filters); their text isn't read. */
 export async function allDocs(): Promise<IndexedDoc[]> {
   if (Platform.OS !== 'web') return [];

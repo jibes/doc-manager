@@ -14,6 +14,8 @@ export type SearchRequest = { id: number } & (
   | { type: 'search'; query: string; snippets?: number }
   /** The page to open and the words around the match, for these documents (rows about to be shown). */
   | { type: 'snippets'; query: string; keys: string[] }
+  /** The start of each document's text (up to `chars`), for these documents. */
+  | { type: 'text'; keys: string[]; chars: number }
 );
 
 /** A match: the document's key, with the page to open and the words around it (undefined: not read yet). */

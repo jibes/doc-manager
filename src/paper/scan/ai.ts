@@ -2,7 +2,7 @@ import { desktop } from '@/core/lib/desktop';
 import { log } from '@/core/lib/log';
 import type { Lang } from '@/core/i18n';
 import { findDate } from '@/paper/archive/rules';
-import { MAX_TAGS_SENT, snapName, snapTags, type Vocabulary } from '@/paper/archive/vocabulary';
+import { MAX_TAGS_SENT, nameKey, snapName, snapTags, type Vocabulary } from '@/paper/archive/vocabulary';
 import { shell, shellRequest } from '@/core/lib/shell';
 import { readStored, writeStored } from '@/core/lib/stored';
 import type { PdfWord } from './engine/pdf/writer';
@@ -719,6 +719,60 @@ export async function sortInNames(s: AiSettings, kind: 'tag' | 'type', categorie
   if (!raw) throw new Error(AI_NO_JSON);
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   return (Array.isArray(raw.names) ? raw.names : []).map((x) => ({ name: str((x as { name?: unknown }).name), category: str((x as { category?: unknown }).category) })).filter((x) => x.name);
+}
+
+const ASSIGN_SCHEMA = object({
+  documents: {
+    type: 'array',
+    items: object({
+      id: { type: 'string', description: 'The document’s id, exactly as given' },
+      categories: { ...strings, description: 'The categories that fit its content, each exactly as written in the list' },
+    }),
+  },
+});
+
+/** A document to sort in by its content: what it has now, and the start of its text. */
+export type ContentDoc = { id: string; name: string; title: string; sender: string; type: string; tags: string[]; text: string };
+
+/**
+ * For each document, the categories its content belongs under (by id): one to three for tags, one for a type, only
+ * from `categories` (a name the model writes differently is matched onto the list; one not on it is dropped).
+ */
+export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categories: string[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
+  const instructions = [
+    `These are the only ${what(kind)} allowed in one person’s archive of documents:`,
+    categories.join(', '),
+    '',
+    kind === 'tag'
+      ? 'For each document below, choose the one to three tags from that list that fit what it is about. Use only tags from the list, exactly as written, or none if none fits.'
+      : 'For each document below, choose the one document type from that list that fits what it is. Use only a type from the list, exactly as written, or none if none fits.',
+    'Go by its content. Its current details are only a hint and may be wrong. Give every document, each once, by its id. Reply with the JSON object only.',
+    '',
+    ...docs.map((d) =>
+      [
+        `--- Document ${d.id}`,
+        `File: ${d.name}`,
+        d.title && `Title: ${d.title}`,
+        d.sender && `Sender: ${d.sender}`,
+        d.type && `Current type: ${d.type}`,
+        d.tags.length ? `Current tags: ${d.tags.join(', ')}` : '',
+        `Text:\n${d.text || '(none)'}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    ),
+  ].join('\n');
+  const raw = replyObject(await send(s, { images: [], text: instructions, schema: ASSIGN_SCHEMA }, signal), (v) => 'documents' in v) as { documents?: unknown[] } | undefined;
+  if (!raw) throw new Error(AI_NO_JSON);
+  const byKey = new Map(categories.map((c) => [nameKey(c), c]));
+  const out = new Map<string, string[]>();
+  for (const x of Array.isArray(raw.documents) ? raw.documents : []) {
+    const { id, categories: found } = x as { id?: unknown; categories?: unknown };
+    if (typeof id !== 'string' || !docs.some((d) => d.id === id.trim())) continue;
+    const names = (Array.isArray(found) ? found : []).flatMap((c) => (typeof c === 'string' && byKey.get(nameKey(c)) ? [byKey.get(nameKey(c))!] : []));
+    out.set(id.trim(), [...new Set(names)].slice(0, kind === 'tag' ? 3 : 1));
+  }
+  return out;
 }
 
 /** A small request (a blank page) that checks the address, key and model, for Settings. */

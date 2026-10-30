@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { allDocs, refreshSoon, useIndex } from '@/paper/archive/indexer';
+import { allDocs, refreshSoon, textsOf, useIndex } from '@/paper/archive/indexer';
 import { writeDetailsEach } from '@/paper/archive/manyDetails';
 import type { IndexedDoc } from '@/paper/archive/search';
-import { changedBy, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, tidyScope, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
+import { changedBy, CONTENT_BATCH, CONTENT_CHARS, directCoverage, editFor, namesOf, repeatsCount, resultCounts, spellingFixes, suggestedCategories, tidyScope, type Destination, type Kind, type NameInfo } from '@/paper/archive/tidy';
 import { nameKey } from '@/paper/archive/vocabulary';
 import { goTab, SubFrame, useColumnWidth } from '@/paper/components/AppNav';
 import { Icon } from '@/paper/components/Icon';
@@ -16,13 +16,15 @@ import { useNotice } from '@/paper/components/useNotice';
 import { fonts, radius, space, type Palette } from '@/core/design/tokens';
 import { aiMessage, t } from '@/core/i18n';
 import { useThrottled } from '@/core/lib/useThrottled';
-import { aiReady, rateNames, sortInNames, type NameRating } from '@/paper/scan/ai';
+import { aiHost, aiReady, rateNames, sortInByContent, sortInNames, type NameRating } from '@/paper/scan/ai';
 import { showActions } from '@/paper/state/actions';
 import { ask } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 type Step = 1 | 2 | 3;
 type Sort = 'count' | 'generality';
+/** How the rest is sorted in: each name onto a category, or each document by its content. */
+type Method = 'name' | 'content';
 /** What the model said about one kind's names: how general each is, which are companies, the categories it suggests. */
 type Rated = { ratings: Map<string, NameRating>; suggested: string[] };
 type PerKind<T> = Partial<Record<Kind, T>>;
@@ -52,6 +54,13 @@ export default function Tidy() {
   const [sorting, setSorting] = useState<string | null>(null);
   const [adding, setAdding] = useState('');
   const [writing, setWriting] = useState<{ done: number; total: number } | null>(null);
+  // By content: the documents chosen in the list are few, so it is the default there.
+  const [method, setMethod] = useState<Method>(only ? 'content' : 'name');
+  const [assigned, setAssigned] = useState<PerKind<Map<string, string[]>>>({});
+  const [skip, setSkip] = useState<PerKind<Set<string>>>({});
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  const stop = useRef<AbortController | null>(null);
+  useEffect(() => () => stop.current?.abort(), []);
   const { notice, id: noticeId, say, dismiss } = useNotice();
 
   useEffect(() => refreshSoon(), []);
@@ -81,7 +90,20 @@ export default function Tidy() {
   const catKeys = useMemo(() => new Set(categories.map(nameKey)), [categories]);
   const rest = useMemo(() => names.filter((n) => !catKeys.has(nameKey(n.name)) && !n.company), [names, catKeys]);
   const dests = useMemo(() => destinations[kind] ?? new Map<string, Destination>(), [destinations, kind]);
-  const plan = useMemo(() => ({ kind, cleanup, categories, destinations: step === 1 ? new Map<string, Destination>() : dests, companies: cleanup ? companies : new Set<string>() }), [kind, cleanup, categories, step, dests, companies]);
+  const byContent = method === 'content' && canAsk;
+  const found = useMemo(() => assigned[kind] ?? new Map<string, string[]>(), [assigned, kind]);
+  const skipped = useMemo(() => skip[kind] ?? new Set<string>(), [skip, kind]);
+  const plan = useMemo(
+    () => ({
+      kind,
+      cleanup,
+      categories,
+      destinations: step === 1 || byContent ? new Map<string, Destination>() : dests,
+      companies: cleanup ? companies : new Set<string>(),
+      ...(byContent && step > 1 && { assigned: found, skip: skipped }),
+    }),
+    [kind, cleanup, categories, step, dests, companies, byContent, found, skipped],
+  );
   const edit = useMemo(() => editFor(plan, names), [plan, names]);
   const toChange = useMemo(() => (docs ? changedBy(docs, edit) : []), [docs, edit]);
   const withAny = (docs ?? []).filter((d) => (kind === 'tag' ? d.tags.length : d.type)).length;
@@ -107,8 +129,10 @@ export default function Tidy() {
 
   const setCategories = (next: string[]) => {
     setChosen((x) => ({ ...x, [kind]: next }));
-    // Other categories: the names sorted in before are sorted in again.
+    // Other categories: the names (and documents) sorted in before are sorted in again.
     setDestinations((x) => ({ ...x, [kind]: undefined }));
+    setAssigned((x) => ({ ...x, [kind]: undefined }));
+    setSkip((x) => ({ ...x, [kind]: undefined }));
   };
   const toggleCategory = (name: string) => setCategories(catKeys.has(nameKey(name)) ? categories.filter((c) => nameKey(c) !== nameKey(name)) : [...categories, name]);
   const addCategory = () => {
@@ -117,8 +141,11 @@ export default function Tidy() {
     setAdding('');
   };
 
-  const toStep2 = async () => {
+  const toStep2 = () => {
     setStep(2);
+    if (!byContent) void sortByName();
+  };
+  const sortByName = async () => {
     if (destinations[kind] || !rest.length) return;
     const fallback = new Map<string, Destination>();
     if (!canAsk) return setDestinations((x) => ({ ...x, [kind]: fallback }));
@@ -144,6 +171,48 @@ export default function Tidy() {
     }
   };
 
+  // Each document, a few at a time, with the start of its text: what the model answers is kept as it comes.
+  const sortByContent = async () => {
+    const list = docs ?? [];
+    const ctl = new AbortController();
+    stop.current = ctl;
+    const got = new Map(found);
+    const todo = list.filter((d) => !got.has(d.key));
+    const before = list.length - todo.length;
+    setReading({ done: before, total: list.length });
+    try {
+      for (let i = 0; i < todo.length; i += CONTENT_BATCH) {
+        const batch = todo.slice(i, i + CONTENT_BATCH);
+        const texts = await textsOf(
+          batch.map((d) => d.key),
+          CONTENT_CHARS,
+        );
+        const answer = await sortInByContent(
+          ai,
+          kind,
+          categories,
+          batch.map((d, j) => ({ id: String(j + 1), name: d.name, title: d.title, sender: d.sender, type: d.type, tags: d.tags, text: texts[j] })),
+          ctl.signal,
+        );
+        // None that fits: the document isn't changed by content (rather than losing everything it has).
+        batch.forEach((d, j) => answer.get(String(j + 1))?.length && got.set(d.key, answer.get(String(j + 1))!));
+        setAssigned((x) => ({ ...x, [kind]: new Map(got) }));
+        setReading({ done: before + i + batch.length, total: list.length });
+      }
+    } catch (e) {
+      if (!ctl.signal.aborted) say(aiMessage(e));
+    } finally {
+      stop.current = null;
+      setReading(null);
+    }
+  };
+  const chooseMethod = (m: Method) => {
+    setMethod(m);
+    if (m === 'name') void sortByName();
+  };
+  const toggleDoc = (key: string) => setSkip((x) => ({ ...x, [kind]: toggled(skipped, key) }));
+  const setAll = (here: NameInfo[], d: Destination) => setDestinations((x) => ({ ...x, [kind]: new Map([...dests, ...here.map((n): [string, Destination] => [nameKey(n.name), d])]) }));
+
   const choose = (n: NameInfo) =>
     showActions(n.name, [
       ...categories.map((c) => ({ key: `to-${c}`, icon: 'tag' as const, label: c, onPress: () => setDest(n, { to: 'category', category: c }) })),
@@ -161,6 +230,8 @@ export default function Tidy() {
     setChosen({});
     setDestinations({});
     setRated({});
+    setAssigned({});
+    setSkip({});
     asked.current.clear();
     setStep(1);
     refreshSoon();
@@ -171,7 +242,7 @@ export default function Tidy() {
     setKind(k);
     setStep(1);
   };
-  const busy = !!asking || !!writing;
+  const busy = !!asking || !!writing || !!reading;
   const sorted = [...names.filter((n) => !n.company)].sort((a, b) => (sort === 'generality' ? (b.generality ?? 0) - (a.generality ?? 0) : 0) || b.count - a.count);
   const fixes = docs ? spellingFixes(docs, kind) : 0;
   const repeated = docs && kind === 'tag' ? repeatsCount(docs) : 0;
@@ -286,7 +357,97 @@ export default function Tidy() {
             </>
           )}
 
-          {step === 2 && !asking && (
+          {step === 2 && canAsk && (
+            <Segments
+              palette={p}
+              testID="tidy-method"
+              value={method}
+              disabled={busy}
+              items={[
+                ['name', t.tidyByName],
+                ['content', t.tidyByContent],
+              ]}
+              onChange={chooseMethod}
+            />
+          )}
+
+          {step === 2 && byContent && (
+            <>
+              {(() => {
+                const all = docs ?? [];
+                const open = all.filter((d) => !found.has(d.key)).length;
+                const now = (d: IndexedDoc) => (kind === 'tag' ? d.tags : d.type ? [d.type] : []);
+                const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => nameKey(x) === nameKey(b[i]));
+                const changes = all.filter((d) => found.has(d.key) && !same(now(d), found.get(d.key)!));
+                return (
+                  <>
+                    {open > 0 && !reading && (
+                      <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline, padding: space.lg, gap: space.md }]}>
+                        <T color={p.muted}>{t.tidyContentHint(open, Math.ceil(open / CONTENT_BATCH), aiHost(ai))}</T>
+                        <View style={styles.actions}>
+                          <Button testID="tidy-content-start" icon="sparkles" label={open < all.length ? t.tidyContentGoOn(open) : t.tidyContentStart} onPress={() => void sortByContent()} />
+                        </View>
+                      </View>
+                    )}
+                    {reading && (
+                      <View style={[styles.row, { paddingHorizontal: 0 }]}>
+                        <T testID="tidy-content-progress" color={p.muted} style={{ flex: 1 }}>
+                          {t.tidyContentProgress(reading.done, reading.total)}
+                        </T>
+                        <Button kind="quiet" label={t.tidyStop} onPress={() => stop.current?.abort()} />
+                      </View>
+                    )}
+                    {changes.length > 0 && (
+                      <>
+                        <T color={p.muted}>{t.tidyContentList}</T>
+                        <View style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
+                          {changes.map((d) => {
+                            const on = !skipped.has(d.key);
+                            return (
+                              <Pressable
+                                key={d.key}
+                                testID="tidy-doc"
+                                accessibilityRole="checkbox"
+                                aria-checked={on}
+                                onPress={() => toggleDoc(d.key)}
+                                style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [styles.row, styles.rowLine, { borderColor: p.hairline, backgroundColor: hovered ? p.raised : 'transparent' }]}
+                              >
+                                <View style={[styles.box, { borderColor: on ? p.accent : p.hairline, backgroundColor: on ? p.accent : 'transparent' }]}>{on && <Icon name="check" size={14} color={p.accentInk} />}</View>
+                                <View style={{ flex: 1, minWidth: 0 }}>
+                                  <T numberOfLines={1} style={{ fontFamily: fonts.sansMedium }}>
+                                    {d.title || d.name}
+                                  </T>
+                                  <T v="caption" color={p.muted} numberOfLines={2}>
+                                    {`${now(d).join(', ') || t.tidyNothing} → ${found.get(d.key)!.join(', ')}`}
+                                  </T>
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </>
+                    )}
+                    {found.size - changes.length > 0 && (
+                      <T v="caption" color={p.muted}>
+                        {t.tidyContentSame(found.size - changes.length)}
+                      </T>
+                    )}
+                    {found.size > 0 && open > 0 && !reading && (
+                      <T v="caption" color={p.muted}>
+                        {t.tidyContentOpen(open)}
+                      </T>
+                    )}
+                  </>
+                );
+              })()}
+              <View style={styles.actions}>
+                <Button kind="quiet" label={t.back} disabled={busy} onPress={() => setStep(1)} />
+                <Button testID="tidy-review" label={t.tidyStep3} disabled={busy} onPress={() => setStep(3)} />
+              </View>
+            </>
+          )}
+
+          {step === 2 && !byContent && !asking && (
             <>
               <T color={p.muted}>{t.tidySortHint}</T>
               {[...categories.map((c): [string, Destination] => [c, { to: 'category', category: c }]), [t.tidyKept, { to: 'keep' }] as [string, Destination], [t.tidyRemoved, { to: 'remove' }] as [string, Destination]].map(([title, d]) => {
@@ -294,9 +455,13 @@ export default function Tidy() {
                 if (!here.length) return null;
                 return (
                   <View key={title} testID="tidy-section" style={[styles.card, { backgroundColor: p.surface, borderColor: p.hairline }]}>
-                    <T v="kicker" color={d.to === 'remove' ? p.markRing : p.muted} style={styles.section}>
-                      {title}
-                    </T>
+                    <View style={[styles.row, styles.section, { paddingVertical: 0 }]}>
+                      <T v="kicker" color={d.to === 'remove' ? p.markRing : p.muted} style={{ flex: 1 }}>
+                        {title}
+                      </T>
+                      {d.to === 'keep' && <Button testID="tidy-remove-all" kind="quiet" icon="trash" label={t.tidyRemoveAll} onPress={() => setAll(here, { to: 'remove' })} />}
+                      {d.to === 'remove' && <Button testID="tidy-keep-all" kind="quiet" icon="check" label={t.tidyKeepAll} onPress={() => setAll(here, { to: 'keep' })} />}
+                    </View>
                     {here.map((n) => (
                       <Pressable
                         key={n.name}
@@ -357,6 +522,12 @@ export default function Tidy() {
     </SubFrame>
   );
 }
+
+const toggled = (set: Set<string>, key: string) => {
+  const next = new Set(set);
+  if (!next.delete(key)) next.add(key);
+  return next;
+};
 
 const sameDest = (a: Destination, b: Destination) => a.to === b.to && (a.to !== 'category' || (b.to === 'category' && nameKey(a.category) === nameKey(b.category)));
 
