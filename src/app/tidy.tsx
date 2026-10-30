@@ -194,8 +194,8 @@ export default function Tidy() {
           batch.map((d, j) => ({ id: String(j + 1), name: d.name, title: d.title, sender: d.sender, type: d.type, tags: d.tags, text: texts[j] })),
           ctl.signal,
         );
-        // None that fits: the document isn't changed by content (rather than losing everything it has).
-        batch.forEach((d, j) => answer.get(String(j + 1))?.length && got.set(d.key, answer.get(String(j + 1))!));
+        // Answered with none that fits: kept as answered (not asked again), changed by name only (tidy.ts).
+        batch.forEach((d, j) => answer.has(String(j + 1)) && got.set(d.key, answer.get(String(j + 1))!));
         setAssigned((x) => ({ ...x, [kind]: new Map(got) }));
         setReading({ done: before + i + batch.length, total: list.length });
       }
@@ -378,7 +378,9 @@ export default function Tidy() {
                 const open = all.filter((d) => !found.has(d.key)).length;
                 const now = (d: IndexedDoc) => (kind === 'tag' ? d.tags : d.type ? [d.type] : []);
                 const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => nameKey(x) === nameKey(b[i]));
-                const changes = all.filter((d) => found.has(d.key) && !same(now(d), found.get(d.key)!));
+                const fits = all.filter((d) => found.get(d.key)?.length);
+                const changes = fits.filter((d) => !same(now(d), found.get(d.key)!));
+                const none = all.filter((d) => found.get(d.key)?.length === 0).length;
                 return (
                   <>
                     {open > 0 && !reading && (
@@ -427,9 +429,14 @@ export default function Tidy() {
                         </View>
                       </>
                     )}
-                    {found.size - changes.length > 0 && (
+                    {fits.length - changes.length > 0 && (
                       <T v="caption" color={p.muted}>
-                        {t.tidyContentSame(found.size - changes.length)}
+                        {t.tidyContentSame(fits.length - changes.length)}
+                      </T>
+                    )}
+                    {none > 0 && (
+                      <T v="caption" color={p.muted} testID="tidy-content-none">
+                        {t.tidyContentNone(none)}
                       </T>
                     )}
                     {found.size > 0 && open > 0 && !reading && (

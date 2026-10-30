@@ -181,19 +181,25 @@ function* objects(text: string): Generator<[number, number]> {
 
 /** The first top-level object in a reply that parses and `fits` (thinking and notes around it left out). */
 function replyObject(text: string, fits: (v: object) => boolean): object | undefined {
+  return replyObjects(text).find(fits);
+}
+
+/** Every top-level object in a reply that parses (the items of a bare array too), thinking left out. */
+function replyObjects(text: string): object[] {
   const paired = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
   // Thinking whose opening tag was the prompt's (some served models): what comes after it is the reply.
   const close = paired.toLowerCase().lastIndexOf('</think>');
   const reply = close < 0 ? paired : paired.slice(close + '</think>'.length);
+  const out: object[] = [];
   for (const [a, b] of objects(reply)) {
     try {
       const v = JSON.parse(reply.slice(a, b)) as unknown;
-      if (v && typeof v === 'object' && fits(v)) return v;
+      if (v && typeof v === 'object') out.push(v);
     } catch {
       // Not JSON (a note in braces): try the next one.
     }
   }
-  return undefined;
+  return out;
 }
 
 /**
@@ -736,9 +742,23 @@ export type ContentDoc = { id: string; name: string; title: string; sender: stri
 
 /**
  * For each document, the categories its content belongs under (by id): one to three for tags, one for a type, only
- * from `categories` (a name the model writes differently is matched onto the list; one not on it is dropped).
+ * from `categories` (a name the model writes differently is matched onto the list; one not on it is dropped; none
+ * that fits: an empty list). A model held to no schema writes the ids its own way (3, "Document 3") and may answer
+ * for fewer documents than asked: those it left out are asked for once more. Not in the map: no answer.
  */
 export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categories: string[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  for (let round = 0; round < 2; round++) {
+    const left = docs.filter((d) => !out.has(d.id));
+    if (!left.length) break;
+    const got = await askByContent(s, kind, categories, left, signal);
+    for (const [id, found] of got) out.set(id, found);
+    log.info('ai', 'sorted in by content', { asked: left.length, answered: got.size, round });
+  }
+  return out;
+}
+
+async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: string[], docs: ContentDoc[], signal?: AbortSignal): Promise<Map<string, string[]>> {
   const instructions = [
     `These are the only ${what(kind)} allowed in one person’s archive of documents:`,
     categories.join(', '),
@@ -746,7 +766,8 @@ export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categ
     kind === 'tag'
       ? 'For each document below, choose the one to three tags from that list that fit what it is about. Use only tags from the list, exactly as written, or none if none fits.'
       : 'For each document below, choose the one document type from that list that fits what it is. Use only a type from the list, exactly as written, or none if none fits.',
-    'Go by its content. Its current details are only a hint and may be wrong. Give every document, each once, by its id. Reply with the JSON object only.',
+    'Go by its content. Its current details are only a hint and may be wrong.',
+    `There ${docs.length === 1 ? 'is 1 document' : `are ${docs.length} documents`} (ids ${docs.map((d) => `"${d.id}"`).join(', ')}): give one entry for each of them in "documents", with its id as a string. Reply with the JSON object only.`,
     '',
     ...docs.map((d) =>
       [
@@ -762,15 +783,21 @@ export async function sortInByContent(s: AiSettings, kind: 'tag' | 'type', categ
         .join('\n'),
     ),
   ].join('\n');
-  const raw = replyObject(await send(s, { images: [], text: instructions, schema: ASSIGN_SCHEMA }, signal), (v) => 'documents' in v) as { documents?: unknown[] } | undefined;
-  if (!raw) throw new Error(AI_NO_JSON);
+  const found = replyObjects(await send(s, { images: [], text: instructions, schema: ASSIGN_SCHEMA }, signal));
+  // The entries: in "documents" as asked, or bare (an array of them, or one object each).
+  const entries = found.flatMap((v) => ('documents' in v && Array.isArray(v.documents) ? (v.documents as unknown[]) : 'id' in v ? [v] : []));
+  if (!found.length || (!entries.length && !found.some((v) => 'documents' in v))) throw new Error(AI_NO_JSON);
   const byKey = new Map(categories.map((c) => [nameKey(c), c]));
   const out = new Map<string, string[]>();
-  for (const x of Array.isArray(raw.documents) ? raw.documents : []) {
-    const { id, categories: found } = x as { id?: unknown; categories?: unknown };
-    if (typeof id !== 'string' || !docs.some((d) => d.id === id.trim())) continue;
-    const names = (Array.isArray(found) ? found : []).flatMap((c) => (typeof c === 'string' && byKey.get(nameKey(c)) ? [byKey.get(nameKey(c))!] : []));
-    out.set(id.trim(), [...new Set(names)].slice(0, kind === 'tag' ? 3 : 1));
+  for (const x of entries) {
+    if (!x || typeof x !== 'object') continue;
+    const { id, categories: named } = x as { id?: unknown; categories?: unknown };
+    // "3", 3, "Document 3", "#3": the number is the id.
+    const doc = docs.find((d) => d.id === String(id ?? '').match(/\d+/)?.[0]);
+    if (!doc) continue;
+    const list = Array.isArray(named) ? named : typeof named === 'string' ? named.split(',') : [];
+    const names = list.flatMap((c) => (typeof c === 'string' && byKey.get(nameKey(c.trim())) ? [byKey.get(nameKey(c.trim()))!] : []));
+    out.set(doc.id, [...new Set([...(out.get(doc.id) ?? []), ...names])].slice(0, kind === 'tag' ? 3 : 1));
   }
   return out;
 }

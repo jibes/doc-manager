@@ -30,7 +30,8 @@ export type Plan = {
   destinations: Map<string, Destination>;
   /** By nameKey: names of companies or people (tags only). */
   companies: Set<string>;
-  /** By document key: the categories found in its content, in place of its tags (or type). Others go by name. */
+  /** By document key: the categories found in its content, in place of its tags (or type). Others (and those
+   * for which none fits) go by name. */
   assigned?: Map<string, string[]>;
   /** By document key: documents left as they are. */
   skip?: Set<string>;
@@ -91,7 +92,7 @@ export function editFor(plan: Plan, names: NameInfo[]): Edit {
   return (d, key) => {
     if (key && plan.skip?.has(key)) return d;
     const found = key ? plan.assigned?.get(key) : undefined;
-    if (!found) return byName(d);
+    if (!found?.length) return byName(d);
     if (plan.kind === 'type') return { ...d, type: found[0] ?? d.type };
     // The company names still go to the sender; the tags are what the content says.
     const moved = byName({ ...d, tags: d.tags.filter((x) => plan.companies.has(nameKey(x))) });

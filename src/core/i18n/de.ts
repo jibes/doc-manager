@@ -538,6 +538,7 @@ export const de: Strings = {
   tidyContentList: 'Jedes Dokument mit dem, was es bekommt. Nimm den Haken weg, damit eines bleibt, wie es ist.',
   tidyContentSame: (n) => (n === 1 ? '1 Dokument hat schon, was passt.' : `${n} Dokumente haben schon, was passt.`),
   tidyContentOpen: (n) => (n === 1 ? '1 Dokument hat noch keine Antwort und bleibt, wie es ist (vom Aufräumen abgesehen).' : `${n} Dokumente haben noch keine Antwort und bleiben, wie sie sind (vom Aufräumen abgesehen).`),
+  tidyContentNone: (n) => (n === 1 ? 'Zu 1 Dokument passt keine der Kategorien: Es bleibt, wie es ist (vom Aufräumen abgesehen).' : `Zu ${n} Dokumenten passt keine der Kategorien: Sie bleiben, wie sie sind (vom Aufräumen abgesehen).`),
   tidyNothing: '(nichts)',
   tidyRemoveAll: 'Alle entfernen',
   tidyKeepAll: 'Alle behalten',

@@ -557,6 +557,7 @@ export const en = {
   tidyContentList: 'Each document with what it gets. Untick one to leave it as it is.',
   tidyContentSame: (n: number) => (n === 1 ? '1 document already has what fits.' : `${n} documents already have what fits.`),
   tidyContentOpen: (n: number) => (n === 1 ? '1 document has no answer yet and stays as it is (clean-up aside).' : `${n} documents have no answer yet and stay as they are (clean-up aside).`),
+  tidyContentNone: (n: number) => (n === 1 ? 'For 1 document none of the categories fits: it stays as it is (clean-up aside).' : `For ${n} documents none of the categories fits: they stay as they are (clean-up aside).`),
   tidyNothing: '(nothing)',
   tidyRemoveAll: 'Remove all',
   tidyKeepAll: 'Keep all',

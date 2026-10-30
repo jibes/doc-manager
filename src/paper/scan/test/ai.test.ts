@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, openAiReply, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
+import { AI_CUT_OFF, AI_NO_JSON, aiHost, aiInsecure, aiReady, aiTitle, anthropicReply, applyReading, DEFAULT_AI, describeWithAi, openAiReply, sortInByContent, pageLines, parseResult, prompt, readWithAi, serverSaid, spread, type AiResult } from '../ai';
 
 const w = (text: string, x0: number, y0: number, x1: number, y1: number) => ({ text, x0, y0, x1, y1 });
 
@@ -278,5 +278,42 @@ describe('parseResult after thinking', () => {
   it('reads the reply after thinking whose opening tag was in the prompt', () => {
     const r = parseResult('Okay, the shape is {"title":"Short and specific","pages":[]} … </think>\n{"title":"Rechnung 1","pages":[]}', 1);
     expect(r.title).toBe('Rechnung 1');
+  });
+});
+
+describe('sorting in by content', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const s = { api: 'openai' as const, url: 'https://ai.test/v1', key: 'k', model: 'm' };
+  const docs = ['1', '2', '3'].map((id) => ({ id, name: `${id}.pdf`, title: '', sender: '', type: '', tags: [], text: 'x' }));
+  // Each request answered by the next reply; what was asked is kept.
+  const server = (...replies: unknown[]) => {
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      asked.push(init.body);
+      return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(replies.shift()) } }] }));
+    });
+    return asked;
+  };
+
+  it('takes the ids however the model writes them, a bare list of entries, and names as one string', async () => {
+    server([
+      { id: 1, categories: ['steuer'] },
+      { id: 'Document 2', categories: 'Gesundheit, Unlisted' },
+      { id: '#3', categories: [] },
+    ]);
+    const got = await sortInByContent(s, 'tag', ['Steuer', 'Gesundheit'], docs);
+    expect([...got]).toEqual([
+      ['1', ['Steuer']],
+      ['2', ['Gesundheit']],
+      ['3', []],
+    ]);
+  });
+
+  it('asks once more for the documents the model left out', async () => {
+    const asked = server({ documents: [{ id: '1', categories: ['Steuer'] }] }, { documents: [{ id: '3', categories: ['Steuer'] }] }, { documents: [] });
+    const got = await sortInByContent(s, 'type', ['Steuer'], docs);
+    expect([...got.keys()]).toEqual(['1', '3']);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).toContain('ids \\"2\\", \\"3\\"');
   });
 });
