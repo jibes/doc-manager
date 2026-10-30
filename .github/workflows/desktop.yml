@@ -100,8 +100,8 @@ jobs:
           TAG: v${{ needs.mac.outputs.version }}
         run: |
           for _ in $(seq 1 90); do
-            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release upload "$TAG" out/* -R "$GITHUB_REPOSITORY" --clobber
+            # Retried too: the release can be seen while Android is still publishing it ("release not found").
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release upload "$TAG" out/* -R "$GITHUB_REPOSITORY" --clobber; then
               exit 0
             fi
             sleep 20
