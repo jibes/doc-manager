@@ -1,4 +1,4 @@
-# Weekly updates (STANDARD.md §9). Expo's packages move together with the SDK (`npx expo upgrade`, then
+# Monthly updates (STANDARD.md §9); security updates come from the repo setting. Expo's packages move together with the SDK (`npx expo upgrade`, then
 # `npx expo install --fix`), never one by one: Dependabot leaves them alone. Major versions are done on purpose,
 # one at a time (they change APIs, configs or the build), not by Dependabot; at most 2 open PRs per ecosystem,
 # so its PRs never queue ahead of main's CI.
@@ -6,7 +6,7 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
     open-pull-requests-limit: 2
     ignore:
       - dependency-name: '*'
@@ -25,7 +25,7 @@ updates:
         update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /shell/desktop
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
     open-pull-requests-limit: 2
     ignore:
       - dependency-name: '*'
@@ -35,7 +35,7 @@ updates:
         update-types: [minor, patch]
   - package-ecosystem: gradle
     directory: /shell/android
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
     open-pull-requests-limit: 2
     ignore:
       - dependency-name: '*'
@@ -48,7 +48,7 @@ updates:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
     open-pull-requests-limit: 2
     ignore:
       - dependency-name: '*'
