@@ -1,6 +1,7 @@
-# Monthly updates (STANDARD.md §9); security updates come from the repo setting. Expo's packages move together with the SDK (`npx expo upgrade`, then
-# `npx expo install --fix`), never one by one: Dependabot leaves them alone. Major versions are done on purpose,
-# one at a time (they change APIs, configs or the build), not by Dependabot; at most 2 open PRs per ecosystem,
+# Monthly updates (STANDARD.md §9); security updates come from the repo setting.
+# Expo's packages move together with the SDK (`npx expo upgrade`, then `npx expo install --fix`),
+# never one by one: Dependabot leaves them alone. Major versions are done on purpose, one at a time
+# (they change APIs, configs or the build), not by Dependabot; at most 2 open PRs per ecosystem,
 # so its PRs never queue ahead of main's CI.
 version: 2
 updates:
