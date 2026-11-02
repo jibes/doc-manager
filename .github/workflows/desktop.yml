@@ -3,11 +3,11 @@ name: Desktop
 # Tessel for macOS (and, from the same shell, Windows and Linux): the web app in an Electron window
 # (shell/desktop). Every push to main starts it for real on Linux and builds the macOS app; a new version in
 # package.json adds the macOS app to that version's GitHub release once the Android workflow has created it.
+# A pull request that changes the shell or this workflow (Dependabot's Electron updates among them) only starts
+# Electron on Linux; the macOS build waits for main.
 on:
   push:
     branches: [main]
-  # A pull request that changes the shell (Dependabot's Electron updates among them): Electron starts on Linux; the
-  # macOS build waits for main.
   pull_request:
     paths: ['shell/desktop/**', '.github/workflows/desktop.yml']
   workflow_dispatch:

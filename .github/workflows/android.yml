@@ -2,13 +2,13 @@ name: Android
 
 # The Android app: the web app bundled in a WebView shell (shell/android). Every push to main builds and
 # smoke-tests an APK on an emulator; a new version in package.json on main, a version tag (v1.2.3) or a
-# manual run with a version publishes a signed release on GitHub, which Obtainium (or any browser) installs and updates from.
+# manual run with a version publishes a signed release on GitHub, which Obtainium (or any browser) installs and
+# updates from. A pull request that changes the shell or this workflow (Dependabot's Gradle updates among them)
+# only builds the APK, with a throwaway debug key and without the emulator, so a build that breaks shows on the PR.
 on:
   push:
     branches: [main]
     tags: ['v*']
-  # A pull request that changes the shell (Dependabot's Gradle updates among them): the APK is built, debug-signed,
-  # without the emulator test, so a build that breaks shows on the PR and not first on main.
   pull_request:
     paths: ['shell/android/**', '.github/workflows/android.yml']
   workflow_dispatch:
@@ -76,6 +76,9 @@ jobs:
       # Updates install only over an APK signed with the same key: releases must use the secrets.
       - id: key
         name: Signing key
+        # Never on a pull request: the release key stays out of PR runs (their artifact is downloadable), and the
+        # warning below keeps meaning that main is missing its secrets.
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
