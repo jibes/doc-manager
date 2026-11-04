@@ -137,9 +137,16 @@ async function handle(req: SearchRequest | { id: 0; type: 'save' }): Promise<unk
       noteChanged([meta.key]);
       return;
     }
-    case 'meta':
+    case 'meta': {
+      // The name is searched: a renamed file goes into the index again (its text as stored).
+      const [known, pages] = await Promise.all([getMany<IndexedDoc | undefined>([req.doc.key], metaStore), getMany<string[] | undefined>([req.doc.key], textStore)]);
       await set(req.doc.key, req.doc, metaStore);
+      if (known[0]?.name !== req.doc.name && pages[0]) {
+        change({ ...req.doc, pages: pages[0] });
+        noteChanged([req.doc.key]);
+      }
       return;
+    }
     case 'rekey': {
       const [pages] = await getMany<string[] | undefined>([req.from], textStore);
       await Promise.all([delMany([req.from], metaStore), delMany([req.from], textStore)]);

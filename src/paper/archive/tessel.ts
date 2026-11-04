@@ -46,6 +46,7 @@ const pdfs = (list: FolderEntry[]) => list.filter((e) => e.kind !== 'dir');
 const SETTINGS = [
   ['.tessel', 'rules.json'],
   ['.tessel', 'views.json'],
+  ['.tessel', 'kinds.json'],
 ];
 
 /**

@@ -4,8 +4,9 @@
 // unchanged ones come back as "not modified"). A release takes over once no page of the last one is open, so a page
 // never gets the new release's workers under its old code.
 const CACHE = 'tessel-dev';
-// The models (~17 MB) are the same from release to release: kept apart, not downloaded again with each one.
-const MODELS = 'tessel-models';
+// The models (~17 MB) are mostly the same from release to release: kept apart, named by their contents (stamped by
+// postexport too), so they are downloaded again only when they change, and a cache of old ones goes.
+const MODELS = 'tessel-models-dev';
 // Paths resolve against the worker's own URL, so the app works under any base path.
 const ROOT = new URL('./', self.location.href).href;
 const BUILD = [];
@@ -59,7 +60,9 @@ const navigate = (req) =>
       (res) => {
         if (done) return;
         clearTimeout(timer);
-        resolve(res);
+        // An error page from the host (a deploy half done, a proxy's 502): this release's own page instead.
+        if (res.ok) resolve(res);
+        else kept().then((k) => resolve(k ?? res));
       },
       () => {
         if (done) return;

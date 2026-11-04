@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { onBack } from '@/core/lib/backGuard';
+import { ask } from '@/paper/state/ask';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -19,12 +21,18 @@ import { usePalette, usePrefs } from '@/paper/state/prefs';
  * The types and tags the model may give (kindList.ts): each a name and a description of where its line runs.
  * Types are a fixed list (the last one for what fits none); tags are preferred, or, switched on, the only ones.
  */
+const up = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
+
 export default function KindsScreen() {
   const p = usePalette();
   const column = useColumnWidth();
   const insets = useSafeAreaInsets();
   const archive = usePrefs((s) => s.archive);
   const stored = useKinds((s) => s.kinds);
+  const loaded = useKinds((s) => s.loaded);
+  const unreadable = useKinds((s) => s.unreadable);
+  // Without the archive's own lists in hand, the editor would show the defaults and save them over the archive's.
+  const ready = !archive || loaded;
   const [draft, setDraft] = useState<Kinds | null>(null);
   const [saving, setSaving] = useState(false);
   const { notice, id: noticeId, say, dismiss } = useNotice();
@@ -45,16 +53,34 @@ export default function KindsScreen() {
       setSaving(false);
     }
   };
-  const up = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
+  // Leaving with unsaved changes asks first (the back button too).
+  const leave = useCallback(() => {
+    if (!dirty) return up();
+    void ask({ title: t.unsavedTitle, body: t.unsavedLeaveKinds, confirm: t.discard, destructive: true }).then((r) => r !== null && up());
+  }, [dirty]);
+  useEffect(() => {
+    if (!dirty) return;
+    return onBack(() => {
+      leave();
+      return true;
+    });
+  }, [dirty, leave]);
 
   return (
     <SubFrame sub="kinds">
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ alignItems: 'center', paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={{ width: column, gap: space.md }}>
-          <ScreenHeader over={t.settings} title={t.kindsTitle} up={up} />
+          <ScreenHeader over={t.settings} title={t.kindsTitle} up={leave} />
           <T v="caption" color={p.muted}>
             {t.kindsWhere(!!archive)}
           </T>
+          {!ready && (
+            <T color={unreadable ? p.markRing : p.muted} testID="kinds-waiting">
+              {unreadable ? t.settingsUnreadable : t.loading}
+            </T>
+          )}
+          {ready && (
+            <>
 
           <T v="kicker" color={p.muted} style={{ marginTop: space.lg }}>
             {t.kindsTypes}
@@ -95,6 +121,8 @@ export default function KindsScreen() {
             {dirty && <Button kind="quiet" label={t.cancel} disabled={saving} onPress={() => setDraft(null)} />}
             <Button testID="kinds-save" label={t.kindsSave} disabled={!dirty || saving || !kinds.types.some((x) => x.name.trim())} onPress={() => void save()} />
           </View>
+            </>
+          )}
         </View>
       </ScrollView>
       <Toast message={notice} id={noticeId} onDismiss={dismiss} />

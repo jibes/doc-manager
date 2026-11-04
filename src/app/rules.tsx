@@ -69,10 +69,17 @@ function RulesEditor({ archive, onError }: { archive: string; onError: (e: unkno
   };
   // A rule fills in something: words to match alone would do nothing.
   const complete = !!draft.match.trim() && !!(draft.sender.trim() || draft.type.trim() || draft.tags.trim());
+  // Once at a time: a second tap while the file is being read and written would race it (a rule lost or doubled).
+  const adding = useRef(false);
   const add = () => {
-    if (!complete) return;
+    if (!complete || adding.current) return;
+    adding.current = true;
     const rule: Rule = { id: `r-${Date.now().toString(36)}`, match: draft.match.trim(), sender: draft.sender.trim(), type: draft.type.trim(), tags: tagsOf(draft.tags) };
-    changeRules(archive, (r) => ({ ...r, rules: [...r.rules, rule] })).then(() => setDraft({ match: '', sender: '', type: '', tags: '' }), onError);
+    changeRules(archive, (r) => ({ ...r, rules: [...r.rules, rule] }))
+      .then(() => setDraft({ match: '', sender: '', type: '', tags: '' }), onError)
+      .finally(() => {
+        adding.current = false;
+      });
   };
   // Asked first: a rule gone is typed again by hand.
   const remove = async (id: string, match: string) => {

@@ -473,7 +473,9 @@ async function run(): Promise<void> {
   for (const [i, c] of todo.entries()) {
     await whileOpen();
     const doc = await read(c);
-    if (doc) put(doc);
+    // Written (and marked stale) while it was being read: what was read is old; the next pass reads it again.
+    if (doc && docs.get(c.key)?.modified === -1) schedule(1000);
+    else if (doc) put(doc);
     log.debug('index', `read ${c.key} ${c.size} B`, doc ? { failed: !!doc.failed } : 'not read');
     useIndex.setState({ done: i + 1 });
     // Let the app breathe between documents.

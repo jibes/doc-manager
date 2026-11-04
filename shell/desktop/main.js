@@ -106,7 +106,7 @@ function dress(w) {
   w.webContents.setUserAgent(`${w.webContents.getUserAgent()} TesselDesktop`);
   // The app's own pages (a document in a window of its own) open in a window of the app; other sites in the browser.
   w.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith(ORIGIN)) {
+    if (url.startsWith(`${ORIGIN}/`)) {
       const at = w.getBounds();
       return { action: 'allow', overrideBrowserWindowOptions: { x: at.x + 32, y: at.y + 32, width: Math.max(900, Math.round(at.width * 0.8)), height: at.height, backgroundColor: background(), title: 'Tessel', webPreferences: webPreferences() } };
     }
@@ -115,7 +115,7 @@ function dress(w) {
   });
   w.webContents.on('did-create-window', (child) => dress(child));
   w.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(ORIGIN)) {
+    if (!url.startsWith(`${ORIGIN}/`)) {
       e.preventDefault();
       if (/^https?:/i.test(url)) void shell.openExternal(url);
     }
@@ -141,10 +141,12 @@ app.on('second-instance', (_e, argv, workingDirectory) => {
 /** The app's files; paths without an extension are app routes and get index.html (the router takes them). */
 async function serve(request) {
   const url = new URL(request.url);
+  // Only the app's host: app://other would get the app's files (and its rights) otherwise.
+  if (url.origin !== ORIGIN) return new Response('Not found', { status: 404 });
   const clean = decodeURIComponent(url.pathname).replace(/^\/+/, '');
   const last = clean.split('/').pop() ?? '';
   const file = path.normalize(path.join(WWW, !clean || !last.includes('.') ? 'index.html' : clean));
-  if (!file.startsWith(WWW)) return new Response('Not found', { status: 404 });
+  if (file !== WWW && !file.startsWith(WWW + path.sep)) return new Response('Not found', { status: 404 });
   const res = await net.fetch(pathToFileURL(file).toString()).catch(() => null);
   if (!res || !res.ok) return new Response('Not found', { status: 404 });
   const headers = new Headers(res.headers);
@@ -155,7 +157,7 @@ async function serve(request) {
   return new Response(res.body, { status: res.status, headers });
 }
 
-const ours = (origin) => typeof origin === 'string' && origin.startsWith(ORIGIN);
+const ours = (origin) => typeof origin === 'string' && (origin === ORIGIN || origin.startsWith(`${ORIGIN}/`));
 
 function createWindow() {
   // Where it was last time; else room for the list, a document and its details, where the screen has it.

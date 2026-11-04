@@ -82,6 +82,8 @@ export function ShellOpen() {
       if (list.length) void show(openFiles(fetchShellFiles(list)));
     };
     window.addEventListener(SHELL_OPEN_EVENT, onOpen);
+    // Handed over before this listener was there (the shell sent them while the app was starting).
+    onOpen();
     return () => window.removeEventListener(SHELL_OPEN_EVENT, onOpen);
   }, []);
 

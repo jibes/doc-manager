@@ -55,7 +55,8 @@ jobs:
           # A new version in package.json on main publishes itself (once: its tag then exists).
           if [ -z "$REQUESTED" ] && [ "$GITHUB_REF" = refs/heads/main ] && [ "$GITHUB_EVENT_NAME" = push ]; then
             PKG="$(node -p "require('./package.json').version")"
-            if [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then REQUESTED="$PKG"; fi
+            TAGGED="$(git ls-remote --tags origin "refs/tags/v$PKG")" || { echo "::error::Could not list the tags"; exit 1; }
+            if [ -z "$TAGGED" ]; then REQUESTED="$PKG"; fi
           fi
           if [ -n "$REQUESTED" ]; then
             if ! [[ "$REQUESTED" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Version must look like 1.2.3 (no leading zeros)"; exit 1; fi
@@ -99,9 +100,9 @@ jobs:
       - name: Build APK
         working-directory: shell/android
         env:
-          TESSEL_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          TESSEL_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          TESSEL_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TESSEL_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          TESSEL_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_ALIAS || '' }}
+          TESSEL_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_PASSWORD || '' }}
         run: |
           ./gradlew --no-daemon assembleRelease -Ptessel.versionName="${{ steps.version.outputs.name }}" -Ptessel.versionCode="${{ steps.version.outputs.code }}"
           mkdir -p "$GITHUB_WORKSPACE/out"

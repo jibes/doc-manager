@@ -5,6 +5,7 @@ import { T } from '@/paper/components/primitives';
 import { elevation, type Palette } from '@/core/design/tokens';
 import type { DocHandle, FormField, FormValue, PageLink, Raster, SearchHit, TextRun } from '@/core/engine/types';
 import { t } from '@/core/i18n';
+import { log } from '@/core/lib/log';
 import { FormLayer } from './FormLayer';
 import { LinkLayer } from './LinkLayer';
 import { MarksLayer } from './MarksLayer';
@@ -67,11 +68,14 @@ function useFields(cache: RasterCache, page: number, beforeEdit?: () => void, on
   const change = useCallback(
     (index: number, value: FormValue) => (
       beforeEdit?.(),
-      handle.setField(page, index, value).then((list) => {
-        setFields({ page, list });
-        cache.invalidate(page);
-        onEdited?.();
-      })
+      handle.setField(page, index, value).then(
+        (list) => {
+          setFields({ page, list });
+          cache.invalidate(page);
+          onEdited?.();
+        },
+        (e: unknown) => log.warn('reader', 'field not set', e),
+      )
     ),
     [handle, cache, page, beforeEdit, onEdited],
   );

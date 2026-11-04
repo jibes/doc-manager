@@ -251,6 +251,9 @@ async function handle(request: ProcessorRequest): Promise<void> {
     } else {
       result = applyFilter(entry.page, spec.filter, spec.adjustments, context);
     }
+    // The reading page handed over below may be the rectified page itself (no filter, no shrinking): a copy,
+    // or the transfer would detach what the cache keeps.
+    if (ocr && ocr.data.buffer === entry.page.data.buffer) ocr = { ...ocr, data: ocr.data.slice() };
     // An uncached export page is garbage from here on; don't hold it through
     // encoding.
     entry = null;

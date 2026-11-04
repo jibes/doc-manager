@@ -128,13 +128,15 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
   const [dark, setDark] = useState(false);
   const [restart, setRestart] = useState(0);
 
+  // The detector at first: the mount effect connects (and may replace) it; never looked up again per render.
+  const [firstDetector] = useState(detector);
   // What the loops read: kept in refs so they see the latest without restarting.
   const live = useRef({
     track: null as MediaStreamTrack | null,
     ready: false,
     capturing: false,
     hidden: false,
-    detector: detector(),
+    detector: firstDetector,
     detectorReady: false,
     raw: null as Quad | null,
     quad: null as Quad | null,
@@ -430,6 +432,8 @@ export function Camera({ deviceId, autoCapture, defaultFilter, retakeId, active,
     event.currentTarget.value = '';
     if (!files.length) return;
     const l = live.current;
+    // A photo is being taken: its end would free the shutter under the import (two captures interleaving).
+    if (l.capturing) return;
     l.capturing = true;
     setCapturing(true);
     const before = useScan.getState().pages.length;

@@ -565,6 +565,8 @@ export const de: Strings = {
   tidyTypesFixed: 'Die Arten sind die Liste aus den Einstellungen. Jede andere Art wird danach einer davon zugeordnet.',
   tidyTagsListed: 'Die Schlagwörter aus den Einstellungen sind angehakt. Nimm Haken weg, setze andere oder füge neue hinzu; jedes andere Schlagwort wird danach einem angehakten zugeordnet.',
   tidyTagsFixed: 'Erlaubt sind nur die Schlagwörter aus den Einstellungen. Jedes andere wird danach einer davon zugeordnet.',
+  unsavedLeaveKinds: 'Ohne Speichern verlassen? Die geänderten Arten und Schlagwörter gehen verloren.',
+  loading: 'Lädt …',
   tidyShort: 'Aufräumen',
   tidyOnly: (n) => (n === 1 ? 'Nur das in der Liste gewählte Dokument.' : `Nur die ${n} in der Liste gewählten Dokumente.`),
   analyse: 'Analysieren',

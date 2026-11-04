@@ -1,5 +1,6 @@
 // Finalises `expo export -p web` output for static hosting under EXPO_BASE_URL:
 // prefixes our hand-written absolute links in index.html, preloads the fonts, and adds a 404.html SPA fallback.
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 
 const base = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
@@ -26,11 +27,15 @@ const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 const sw = `${out}/sw.js`;
 const files = (dir) => (existsSync(`${out}/${dir}`) ? readdirSync(`${out}/${dir}`, { recursive: true }).map((f) => `${dir}/${String(f).replaceAll('\\', '/')}`).filter((f) => statSync(`${out}/${f}`).isFile()) : []);
 const build = [...files('_expo'), ...files('assets'), ...files('icons')];
+// The models' cache is named by what they are: a release with the same models keeps the ones downloaded.
+const models = createHash('sha256');
+for (const f of files('models').sort()) models.update(f).update(readFileSync(`${out}/${f}`));
 if (existsSync(sw)) {
   const stamped = readFileSync(sw, 'utf8')
     .replace("const CACHE = 'tessel-dev';", `const CACHE = 'tessel-${version}-${Date.now().toString(36)}';`)
+    .replace("const MODELS = 'tessel-models-dev';", `const MODELS = 'tessel-models-${models.digest('hex').slice(0, 12)}';`)
     .replace('const BUILD = [];', `const BUILD = ${JSON.stringify(build)};`);
-  if (!build.length || stamped.includes('const BUILD = [];')) throw new Error('postexport: the build list did not go into sw.js');
+  if (!build.length || stamped.includes('const BUILD = [];') || stamped.includes('tessel-models-dev')) throw new Error('postexport: the build list did not go into sw.js');
   writeFileSync(sw, stamped);
 }
 writeFileSync(`${out}/.nojekyll`, '');

@@ -6,7 +6,7 @@ import { passwordFor } from '@/paper/state/password';
 import { usePrefs } from '@/paper/state/prefs';
 import { detailsOf, saveDetails, suggestDetails } from './details';
 import { invalidate } from './indexer';
-import { readAdded, useIntake } from './intake';
+import { readAdded, untilSaved, useIntake } from './intake';
 import { realTitle } from './pdfInfo';
 import { importFromFolder } from './Results';
 import type { IndexedDoc } from './search';
@@ -40,6 +40,8 @@ export async function analyseMany(docs: IndexedDoc[], onProgress?: (done: number
         }
         if (!withAi) continue;
         if (!(await repo.requestAccess(id, true))) throw new Error('denied');
+        // Open in a reader with unsaved edits: written once they are saved or dropped (else it would reload over them).
+        await untilSaved(id);
         const now = detailsOf(handle, realTitle(doc.title) || doc.name.replace(/\.pdf$/i, ''));
         const next = await suggestDetails(handle, doc.name, now, ai);
         if (JSON.stringify(next) === JSON.stringify(now)) continue;
