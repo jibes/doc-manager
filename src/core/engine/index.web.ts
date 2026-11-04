@@ -60,22 +60,22 @@ class WorkerClient {
   ): Promise<ResultMap[T]> {
     const id = this.seq++;
     const started = performance.now();
+    // Abort asks the worker to drop the job but settles only when the worker answers,
+    // so callers' concurrency accounting matches what the worker is really doing.
+    const onAbort = () => {
+      const p = this.pending.get(id);
+      if (!p) return;
+      p.onProgress = undefined;
+      this.w.postMessage({ id: this.seq++, type: 'cancel', target: id } satisfies Request);
+    };
     const done = new Promise<ResultMap[T]>((resolve, reject) => {
       if (opts.signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
       this.pending.set(id, { resolve: resolve as Pending['resolve'], reject, onProgress: opts.onProgress });
-      // Abort asks the worker to drop the job but settles only when the worker answers,
-      // so callers' concurrency accounting matches what the worker is really doing.
-      const onAbort = () => {
-        const p = this.pending.get(id);
-        if (!p) return;
-        p.onProgress = undefined;
-        this.w.postMessage({ id: this.seq++, type: 'cancel', target: id } satisfies Request);
-      };
       opts.signal?.addEventListener('abort', onAbort, { once: true });
-      // A long-lived signal (a document's, a screen's) doesn't keep every call's listener.
-      if (opts.signal) done.finally(() => opts.signal?.removeEventListener('abort', onAbort)).catch(() => {});
       this.w.postMessage({ id, type, ...body } as unknown as Request, opts.transfer ?? []);
     });
+    // A long-lived signal (a document's, a screen's) doesn't keep every call's listener.
+    if (opts.signal) done.finally(() => opts.signal?.removeEventListener('abort', onAbort)).catch(() => {});
     // Each request to the engine and its time (drawing a page is debug; failures are warnings).
     const what = `${type} ${brief({ ...body, bytes: undefined }, 1)}`;
     done.then(

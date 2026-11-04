@@ -230,6 +230,9 @@ export async function allDocs(): Promise<IndexedDoc[]> {
   return [...docs.values()];
 }
 
+/** Writes by Tessel per key since the start: a read that a write overtook is thrown away (see run). */
+const writes = new Map<string, number>();
+
 /** Tessel wrote to a library document (details, saved forms): read it again on the next pass. */
 export function invalidate(docId: string) {
   if (Platform.OS !== 'web') return;
@@ -240,6 +243,7 @@ export function invalidate(docId: string) {
     // Stored too: the mark must outlive a reload before the next pass.
     const stale = { ...known, modified: -1 };
     docs.set(key, stale);
+    writes.set(key, (writes.get(key) ?? 0) + 1);
     void set(key, stale, metaStore()).catch(() => {});
   });
   schedule(1000);
@@ -472,9 +476,10 @@ async function run(): Promise<void> {
   log.info('index', `pass: ${list.length} files, ${gone.length} gone, ${todo.length} to read, ${unlisted.length} folders not listed, ${conflicts.length} conflicts`);
   for (const [i, c] of todo.entries()) {
     await whileOpen();
+    const written = writes.get(c.key);
     const doc = await read(c);
-    // Written (and marked stale) while it was being read: what was read is old; the next pass reads it again.
-    if (doc && docs.get(c.key)?.modified === -1) schedule(1000);
+    // Written by Tessel while it was being read: what was read is old; the next pass reads it again.
+    if (doc && writes.get(c.key) !== written) schedule(1000);
     else if (doc) put(doc);
     log.debug('index', `read ${c.key} ${c.size} B`, doc ? { failed: !!doc.failed } : 'not read');
     useIndex.setState({ done: i + 1 });

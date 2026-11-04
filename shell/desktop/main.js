@@ -9,7 +9,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const SCHEME = 'app';
-const ORIGIN = `${SCHEME}://tessel`;
+const HOST = 'tessel';
+const ORIGIN = `${SCHEME}://${HOST}`;
 const WWW = path.join(__dirname, 'www');
 
 // A secure, standard origin of its own: IndexedDB, the browser's own file system, module workers and WebAssembly
@@ -141,8 +142,9 @@ app.on('second-instance', (_e, argv, workingDirectory) => {
 /** The app's files; paths without an extension are app routes and get index.html (the router takes them). */
 async function serve(request) {
   const url = new URL(request.url);
-  // Only the app's host: app://other would get the app's files (and its rights) otherwise.
-  if (url.origin !== ORIGIN) return new Response('Not found', { status: 404 });
+  // Only the app's host: app://other would get the app's files (and its rights) otherwise. (Node's URL has no
+  // origin for the scheme, so the host is checked.)
+  if (url.host !== HOST) return new Response('Not found', { status: 404 });
   const clean = decodeURIComponent(url.pathname).replace(/^\/+/, '');
   const last = clean.split('/').pop() ?? '';
   const file = path.normalize(path.join(WWW, !clean || !last.includes('.') ? 'index.html' : clean));
