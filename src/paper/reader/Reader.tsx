@@ -590,7 +590,7 @@ export function Reader({
       const contents = note ? await askNote('', quote) : undefined;
       if (note && contents == null) return;
       edits.step();
-      for (const g of groups) await handle.addHighlight(g.page, g.rects, color, contents || undefined);
+      for (const g of groups) await handle.addHighlight(g.page, g.rects, color, contents || undefined).catch((e: unknown) => log.warn('reader', 'highlight not added', e));
       annotated(groups.map((g) => g.page));
     },
     [askNote, handle, annotated, edits],
@@ -601,7 +601,7 @@ export function Reader({
       const contents = await askNote('', '');
       if (contents == null) return;
       edits.step();
-      await handle.addNote(pg, { x: 0.03, y: 0.02 }, HIGHLIGHT_COLORS[0].hex, contents.trim() || t.pageNoteDefault);
+      await handle.addNote(pg, { x: 0.03, y: 0.02 }, HIGHLIGHT_COLORS[0].hex, contents.trim() || t.pageNoteDefault).catch((e: unknown) => log.warn('reader', 'note not added', e));
       annotated([pg]);
     },
     [askNote, handle, annotated, edits],

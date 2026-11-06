@@ -45,7 +45,7 @@ F9:AF:FA:64:D7:53:51:D8:BE:43:4E:99:05:C4:6D:B2:C2:51:9C:36:D8:0E:9B:A5:A3:71:F6
 
 **Duplicates.** ⋯ → Duplicates (`src/paper/archive/duplicates.ts`) groups identical files (same SHA-256; the copy in the Tessel folder stays, else the oldest) and older versions (same content key, different bytes; the newest stays), each with the space removing the others frees.
 
-Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push, tests the APK on an emulator, and publishes a signed release when `package.json`'s version on main is new (or for a `v*` tag, or a manual run of the Android workflow with a version) (signing key from the `ANDROID_*` repository secrets).
+Building: `npm run build:android-web`, then `./gradlew assembleRelease` in `shell/android` (Android SDK, JDK 17). CI builds every push to main (and pull requests that change the shell, with a debug key), tests the APK on an emulator, and publishes a signed release when `package.json`'s version on main is new (or for a `v*` tag, or a manual run of the Android workflow with a version) (signing key from the `ANDROID_*` repository secrets).
 
 ## Install on macOS
 

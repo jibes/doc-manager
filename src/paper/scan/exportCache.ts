@@ -84,6 +84,8 @@ let reading = 0;
 let readerIdle: ReturnType<typeof setTimeout> | undefined;
 const ready = new Map<string, EncodedPage>();
 const inFlight = new Map<string, Promise<EncodedPage>>();
+/** Ready entries no page wants any more, kept for one more round (see prefetchExports). */
+const unwanted = new Set<string>();
 /** Keys whose text has been read (successfully) and is attached to their `ready` entry. */
 const read = new Set<string>();
 let paused = false;
@@ -327,8 +329,17 @@ export function encodedPage(
 export function prefetchExports(pages: Page[], settings: ScanSettings): void {
   last = { pages, settings };
   const wanted = new Set(pages.map((p) => key(p, settings)));
+  // Dropped once unwanted twice in a row: a save under way still reads the page as it was before a turn.
   for (const k of [...ready.keys()]) {
-    if (wanted.has(k)) continue;
+    if (wanted.has(k)) {
+      unwanted.delete(k);
+      continue;
+    }
+    if (!unwanted.has(k)) {
+      unwanted.add(k);
+      continue;
+    }
+    unwanted.delete(k);
     ready.delete(k);
     read.delete(k);
   }
@@ -390,6 +401,7 @@ export function resetExports(): void {
   last = null;
   ready.clear();
   read.clear();
+  unwanted.clear();
   inFlight.clear();
   exporter?.dispose();
   exporter = null;

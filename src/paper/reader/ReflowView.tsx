@@ -165,7 +165,10 @@ function Figure({
   const [raster, setRaster] = useState<Raster | undefined>(undefined);
   useEffect(() => {
     const ctrl = new AbortController();
-    handle.renderPage(block.page, { width: Math.round(box.width * PixelRatio.get()), clip: block.rect, signal: ctrl.signal }).then(setRaster, () => {});
+    handle
+      .renderPage(block.page, { width: Math.round(box.width * PixelRatio.get()), clip: block.rect, signal: ctrl.signal })
+      // Done after all (aborted too late): nobody shows it, so its pixels go now.
+      .then((r) => (ctrl.signal.aborted ? void (r.kind === 'bitmap' && r.bitmap.close()) : setRaster(r)), () => {});
     return () => ctrl.abort();
   }, [handle, block, box.width]);
   // The canvas keeps its pixels; the bitmap can go once replaced or unmounted.

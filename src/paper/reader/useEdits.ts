@@ -91,10 +91,11 @@ export function useEdits(doc: DocRecord, handle: DocHandle, focused = true, clos
     if (!(await repo.requestAccess(doc.id, true).catch(() => false))) return fail();
     // Changed meanwhile (synced from another device, written by another app): writing over it is asked about.
     if ((await changedElsewhere(doc.id, handle)) && (await ask({ title: t.changedTitle, body: t.changedBody, confirm: t.changedOverwrite, destructive: true })) === null) return false;
-    // The version written: an undo while it is being written still knows which one is on disk.
-    const writing = steps.current.handle === handle ? steps.current.history.state : null;
     const bytes = await handle.save().catch(() => null);
     if (!bytes) return fail();
+    // The version written (the engine works in order: every step before the save has answered by now; an undo
+    // while it is being written still knows which one is on disk).
+    const writing = steps.current.handle === handle ? steps.current.history.state : null;
     // The engine works in order: every edit counted by now is in these bytes; one made while writing isn't.
     const saved = edits.current;
     const failed = await writeFrom(doc.id, handle, bytes).then(() => null, (e: unknown) => e);

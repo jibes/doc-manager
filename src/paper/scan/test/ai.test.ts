@@ -309,6 +309,17 @@ describe('sorting in by content', () => {
     ]);
   });
 
+  it('takes no id from a name with digits, and asks again when every name was off the list', async () => {
+    const asked = server([{ id: 'Rechnung 2024-1.pdf', categories: ['Steuer'] }, { id: 2, categories: ['Health'] }], [{ id: 1, categories: [] }, { id: 2, categories: ['Gesundheit'] }, { id: 3, categories: [] }]);
+    const got = await sortInByContent(s, 'tag', ['Steuer', 'Gesundheit'], docs);
+    expect([...got]).toEqual([
+      ['1', []],
+      ['2', ['Gesundheit']],
+      ['3', []],
+    ]);
+    expect(asked).toHaveLength(2);
+  });
+
   it('asks once more for the documents the model left out', async () => {
     const asked = server({ documents: [{ id: '1', categories: ['Steuer'] }] }, { documents: [{ id: '3', categories: ['Steuer'] }] }, { documents: [] });
     const got = await sortInByContent(s, 'type', ['Steuer'], docs);

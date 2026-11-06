@@ -16,7 +16,7 @@ import { ScreenHeader } from '@/paper/components/ScreenHeader';
 import { Toast } from '@/paper/components/Toast';
 import { useNotice } from '@/paper/components/useNotice';
 import { fonts, radius, space, type Palette } from '@/core/design/tokens';
-import { aiMessage, t } from '@/core/i18n';
+import { aiMessage, opError, t } from '@/core/i18n';
 import { useThrottled } from '@/core/lib/useThrottled';
 import { aiHost, aiReady, matchCategory, rateNames, sortInByContent, sortInNames, type NameRating } from '@/paper/scan/ai';
 import { showActions } from '@/paper/state/actions';
@@ -24,6 +24,12 @@ import { ask } from '@/paper/state/ask';
 import { usePalette, usePrefs } from '@/paper/state/prefs';
 
 type Step = 1 | 2 | 3;
+/** The index couldn't give a document's text (not the model's fault). */
+class TextsError extends Error {
+  constructor(readonly cause: unknown) {
+    super('texts');
+  }
+}
 type Sort = 'count' | 'generality';
 /** How the rest is sorted in: each name onto a category, or each document by its content. */
 type Method = 'name' | 'content';
@@ -69,10 +75,12 @@ export default function Tidy() {
   useEffect(() => refreshSoon(), []);
   useEffect(() => void loadKinds().catch(() => {}), []);
   const kinds = useKinds((s) => s.kinds);
+  // The lists of Settings, once read from the archive (before that they are this device's defaults, not the user's).
+  const kindsReady = useKinds((s) => s.loaded) || !usePrefs.getState().archive;
   // The types (and, where only those are allowed, the tags) are the lists of Settings: the categories to start from.
-  const fixed = kind === 'type' ? kinds.types : kinds.onlyTags ? kinds.tags : null;
+  const fixed = !kindsReady ? null : kind === 'type' ? kinds.types : kinds.onlyTags ? kinds.tags : null;
   // Where to start: the list of Settings when it has one (tags too, only these allowed or not), else the model's.
-  const start = fixed ?? (kind === 'tag' && kinds.tags.length ? kinds.tags : null);
+  const start = fixed ?? (kindsReady && kind === 'tag' && kinds.tags.length ? kinds.tags : null);
   useEffect(() => {
     let alive = true;
     void allDocs().then(
@@ -121,7 +129,7 @@ export default function Tidy() {
   const covered = docs ? directCoverage(docs, categories, kind) : 0;
 
   // The model's view of the names, once per kind (when it is set up): asked for while it is missing.
-  const toRate = canAsk && !fixed && !rated[kind] ? names.length : 0;
+  const toRate = canAsk && kindsReady && !fixed && !rated[kind] ? names.length : 0;
   const asked = useRef(new Set<Kind>());
   useEffect(() => {
     if (!toRate || !docs || asked.current.has(kind)) return;
@@ -197,7 +205,9 @@ export default function Tidy() {
         const texts = await textsOf(
           batch.map((d) => d.key),
           CONTENT_CHARS,
-        );
+        ).catch((e: unknown) => {
+          throw new TextsError(e);
+        });
         const answer = await sortInByContent(
           ai,
           kind,
@@ -211,7 +221,7 @@ export default function Tidy() {
         setReading({ done: before + i + batch.length, total: list.length });
       }
     } catch (e) {
-      if (!ctl.signal.aborted) say(aiMessage(e));
+      if (!ctl.signal.aborted) say(e instanceof TextsError ? opError(e.cause) : aiMessage(e));
     } finally {
       stop.current = null;
       setReading(null);

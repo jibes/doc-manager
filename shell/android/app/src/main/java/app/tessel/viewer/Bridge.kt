@@ -76,8 +76,8 @@ class Bridge(private val activity: MainActivity) {
      * files, which a hostile app could ask it to copy out).
      */
     private fun shared(uri: Uri): Boolean {
-        // Tessel's own file provider hands out its files to others, not to itself on another app's behalf.
-        if (uri.scheme == "content") return uri.authority != "${activity.packageName}.files"
+        // Tessel's own providers hand out its files to others, not to itself on another app's behalf.
+        if (uri.scheme == "content") return uri.authority != "${activity.packageName}.files" && uri.authority != "${activity.packageName}.documents"
         if (uri.scheme != "file") return false
         val path = runCatching { File(uri.path ?: return false).canonicalPath }.getOrNull() ?: return false
         val storage = Environment.getExternalStorageDirectory().canonicalPath

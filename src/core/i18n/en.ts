@@ -584,6 +584,8 @@ export const en = {
   tidyTypesFixed: 'The types are the list in Settings. Every other type is sorted into one of them next.',
   tidyTagsListed: 'The tags listed in Settings come ticked. Untick some, tick others or add new ones; every other tag is sorted into the ticked ones next.',
   tidyTagsFixed: 'Only the tags listed in Settings are allowed. Every other tag is sorted into one of them next.',
+  unsavedLeaveKinds: 'Leave without saving? The types and tags you changed will be lost.',
+  loading: 'Loading…',
   tidyShort: 'Tidy up',
   tidyOnly: (n: number) => (n === 1 ? 'Only the document chosen in the list.' : `Only the ${n} documents chosen in the list.`),
   analyse: 'Analyse',

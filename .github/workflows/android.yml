@@ -2,13 +2,13 @@ name: Android
 
 # The Android app: the web app bundled in a WebView shell (shell/android). Every push to main builds and
 # smoke-tests an APK on an emulator; a new version in package.json on main, a version tag (v1.2.3) or a
-# manual run with a version publishes a signed release on GitHub, which Obtainium (or any browser) installs and updates from.
+# manual run with a version publishes a signed release on GitHub, which Obtainium (or any browser) installs and
+# updates from. A pull request that changes the shell or this workflow (Dependabot's Gradle updates among them)
+# only builds the APK, with a throwaway debug key and without the emulator, so a build that breaks shows on the PR.
 on:
   push:
     branches: [main]
     tags: ['v*']
-  # A pull request that changes the shell (Dependabot's Gradle updates among them): the APK is built, debug-signed,
-  # without the emulator test, so a build that breaks shows on the PR and not first on main.
   pull_request:
     paths: ['shell/android/**', '.github/workflows/android.yml']
   workflow_dispatch:
@@ -55,7 +55,8 @@ jobs:
           # A new version in package.json on main publishes itself (once: its tag then exists).
           if [ -z "$REQUESTED" ] && [ "$GITHUB_REF" = refs/heads/main ] && [ "$GITHUB_EVENT_NAME" = push ]; then
             PKG="$(node -p "require('./package.json').version")"
-            if [ -z "$(git ls-remote --tags origin "refs/tags/v$PKG")" ]; then REQUESTED="$PKG"; fi
+            TAGGED="$(git ls-remote --tags origin "refs/tags/v$PKG")" || { echo "::error::Could not list the tags"; exit 1; }
+            if [ -z "$TAGGED" ]; then REQUESTED="$PKG"; fi
           fi
           if [ -n "$REQUESTED" ]; then
             if ! [[ "$REQUESTED" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Version must look like 1.2.3 (no leading zeros)"; exit 1; fi
@@ -76,6 +77,9 @@ jobs:
       # Updates install only over an APK signed with the same key: releases must use the secrets.
       - id: key
         name: Signing key
+        # Never on a pull request: the release key stays out of PR runs (their artifact is downloadable), and the
+        # warning below keeps meaning that main is missing its secrets.
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -96,9 +100,9 @@ jobs:
       - name: Build APK
         working-directory: shell/android
         env:
-          TESSEL_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          TESSEL_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          TESSEL_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TESSEL_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          TESSEL_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_ALIAS || '' }}
+          TESSEL_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_PASSWORD || '' }}
         run: |
           ./gradlew --no-daemon assembleRelease -Ptessel.versionName="${{ steps.version.outputs.name }}" -Ptessel.versionCode="${{ steps.version.outputs.code }}"
           mkdir -p "$GITHUB_WORKSPACE/out"

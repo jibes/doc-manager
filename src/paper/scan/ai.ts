@@ -450,7 +450,12 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : '');
 /** A rejected output length: the model's own maximum, when the server says it. */
 const LENGTH_REJECTED = /max_tokens/i;
 /** Room for thinking and every line of every page given back (a stream allows this much); less where a model allows less. */
-const MAX_TOKENS = [64_000, 32_000, 16_000];
+const MAX_TOKENS = [64_000, 32_000, 16_000, 8_192, 4_096];
+/** The next length to ask for after `was` was rejected: the one the server names ("> 8192, which is the maximum"), else the next rung down. */
+const shorter = (said: string, was: number) => {
+  const named = Number(said.match(/>\s*(\d{4,6})\b/)?.[1]);
+  return named >= 1000 && named < was ? named : MAX_TOKENS.find((n) => n < was);
+};
 
 /** A reply read as the API's own, or (a page that isn't one: a login or error page) said so. */
 const asReply = (read: () => string) => {
@@ -499,7 +504,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
   // A model or server without structured output gets the request again without it (the prompt asks for JSON
   // anyway); one that allows a shorter reply, again with that length.
   let structured = formatTaken.get(modelKey(s)) !== 1;
-  let length = 0;
+  let maxTokens = MAX_TOKENS[0];
   const hints = new Hints(s);
   for (let tries = 0; tries < 6; tries++) {
     // With or without the /v1 that OpenAI-style addresses carry.
@@ -510,7 +515,7 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
         'anthropic-dangerous-direct-browser-access': 'true',
         ...(s.key ? { 'x-api-key': s.key } : {}),
       },
-      body: body(structured, MAX_TOKENS[length]),
+      body: body(structured, maxTokens),
       signal,
     });
     if (res.ok) {
@@ -530,7 +535,8 @@ async function viaAnthropic(s: AiSettings, req: Request, signal?: AbortSignal): 
     last = `${res.status} ${serverSaid(said)}`;
     if (res.status !== 400) break;
     if (hints.rejected(said)) continue;
-    if (LENGTH_REJECTED.test(said) && length < MAX_TOKENS.length - 1) length++;
+    const less = LENGTH_REJECTED.test(said) ? shorter(said, maxTokens) : undefined;
+    if (less) maxTokens = less;
     else if (FORMAT_REJECTED.test(said) && structured) structured = false;
     else break;
   }
@@ -870,8 +876,8 @@ async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Cat
   for (const x of entries) {
     if (!x || typeof x !== 'object') continue;
     const { id, categories: named } = x as { id?: unknown; categories?: unknown };
-    // "3", 3, "Document 3", "#3": the number is the id.
-    const doc = docs.find((d) => d.id === String(id ?? '').match(/\d+/)?.[0]);
+    // "3", 3, "Document 3", "#3": the number is the id; a name with digits in it ("Rechnung 2024.pdf") is none.
+    const doc = docs.find((d) => d.id === String(id ?? '').trim().match(/^(?:document|doc|dokument|#|no\.?)?\s*(\d+)$/i)?.[1]);
     if (!doc) continue;
     const list = Array.isArray(named) ? named : typeof named === 'string' ? named.split(',') : [];
     const matched: string[] = [];
@@ -881,6 +887,8 @@ async function askByContent(s: AiSettings, kind: 'tag' | 'type', categories: Cat
       if (m) matched.push(m);
       else dropped.push(c.trim());
     }
+    // Names only, none on the list (the other language, say): no answer, so the document is asked about again.
+    if (!matched.length && list.length && !out.has(doc.id)) continue;
     out.set(doc.id, [...new Set([...(out.get(doc.id) ?? []), ...matched])].slice(0, kind === 'tag' ? 3 : 1));
   }
   return { got: out, dropped };

@@ -4,7 +4,7 @@ import { libraryActions } from '@/paper/state/library';
 import { passwordFor } from '@/paper/state/password';
 import { detailsOf, saveDetails } from './details';
 import { invalidate } from './indexer';
-import { useIntake } from './intake';
+import { untilSaved, useIntake } from './intake';
 import { realTitle, type Details } from './pdfInfo';
 import { importFromFolder } from './Results';
 import type { IndexedDoc } from './search';
@@ -53,6 +53,8 @@ export async function writeDetailsEach(docs: IndexedDoc[], edit: (now: Details, 
     try {
       const id = doc.place.kind === 'library' ? doc.place.id : (await importFromFolder(doc.place))?.id;
       if (!id || !(await repo.requestAccess(id, true))) throw new Error('no access');
+      // Open in a reader with unsaved edits: written once they are saved or dropped (else it would reload over them).
+      await untilSaved(id);
       const handle = await engine.open(await repo.source(id), passwordFor(id));
       try {
         const now = detailsOf(handle, realTitle(doc.title) || doc.name.replace(/\.pdf$/i, ''));

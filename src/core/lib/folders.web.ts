@@ -225,10 +225,24 @@ const browserFolders: FoldersApi = {
   },
   async rename(root, dir, e, name) {
     const parent = await writable(root, dir);
-    if (await exists(parent, name)) throw new Error(`exists:${name}`);
+    const isDir = e.kind === 'dir';
+    // Only the case changed: the file system may not tell the two names apart (the name "exists" there).
+    const caseOnly = name !== e.name && name.toLowerCase() === e.name.toLowerCase();
+    if (!caseOnly && (await exists(parent, name))) throw new Error(`exists:${name}`);
     // Renamed in place where the browser can; elsewhere copied, then the old one removed.
-    if (await moveEntry(parent, e.name, e.kind === 'dir', name)) return undefined;
-    await copyEntry(parent, e.name, e.kind === 'dir', parent, name);
+    if (await moveEntry(parent, e.name, isDir, name)) return undefined;
+    if (caseOnly) {
+      // By way of another name: copying onto "itself" would remove the copy with the original.
+      const via = await freeName(parent, `${name}.tmp`, isDir);
+      await copyEntry(parent, e.name, isDir, parent, via);
+      await parent.removeEntry(e.name, { recursive: true });
+      if (!(await moveEntry(parent, via, isDir, name))) {
+        await copyEntry(parent, via, isDir, parent, name);
+        await parent.removeEntry(via, { recursive: true });
+      }
+      return undefined;
+    }
+    await copyEntry(parent, e.name, isDir, parent, name);
     await parent.removeEntry(e.name, { recursive: true });
     return undefined;
   },

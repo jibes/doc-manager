@@ -34,7 +34,7 @@ class WorkerClient {
         if ('progress' in msg) return p.onProgress?.(msg.progress);
         this.pending.delete(msg.id);
         if (msg.ok) p.resolve(msg.result);
-        else p.reject(new Error(msg.error));
+        else p.reject(msg.error === 'aborted' ? new DOMException('Aborted', 'AbortError') : new Error(msg.error));
       };
       // The worker itself failed (its script didn't load, or threw): what waits on it fails rather than waiting for
       // ever, and the next call starts another.
@@ -60,23 +60,22 @@ class WorkerClient {
   ): Promise<ResultMap[T]> {
     const id = this.seq++;
     const started = performance.now();
+    // Abort asks the worker to drop the job but settles only when the worker answers,
+    // so callers' concurrency accounting matches what the worker is really doing.
+    const onAbort = () => {
+      const p = this.pending.get(id);
+      if (!p) return;
+      p.onProgress = undefined;
+      this.w.postMessage({ id: this.seq++, type: 'cancel', target: id } satisfies Request);
+    };
     const done = new Promise<ResultMap[T]>((resolve, reject) => {
       if (opts.signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
       this.pending.set(id, { resolve: resolve as Pending['resolve'], reject, onProgress: opts.onProgress });
-      // Abort asks the worker to drop the job but settles only when the worker answers,
-      // so callers' concurrency accounting matches what the worker is really doing.
-      opts.signal?.addEventListener(
-        'abort',
-        () => {
-          const p = this.pending.get(id);
-          if (!p) return;
-          p.onProgress = undefined;
-          this.w.postMessage({ id: this.seq++, type: 'cancel', target: id } satisfies Request);
-        },
-        { once: true },
-      );
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
       this.w.postMessage({ id, type, ...body } as unknown as Request, opts.transfer ?? []);
     });
+    // A long-lived signal (a document's, a screen's) doesn't keep every call's listener.
+    if (opts.signal) done.finally(() => opts.signal?.removeEventListener('abort', onAbort)).catch(() => {});
     // Each request to the engine and its time (drawing a page is debug; failures are warnings).
     const what = `${type} ${brief({ ...body, bytes: undefined }, 1)}`;
     done.then(

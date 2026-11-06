@@ -145,7 +145,7 @@ function whyNot(e: unknown, ai: boolean): string {
 }
 
 /** Until the document's unsaved changes are saved or dropped (they would be written over the text, or it over them). */
-const untilSaved = (id: string) =>
+export const untilSaved = (id: string) =>
   new Promise<void>((resolve) => {
     if (!useIntake.getState().editing.includes(id)) return resolve();
     const stop = useIntake.subscribe((s) => {
