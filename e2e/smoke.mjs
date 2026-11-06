@@ -1752,6 +1752,9 @@ async function tidyTags() {
 // The selection's actions: what doesn't fit a phone's bar is behind ⋯; Analyse reads pages without text.
 async function selectionActions() {
   const ctx = await newContext({ viewport: { width: 390, height: 800 } });
+  // The text recognition models never arrive: the scan, read by itself once kept, stays without text until
+  // Analyse is asked (else it races the reading and finds nothing to read).
+  await ctx.route('**/models/**', () => {});
   const page = await ctx.newPage();
   const vis = (id) => page.getByTestId(id).locator('visible=true');
   page.on('pageerror', (e) => errors.push(`selection actions: ${e.message}`));
