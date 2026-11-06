@@ -245,6 +245,23 @@ describe('output formats', () => {
     expect(sent[1].thinking).toEqual({ type: 'adaptive' });
     await describeWithAi({ api: 'anthropic', url: 'https://off.test', key: 'k', model: 'm' }, 'text').catch(() => {});
     expect(sent[2].thinking).toEqual({ type: 'disabled' });
+    // Models that refuse "disabled": the way they take, or (thinking always on) none at all.
+    await describeWithAi({ api: 'anthropic', url: 'https://off.test', key: 'k', model: 'claude-sonnet-5-5' }, 'text').catch(() => {});
+    expect(sent[3].thinking).toEqual({ type: 'between_tools' });
+    await describeWithAi({ api: 'anthropic', url: 'https://off.test', key: 'k', model: 'claude-opus-5-5' }, 'text').catch(() => {});
+    expect('thinking' in sent[4]).toBe(false);
+  });
+
+  it('tries Anthropic’s other way to turn thinking off when a model refuses "disabled"', async () => {
+    const sent: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { thinking?: { type: string } };
+      sent.push(body);
+      if (body.thinking?.type === 'disabled') return new Response(JSON.stringify({ error: { message: 'thinking.type: "disabled" is not supported for this model' } }), { status: 400 });
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: answer }], stop_reason: 'end_turn' }));
+    });
+    await describeWithAi({ api: 'anthropic', url: 'https://refuses.test', key: 'k', model: 'claude-next' }, 'text');
+    expect(sent.map((b) => (b.thinking as { type: string } | undefined)?.type)).toEqual(['disabled', 'between_tools']);
   });
 
   it('give the JSON shape in the prompt when the schema isn’t sent', async () => {

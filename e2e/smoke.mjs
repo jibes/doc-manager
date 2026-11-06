@@ -1272,7 +1272,6 @@ async function foldersShell() {
   // Screens below the top of the stack stay mounted (hidden): look at the visible one only.
   const vis = (id) => page.getByTestId(id).locator('visible=true');
   // Tiles show document names without their extension.
-  const text = (s) => page.getByText(s.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
   const nodes = () => page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem('fake')).nodes));
   // The folder a node is in, by name.
   const parentName = (node) => page.evaluate((parent) => JSON.parse(sessionStorage.getItem('fake')).nodes[parent]?.name ?? parent, node?.parent);
@@ -1671,7 +1670,7 @@ async function tidyTags() {
   await page.getByTestId('open-more').click();
   await page.getByTestId('menu-details').click();
   await page.getByTestId('details-panel').waitFor();
-  for (const tag of await page.getByTestId('detail-tag').all()) await page.getByTestId('detail-tag').first().click();
+  for (let n = (await page.getByTestId('detail-tag').all()).length; n > 0; n--) await page.getByTestId('detail-tag').first().click();
   await page.getByTestId('detail-type').fill('');
   await page.getByTestId('details-suggest').click();
   let tags = [];
@@ -2321,7 +2320,6 @@ async function syncSafety() {
   });
   const page = await ctx.newPage();
   const vis = (id) => page.getByTestId(id).locator('visible=true');
-  const text = (x) => page.getByText(x.replace(/\.(pdf|epub)$/, ''), { exact: true }).locator('visible=true');
   page.on('pageerror', (e) => errors.push(`sync: ${e.message}`));
   await page.goto(BASE);
   await page.getByText('Every document').waitFor();
@@ -2813,7 +2811,6 @@ async function desktopList() {
   check(/Choose a document/.test(await pane.innerText()), 'desktop list: closing it leaves the list alone');
 
   // A right click: the row's menu. Details of one, then of two at once; a row dropped on Tag tags it.
-  const rowText = async (i) => (await docRows(page).nth(i).innerText()).replace(/\n/g, ' ');
   await docRows(page).first().click({ button: 'right' });
   await page.getByTestId('menu-ctx-details').click();
   await page.getByTestId('many-details').waitFor();

@@ -1,3 +1,4 @@
+/* eslint-disable import/first -- the mocks come before the module they replace */
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/core/lib/folders', () => ({ folders: { supported: false } }));

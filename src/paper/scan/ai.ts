@@ -409,8 +409,19 @@ const OFF_HINTS: Hint[] = [
   { key: 'chat_template_kwargs', values: [{ enable_thinking: false, thinking: false }] },
   { key: 'enable_thinking', values: [false] },
 ];
+/**
+ * Anthropic's ways to turn thinking off, in the order a model takes them: most take "disabled"; Sonnet 5.5 refuses
+ * it and takes "between_tools" (no tools here: no thinking); Opus 5.5, Fable and Mythos can't turn it off at all, so
+ * nothing is sent (each refusal would cost a request on every device first).
+ */
+const anthropicOff = (model: string): unknown[] => {
+  const m = model.toLowerCase();
+  if (/opus-5-5|fable|mythos/.test(m)) return [];
+  if (/sonnet-5-5/.test(m)) return [{ type: 'between_tools' }, { type: 'disabled' }];
+  return [{ type: 'disabled' }, { type: 'between_tools' }];
+};
 const thinkingHints = (s: AiSettings): Hint[] =>
-  s.api === 'anthropic' ? [{ key: 'thinking', values: [s.thinking ? { type: 'adaptive' } : { type: 'disabled' }] }] : s.thinking ? [] : OFF_HINTS;
+  s.api === 'anthropic' ? [{ key: 'thinking', values: s.thinking ? [{ type: 'adaptive' }] : anthropicOff(s.model) }] : s.thinking ? [] : OFF_HINTS;
 
 const hintsTaken = new Map<string, Record<string, number>>();
 /** Which value of each hint a model takes (past the last: none), for this address, model and choice. */

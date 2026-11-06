@@ -23,6 +23,7 @@ Every platform runs the same web export; the shells only host it and add what a 
 ## Releases
 - `package.json` `version` is the single source: pushing a version that has no tag yet to `main` releases it. `android.yml` builds, smoke-tests on an emulator, waits for the Web checks on that commit, then publishes the signed APK as GitHub release `vX.Y.Z`; `desktop.yml` attaches the Mac `.dmg`/`.zip` to it.
 - Each version has its notes in `docs/releases/X.Y.Z.md` (first line a **bold lead**), used as the release body. Write them before bumping (`npm version X.Y.Z --no-git-tag-version`).
+- Before bumping, run the whole e2e locally (all suites, ~10 min), not `ONLY=`: a change can break suites it seems unrelated to (3.18.1 went out red that way).
 - versionCode = major·10⁷ + minor·10⁵ + patch·10³ (minor and patch below 100). Signing secrets are `ANDROID_*`; without them a release fails.
 
 ## Deviations from apps-data STANDARD.md v1
